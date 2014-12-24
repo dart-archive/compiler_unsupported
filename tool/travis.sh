@@ -26,7 +26,6 @@ pub get
 # Verify that the libraries are error free.
 dartanalyzer --fatal-warnings \
   example/compiler.dart \
-#  lib/compiler.dart \
   lib/libraries.dart \
   lib/version.dart \
   test/all.dart \
