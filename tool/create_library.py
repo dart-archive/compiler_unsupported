@@ -66,7 +66,7 @@ def Main(argv):
   replace1 = [(
       r'package:_internal/', 
       r'package:compiler_unsupported/_internal/')]
-      
+
   replace2 = [(
       r'package:compiler_unsupported/_internal/libraries.dart', 
       r'package:compiler_unsupported/libraries.dart')]

@@ -355,7 +355,7 @@ class OldEmitter implements Emitter {
 
     if (compiler.hasIncrementalSupport) {
       result.add(
-          js(r'self.$dart_unsafe_eval.defineClass = defineClass'));
+          js(r'#.defineClass = defineClass', [namer.accessIncrementalHelper]));
     }
 
     if (hasIsolateSupport) {
@@ -411,6 +411,17 @@ class OldEmitter implements Emitter {
           function tmp() {}
           var hasOwnProperty = Object.prototype.hasOwnProperty;
           return function (constructor, superConstructor) {
+            if (superConstructor == null) {
+              // TODO(21896): this test shouldn't be necessary. Without it
+              // we have a crash in language/mixin_only_for_rti and
+              // pkg/analysis_server/tool/spec/check_all_test.
+              if (constructor == null) return;
+
+              // Fix up the the Dart Object class' prototype.
+              var prototype = constructor.prototype;
+              prototype.constructor = constructor;
+              return prototype;
+            }
             tmp.prototype = superConstructor.prototype;
             var object = new tmp();
             var properties = constructor.prototype;
@@ -426,7 +437,8 @@ class OldEmitter implements Emitter {
         }()
       ''');
     if (compiler.hasIncrementalSupport) {
-      result = js(r'self.$dart_unsafe_eval.inheritFrom = #', [result]);
+      result = js(
+          r'#.inheritFrom = #', [namer.accessIncrementalHelper, result]);
     }
     return js(r'var inheritFrom = #', [result]);
   }
@@ -515,9 +527,11 @@ class OldEmitter implements Emitter {
                 classData instanceof Array) {
               classData = fields = classData[0];
             }
+          // ${ClassBuilder.fieldEncodingDescription}.
           var s = fields.split(";");
           fields = s[1] == "" ? [] : s[1].split(",");
           supr = s[0];
+          // ${ClassBuilder.functionTypeEncodingDescription}.
           split = supr.split(":");
           if (split.length == 2) {
             supr = split[0];
@@ -527,19 +541,6 @@ class OldEmitter implements Emitter {
                   return function(){ return #metadata[s]; };
                 })(functionSignature);
           }
-
-          if (#needsMixinSupport)
-            if (supr && supr.indexOf("+") > 0) {
-              s = supr.split("+");
-              supr = s[0];
-              var mixin = collectedClasses[s[1]];
-              if (mixin instanceof Array) mixin = mixin[1];
-              for (var d in mixin) {
-                if (hasOwnProperty.call(mixin, d) &&
-                    !hasOwnProperty.call(desc, d))
-                  desc[d] = mixin[d];
-              }
-            }
 
           if (typeof dart_precompiled != "function") {
             combinedConstructorFunction += defineClass(cls, fields);
@@ -583,7 +584,6 @@ class OldEmitter implements Emitter {
               'debugFastObjects': DEBUG_FAST_OBJECTS,
               'hasRetainedMetadata': backend.hasRetainedMetadata,
               'metadata': metadataAccess,
-              'needsMixinSupport': needsMixinSupport,
               'isTreeShakingDisabled': backend.isTreeShakingDisabled,
               'finishClassFunction': buildFinishClass(),
               'trivialNsmHandlers': nsmEmitter.buildTrivialNsmHandlers()});
@@ -613,11 +613,37 @@ class OldEmitter implements Emitter {
         finishedClasses[cls] = true;
 
         var superclass = pendingClasses[cls];
+
+        if (#needsMixinSupport) {
+          if (superclass && superclass.indexOf("+") > 0) {
+            var s = superclass.split("+");
+            superclass = s[0];
+            var mixinClass = s[1];
+            finishClass(mixinClass);
+            var mixin = allClasses[mixinClass];
+            // TODO(21896): this test shouldn't be necessary. Without it
+            // we have a crash in language/mixin_only_for_rti and
+            // pkg/analysis_server/tool/spec/check_all_test.
+            if (mixin) {
+              var mixinPrototype = mixin.prototype;
+              var clsPrototype = allClasses[cls].prototype;
+              for (var d in mixinPrototype) {
+                if (hasOwnProperty.call(mixinPrototype, d) &&
+                    !hasOwnProperty.call(clsPrototype, d))
+                  clsPrototype[d] = mixinPrototype[d];
+              }
+            }
+          }
+        }
+
         // The superclass is only false (empty string) for the Dart Object
         // class.  The minifier together with noSuchMethod can put methods on
         // the Object.prototype object, and they show through here, so we check
         // that we have a string.
-        if (!superclass || typeof superclass != "string") return;
+        if (!superclass || typeof superclass != "string") {
+          inheritFrom(allClasses[cls], null);
+          return;
+        }
         finishClass(superclass);
         var superConstructor = allClasses[superclass];
 
@@ -678,6 +704,7 @@ class OldEmitter implements Emitter {
         }
       }
     }''', {'finishedClassesAccess': finishedClassesAccess,
+           'needsMixinSupport': needsMixinSupport,
            'hasNativeClasses': nativeClasses.isNotEmpty,
            'interceptorsByTagAccess': interceptorsByTagAccess,
            'leafTagsAccess': leafTagsAccess,
@@ -1005,7 +1032,8 @@ class OldEmitter implements Emitter {
     }
   }
 
-  void emitStaticNonFinalFieldInitializations(CodeBuffer buffer) {
+  void emitStaticNonFinalFieldInitializations(CodeBuffer buffer,
+                                              OutputUnit outputUnit) {
     JavaScriptConstantCompiler handler = backend.constants;
     Iterable<VariableElement> staticNonFinalFields =
         handler.getStaticNonFinalFieldsForEmission();
@@ -1015,11 +1043,25 @@ class OldEmitter implements Emitter {
       // `mapTypeToInterceptor` is handled in [emitMapTypeToInterceptor].
       if (element == backend.mapTypeToInterceptor) continue;
       compiler.withCurrentElement(element, () {
-        ConstantValue initialValue = handler.getInitialValueFor(element).value;
+        jsAst.Expression initialValue;
+        if (outputUnit !=
+            compiler.deferredLoadTask.outputUnitForElement(element)) {
+          if (outputUnit == compiler.deferredLoadTask.mainOutputUnit) {
+            // In the main output-unit we output a stub initializer for deferred
+            // variables, such that `isolateProperties` stays a fast object.
+            initialValue = jsAst.number(0);
+          } else {
+            // Don't output stubs outside the main output file.
+            return;
+          }
+        } else {
+          initialValue = constantEmitter.referenceInInitializationContext(
+              handler.getInitialValueFor(element).value);
+
+        }
         jsAst.Expression init =
           js('$isolateProperties.# = #',
-              [namer.getNameOfGlobalField(element),
-               constantEmitter.referenceInInitializationContext(initialValue)]);
+              [namer.getNameOfGlobalField(element), initialValue]);
         buffer.write(jsAst.prettyPrint(init, compiler,
                                        monitor: compiler.dumpInfoTask));
         buffer.write('$N');
@@ -1110,10 +1152,7 @@ class OldEmitter implements Emitter {
         if (cachedEmittedConstants.contains(constant)) continue;
         cachedEmittedConstants.add(constant);
       }
-      String name = namer.constantName(constant);
-      jsAst.Expression init = js('#.# = #',
-          [namer.globalObjectForConstant(constant), name,
-           constantInitializerExpression(constant)]);
+      jsAst.Expression init = buildConstantInitializer(constant);
       buffer.write(jsAst.prettyPrint(init, compiler,
                                      monitor: compiler.dumpInfoTask));
       buffer.write('$N');
@@ -1121,6 +1160,13 @@ class OldEmitter implements Emitter {
     if (compiler.hasIncrementalSupport && isMainBuffer) {
       mainBuffer.add(cachedEmittedConstantsBuffer);
     }
+  }
+
+  jsAst.Expression buildConstantInitializer(ConstantValue constant) {
+    String name = namer.constantName(constant);
+    return js('#.# = #',
+              [namer.globalObjectForConstant(constant), name,
+               constantInitializerExpression(constant)]);
   }
 
   jsAst.Template get makeConstantListTemplate {
@@ -1462,12 +1508,18 @@ class OldEmitter implements Emitter {
       // TODO(karlklose): add a TypedefBuilder and move this code there.
       DartType type = typedef.alias;
       int typeIndex = metadataEmitter.reifyType(type);
-      String typeReference =
-          encoding.encodeTypedefFieldDescriptor(typeIndex);
-      jsAst.Property descriptor = new jsAst.Property(
-          js.string(namer.classDescriptorProperty),
-          js.string(typeReference));
-      jsAst.Node declaration = new jsAst.ObjectInitializer([descriptor]);
+      ClassBuilder builder = new ClassBuilder(typedef, namer);
+      builder.addProperty(embeddedNames.TYPEDEF_TYPE_PROPERTY_NAME,
+                          js.number(typeIndex));
+      builder.addProperty(embeddedNames.TYPEDEF_PREDICATE_PROPERTY_NAME,
+                          js.boolean(true));
+
+      // We can be pretty sure that the objectClass is initialized, since
+      // typedefs are only emitted with reflection, which requires lots of
+      // classes.
+      assert(compiler.objectClass != null);
+      builder.superName = namer.getNameOfClass(compiler.objectClass);
+      jsAst.Node declaration = builder.toObjectInitializer();
       String mangledName = namer.getNameX(typedef);
       String reflectionName = getReflectionName(typedef, mangledName);
       getElementDescriptor(library)
@@ -1567,19 +1619,22 @@ class OldEmitter implements Emitter {
     // Chrome/V8.
     mainBuffer.add('(function(${namer.currentIsolate})$_{\n');
     if (compiler.hasIncrementalSupport) {
-      mainBuffer.add(
-          'this.\$dart_unsafe_eval ='
-          ' this.\$dart_unsafe_eval || Object.create(null)$N');
-      mainBuffer.add(
-          'this.\$dart_unsafe_eval.patch = function(a) { eval(a) }$N');
-      String schemaChange =
-          jsAst.prettyPrint(buildSchemaChangeFunction(), compiler).getText();
-      String addMethod =
-          jsAst.prettyPrint(buildIncrementalAddMethod(), compiler).getText();
-      mainBuffer.add(
-          'this.\$dart_unsafe_eval.schemaChange$_=$_$schemaChange$N');
-      mainBuffer.add(
-          'this.\$dart_unsafe_eval.addMethod$_=$_$addMethod$N');
+      mainBuffer.add(jsAst.prettyPrint(js.statement(
+          """
+{
+  #helper = #helper || Object.create(null);
+  #helper.patch = function(a) { eval(a)};
+  #helper.schemaChange = #schemaChange;
+  #helper.addMethod = #addMethod;
+  #helper.extractStubs = function(array, name, isStatic, originalDescriptor) {
+    var descriptor = Object.create(null);
+    this.addStubs(descriptor, array, name, isStatic, originalDescriptor, []);
+    return descriptor;
+  };
+}""",
+          { 'helper': js('this.#', [namer.incrementalHelperName]),
+            'schemaChange': buildSchemaChangeFunction(),
+            'addMethod': buildIncrementalAddMethod() }), compiler));
     }
     if (isProgramSplit) {
       /// We collect all the global state of the, so it can be passed to the
@@ -1671,7 +1726,6 @@ class OldEmitter implements Emitter {
       emitFinishClassesInvocationIfNecessary(mainBuffer);
     }
 
-    typeTestEmitter.emitRuntimeTypeSupport(mainBuffer, mainOutputUnit);
     interceptorEmitter.emitGetInterceptorMethods(mainBuffer);
     interceptorEmitter.emitOneShotInterceptors(mainBuffer);
 
@@ -1689,7 +1743,7 @@ class OldEmitter implements Emitter {
 
     // Static field initializations require the classes and compile-time
     // constants to be set up.
-    emitStaticNonFinalFieldInitializations(mainBuffer);
+    emitStaticNonFinalFieldInitializations(mainBuffer, mainOutputUnit);
     interceptorEmitter.emitInterceptedNames(mainBuffer);
     interceptorEmitter.emitMapTypeToInterceptor(mainBuffer);
     emitLazilyInitializedStaticFields(mainBuffer);
@@ -1824,10 +1878,20 @@ function(originalDescriptor, name, holder, isStatic, globalFunctionsAccess) {
   if (arrayOrFunction.constructor === Array) {
     var existing = holder[name];
     var array = arrayOrFunction;
-    var descriptor = Object.create(null);
-    this.addStubs(
-        descriptor, arrayOrFunction, name, isStatic, originalDescriptor, []);
+
+    // Each method may have a number of stubs associated. For example, if an
+    // instance method supports multiple arguments, a stub for each matching
+    // selector. There is also a getter stub for tear-off getters. For example,
+    // an instance method foo([a]) may have the following stubs: foo$0, foo$1,
+    // and get$foo (here exemplified using unminified names).
+    // [extractStubs] returns a JavaScript object whose own properties
+    // corresponds to the stubs.
+    var descriptor =
+        this.extractStubs(array, name, isStatic, originalDescriptor);
     method = descriptor[name];
+
+    // Iterate through the properties of descriptor and copy the stubs to the
+    // existing holder (for instance methods, a prototype).
     for (var property in descriptor) {
       if (!Object.prototype.hasOwnProperty.call(descriptor, property)) continue;
       var stub = descriptor[property];
@@ -1857,6 +1921,8 @@ function(originalDescriptor, name, holder, isStatic, globalFunctionsAccess) {
           // prototype.
           stub = stub.call(receiver);
 
+          // Copy the properties from the new tear-off's prototype to the
+          // prototype of the existing tear-off.
           var newProto = stub.constructor.prototype;
           var existingProto = existingStub.constructor.prototype;
           for (var stubProperty in newProto) {
@@ -1986,8 +2052,10 @@ function(originalDescriptor, name, holder, isStatic, globalFunctionsAccess) {
       // native elements.
       ClassElement cls =
           element.enclosingClassOrCompilationUnit.declaration;
-      if (compiler.codegenWorld.directlyInstantiatedClasses.contains(cls)
-          && !cls.isNative) {
+      if (compiler.codegenWorld.directlyInstantiatedClasses.contains(cls) &&
+          !cls.isNative &&
+          compiler.deferredLoadTask.outputUnitForElement(element) ==
+              compiler.deferredLoadTask.outputUnitForElement(cls)) {
         owner = cls;
       }
     }
@@ -2128,9 +2196,9 @@ function(originalDescriptor, name, holder, isStatic, globalFunctionsAccess) {
       // point to the current Isolate. Otherwise all methods/functions
       // accessing isolate variables will access the wrong object.
       outputBuffer.write("${namer.currentIsolate}$_=${_}arguments[1]$N");
-      typeTestEmitter.emitRuntimeTypeSupport(outputBuffer, outputUnit);
 
       emitCompileTimeConstants(outputBuffer, outputUnit);
+      emitStaticNonFinalFieldInitializations(outputBuffer, outputUnit);
       outputBuffer.write('}$N');
 
       if (compiler.useContentSecurityPolicy) {
