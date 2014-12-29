@@ -10,7 +10,7 @@ import 'dart:io';
 import 'package:compiler_unsupported/compiler.dart' as compiler;
 import 'package:grinder/grinder.dart' as grinder;
 
-import 'sdk.dart';
+import 'package:compiler_unsupported/sdk_io.dart';
 
 final String _sample = """
 import 'dart:html';
@@ -29,11 +29,11 @@ void main(List<String> args) {
     print('Please set the DART_SDK environment variable or pass --dart-sdk '
         '<path> into this script.');
   } else {
-    DartSdk sdk = new DartSdk(sdkDir.path);
-    print('Using SDK at ${sdk.sdkPath}; version ${sdk.version}.');
+    DartSdk sdk = new DartSdkIO();
+    print('Using SDK at ${sdk.location}; version ${sdk.version}.');
     print('');
 
-    Compiler compiler = new Compiler(sdk.sdkPath);
+    Compiler compiler = new Compiler(sdk);
     compiler.compile(_sample).then((CompilationResults results) {
       print(results);
 
@@ -52,13 +52,13 @@ void main(List<String> args) {
  * on the order of a 2x speedup.
  */
 class Compiler {
-  final DartSdk _sdk;
+  final DartSdk sdk;
 
-  Compiler(String sdkPath) : _sdk = new DartSdk(sdkPath);
+  Compiler(this.sdk);
 
   /// Compile the given string and return the resulting [CompilationResults].
   Future<CompilationResults> compile(String input) {
-    _CompilerProvider provider = new _CompilerProvider(_sdk, input);
+    _CompilerProvider provider = new _CompilerProvider(sdk, input);
     _Lines lines = new _Lines(input);
 
     CompilationResults result = new CompilationResults(lines);

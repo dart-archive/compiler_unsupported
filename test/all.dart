@@ -8,7 +8,7 @@ import 'package:grinder/grinder.dart' as grinder;
 import 'package:unittest/unittest.dart';
 
 import '../example/compiler.dart';
-import '../example/sdk.dart';
+import '../lib/sdk_io.dart';
 
 void main(List<String> args) {
   Directory sdkDir = grinder.getSdkDir(args);
@@ -20,15 +20,15 @@ void main(List<String> args) {
     exit(1);
   }
 
-  DartSdk sdk = new DartSdk(sdkDir.path);
-  print('Using SDK at ${sdk.sdkPath}; version ${sdk.version}.');
+  DartSdk sdk = new DartSdkIO();
+  print('Using SDK at ${sdk.location}; version ${sdk.version}.');
   print('');
 
   group('compiler', () {
     Compiler compiler;
 
     setUp(() {
-      compiler = new Compiler(sdkDir.path);
+      compiler = new Compiler(sdk);
     });
 
     test('helloworld', () {

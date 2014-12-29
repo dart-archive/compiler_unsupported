@@ -53,7 +53,7 @@ final String version = '${version}';
 final String versionLong = '${versionLong}';
 ''');
 
-  // Copy dart2js and sdk sources.
+  // Copy dart2js sources.
   Directory sourceDir = joinDir(dartDir, ['sdk', 'lib', '_internal']);
   Directory pkgDir = joinDir(dartDir, ['pkg']);
 
@@ -64,6 +64,9 @@ final String versionLong = '${versionLong}';
       joinDir(LIB_DIR, ['_internal', 'compiler']), context);
   copyDirectory(joinDir(pkgDir, ['compiler', 'lib', 'src']),
       joinDir(LIB_DIR, ['src']), context);
+
+  // Copy sdk sources.
+  _copySdk(joinDir(dartDir, ['sdk']), joinDir(LIB_DIR, ['sdk']), context);
 
   // Adjust sources.
   List replacements = [
@@ -114,8 +117,36 @@ void validate(GrinderContext context) {
  * Delete files copied from the dart2js sources.
  */
 void clean(GrinderContext context) {
+  deleteEntity(joinDir(LIB_DIR, ['sdk']), context);
   deleteEntity(joinDir(LIB_DIR, ['src']), context);
   deleteEntity(joinDir(LIB_DIR, ['_internal']), context);
+}
+
+void _copySdk(Directory srcDir, Directory destDir, GrinderContext context) {
+  String srcPath = srcDir.path;
+  String destPath = destDir.path;
+
+  int count = 0;
+
+  ZLibCodec zlib = new ZLibCodec(level: 9);
+
+  srcDir.listSync(recursive: true, followLinks: false).forEach((entity) {
+    if (entity is File && entity.path.endsWith('.dart')) {
+      // Create the new path, remove the `lib/` section.
+      String newPath = destPath + entity.path.substring(srcPath.length + 4) + '_';
+      File f = new File(newPath);
+      if (!f.parent.existsSync()) f.parent.createSync(recursive: true);
+      List bytes = entity.readAsBytesSync();
+      bytes = zlib.encode(bytes);
+      new File(newPath).writeAsBytesSync(bytes, flush: true);
+      count++;
+    }
+  });
+
+  context.log('Copied ${count} sdk files.');
+
+  deleteEntity(joinDir(destDir, ['_internal', 'pub']));
+  deleteEntity(joinDir(destDir, ['_internal', 'pub_generated']));
 }
 
 void _writeDart(File file, String text) {
