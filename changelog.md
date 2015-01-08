@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.0-dev.3.0 (2015-01-08)
+- upgraded to SDK 1.9.0-dev.3.0
+
 ## 1.9.0-dev.2.2.1 (2014-12-29)
 - added the SDK sources to the package and added the `sdk_io.dart` library
 
