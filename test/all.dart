@@ -7,8 +7,9 @@ import 'dart:io';
 import 'package:grinder/grinder.dart' as grinder;
 import 'package:unittest/unittest.dart';
 
+import 'package:compiler_unsupported/sdk_io.dart';
+
 import '../example/compiler.dart';
-import '../lib/sdk_io.dart';
 
 void main(List<String> args) {
   Directory sdkDir = grinder.getSdkDir(args);
