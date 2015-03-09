@@ -38,6 +38,9 @@ class BuilderContext<T> {
   /// Variables that have had their declaration created.
   final Set<tree.Variable> declaredVariables = new Set<tree.Variable>();
 
+  /// Variables that are used as catch handler parameters.
+  final Set<tree.Variable> handlerVariables = new Set<tree.Variable>();
+
   /// Variable names that have already been used. Used to avoid name clashes.
   final Set<String> usedVariableNames;
 
@@ -83,7 +86,7 @@ class BuilderContext<T> {
             new Map<tree.Variable, String>.from(parent.variableNames);
 
   // TODO(johnniwinther): Fully encapsulate handling of parameter, variable
-  // and local funciton declarations.
+  // and local function declarations.
   void addDeclaration(tree.Variable variable, [Expression initializer]) {
     assert(!declaredVariables.contains(variable));
     String name = getVariableName(variable);
@@ -91,6 +94,12 @@ class BuilderContext<T> {
     decl.element = variable.element;
     declaredVariables.add(variable);
     variables.add(decl);
+  }
+
+  /// Creates an [Identifier] referring to the given variable.
+  Expression makeVariableAccess(tree.Variable variable) {
+    return new Identifier(getVariableName(variable))
+               ..element = variable.element;
   }
 
   /// Generates a name for the given variable and synthesizes an element for it,
@@ -360,7 +369,8 @@ class ASTEmitter
       // if their first assignment could be pulled into the initializer.
       // Add the remaining variable declarations now.
       for (tree.Variable variable in context.variableNames.keys) {
-        if (!context.declaredVariables.contains(variable)) {
+        if (!context.declaredVariables.contains(variable) &&
+            !context.handlerVariables.contains(variable)) {
           context.addDeclaration(variable);
         }
       }
@@ -434,7 +444,7 @@ class ASTEmitter
   Expression makeAssignment(Expression target, Expression value) {
     // Try to print as compound assignment or increment
     if (value is BinaryOperator && isCompoundableOperator(value.operator)) {
-      Expression leftOperand = value.left;
+      Receiver leftOperand = value.left;
       Expression rightOperand = value.right;
       bool valid = false;
       if (isSameVariable(target, leftOperand)) {
@@ -536,7 +546,7 @@ class ASTEmitter
     }
 
     // Emit a variable declaration if we are required to do so.
-    // This is to ensure that a fresh closure variable is created.
+    // For captured variables, this ensures that a fresh variable is created.
     if (stmt.isDeclaration) {
       assert(isFirstOccurrence);
       assert(isDeclaredHere);
@@ -550,7 +560,7 @@ class ASTEmitter
     }
 
     context.addStatement(new ExpressionStatement(makeAssignment(
-        visitVariable(stmt.variable, context),
+        context.makeVariableAccess(stmt.variable),
         definition)));
     visitStatement(stmt.next, context);
   }
@@ -626,6 +636,34 @@ class ASTEmitter
     addLabeledStatement(stmt.label, statement, context);
 
     visitStatement(stmt.next, context);
+  }
+
+  @override
+  void visitTry(tree.Try stmt,
+                BuilderContext<Statement> context) {
+    Block tryBody = visitInSubContext(stmt.tryBody, context);
+    Block catchBody = visitInSubContext(stmt.catchBody, context);
+    CatchBlock catchBlock;
+    tree.Variable exceptionVariable = stmt.catchParameters[0];
+    context.handlerVariables.add(exceptionVariable);
+    VariableDeclaration exceptionParameter =
+        new VariableDeclaration(context.getVariableName(exceptionVariable));
+    exceptionParameter.element = exceptionVariable.element;
+    if (stmt.catchParameters.length == 2) {
+      tree.Variable stackTraceVariable = stmt.catchParameters[1];
+      context.handlerVariables.add(stackTraceVariable);
+      VariableDeclaration stackTraceParameter =
+          new VariableDeclaration(context.getVariableName(stackTraceVariable));
+      stackTraceParameter.element = stackTraceVariable.element;
+      catchBlock = new CatchBlock(catchBody,
+          exceptionVar: exceptionParameter,
+          stackVar: stackTraceParameter);
+    } else {
+      assert(stmt.catchParameters.length == 1);
+      catchBlock = new CatchBlock(catchBody,
+          exceptionVar: exceptionParameter);
+    }
+    context.addStatement(new Try(tryBody, <CatchBlock>[catchBlock], null));
   }
 
   @override
@@ -777,8 +815,12 @@ class ASTEmitter
   }
 
   @override
-  Expression visitInvokeSuperMethod(tree.InvokeSuperMethod exp,
-                                    BuilderContext<Statement> context) {
+  Expression visitInvokeMethodDirectly(tree.InvokeMethodDirectly exp,
+                                       BuilderContext<Statement> context) {
+    // When targeting Dart, InvokeMethodDirectly is only used for super calls.
+    // The receiver is known to be `this`, and the target method is a method
+    // on the super class. So we just translate it as a method call with the
+    // super receiver.
     return emitMethodCall(exp, new SuperReceiver(), context);
   }
 
@@ -827,10 +869,9 @@ class ASTEmitter
   }
 
   @override
-  Expression visitVariable(tree.Variable exp,
-                           BuilderContext<Statement> context) {
-    return new Identifier(context.getVariableName(exp))
-               ..element = exp.element;
+  Expression visitVariableUse(tree.VariableUse exp,
+                              BuilderContext<Statement> context) {
+    return context.makeVariableAccess(exp.variable);
   }
 
   FunctionExpression makeSubFunction(tree.FunctionDefinition function,
@@ -893,6 +934,24 @@ class ASTEmitter
     }).toList();
     return new SuperInitializer(node.target,
                                 emitArguments(arguments, node.selector));
+  }
+
+  @override
+  visitGetField(tree.GetField node, arg) => errorUnsupportedNode(node);
+
+  @override
+  visitSetField(tree.SetField node, arg) => errorUnsupportedNode(node);
+
+  @override
+  visitCreateBox(tree.CreateBox node, arg) => errorUnsupportedNode(node);
+
+  @override
+  visitCreateInstance(tree.CreateInstance node, arg) {
+    return errorUnsupportedNode(node);
+  }
+
+  errorUnsupportedNode(tree.JsSpecificNode node) {
+    throw '$node not supported by dart backend';
   }
 }
 
@@ -1211,12 +1270,15 @@ class UnshadowParameters extends tree.RecursiveVisitor {
         tree.Variable newParam = new tree.Variable(definition.element,
             param.element);
         definition.parameters[i] = newParam;
-        definition.body = new tree.Assign(param, newParam, definition.body);
+        definition.body = new tree.Assign(param, new tree.VariableUse(newParam),
+            definition.body);
         newParam.writeCount = 1; // Being a parameter counts as a write.
+        param.writeCount--; // Not a parameter anymore.
       }
     }
   }
 
+  @override
   visitVariable(tree.Variable variable) {
     if (shadowedParameters.contains(variable)) {
       hasShadowedUse.add(variable);

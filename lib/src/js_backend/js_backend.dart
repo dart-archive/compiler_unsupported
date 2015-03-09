@@ -5,10 +5,11 @@
 library js_backend;
 
 import 'dart:async' show EventSink, Future;
-import 'dart:collection' show Queue, LinkedHashMap, LinkedHashSet;
 
 import 'package:compiler_unsupported/_internal/compiler/js_lib/shared/embedded_names.dart'
     as embeddedNames;
+import 'package:compiler_unsupported/_internal/compiler/js_lib/shared/embedded_names.dart'
+    show JsGetName;
 
 import '../closure.dart';
 import '../constants/expressions.dart';
@@ -20,7 +21,12 @@ import '../io/code_output.dart';
 import '../js/js.dart' as jsAst;
 import '../js/js.dart' show js;
 import '../js_emitter/js_emitter.dart'
-    show Emitter, CodeEmitterTask, ClassBuilder, MetadataEmitter;
+    show Emitter,
+         CodeEmitterTask,
+         ClassBuilder,
+         MetadataCollector,
+         USE_NEW_EMITTER;
+
 import '../library_loader.dart' show LibraryLoader, LoadedLibraries;
 import '../native/native.dart' as native;
 import '../ssa/ssa.dart';
@@ -32,8 +38,10 @@ import '../util/util.dart';
 
 import '../elements/visitor.dart' show
     ElementVisitor;
+
 import '../js_backend/codegen/task.dart';
 import 'patch_resolver.dart';
+import '../resolution/resolution.dart' show ResolutionRegistry;
 
 part 'backend.dart';
 part 'checked_mode_helpers.dart';
@@ -43,6 +51,5 @@ part 'constant_system_javascript.dart';
 part 'custom_elements_analysis.dart';
 part 'minify_namer.dart';
 part 'namer.dart';
-part 'native_emitter.dart';
 part 'runtime_types.dart';
 part 'type_variable_handler.dart';

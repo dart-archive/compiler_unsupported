@@ -6,9 +6,9 @@ library tree_ir_nodes;
 
 import '../constants/expressions.dart';
 import '../constants/values.dart' as values;
-import '../cps_ir/cps_ir_nodes.dart' as cps_ir;
 import '../dart_types.dart' show DartType, GenericType;
 import '../elements/elements.dart';
+import '../io/source_information.dart' show SourceInformation;
 import '../universe/universe.dart';
 import '../universe/universe.dart' show Selector;
 import 'optimization/optimization.dart';
@@ -85,9 +85,20 @@ class Label {
 }
 
 /**
- * Variables are [Expression]s.
+ * A local variable in the tree IR.
+ *
+ * All tree IR variables are mutable, and may in Dart-mode be referenced inside
+ * nested functions.
+ *
+ * To use a variable as an expression, reference it from a [VariableUse], with
+ * one [VariableUse] per expression.
+ *
+ * [Variable]s are reference counted. The node constructors [VariableUse],
+ * [Assign], [FunctionDefinition], and [Try] automatically update the reference
+ * count for their variables, but when transforming the tree, the transformer
+ * is responsible for updating reference counts.
  */
-class Variable extends Expression {
+class Variable extends Node {
   /// Function that declares this variable.
   ExecutableElement host;
 
@@ -95,20 +106,34 @@ class Variable extends Expression {
   /// Different variables may have the same entity. May be null.
   Entity element;
 
+  /// Number of places where this variable occurs in a [VariableUse].
   int readCount = 0;
 
   /// Number of places where this variable occurs as:
   /// - left-hand of an [Assign]
   /// - left-hand of a [FunctionDeclaration]
   /// - parameter in a [FunctionDefinition]
+  /// - catch parameter in a [Try]
   int writeCount = 0;
 
   Variable(this.host, this.element) {
     assert(host != null);
   }
+}
 
-  accept(ExpressionVisitor visitor) => visitor.visitVariable(this);
-  accept1(ExpressionVisitor1 visitor, arg) => visitor.visitVariable(this, arg);
+/// Read the value of a variable.
+class VariableUse extends Expression {
+  Variable variable;
+
+  /// Creates a use of [variable] and updates its `readCount`.
+  VariableUse(this.variable) {
+    variable.readCount++;
+  }
+
+  accept(ExpressionVisitor visitor) => visitor.visitVariableUse(this);
+  accept1(ExpressionVisitor1 visitor, arg) {
+    return visitor.visitVariableUse(this, arg);
+  }
 }
 
 /**
@@ -128,8 +153,10 @@ class InvokeStatic extends Expression implements Invoke {
   final Entity target;
   final List<Expression> arguments;
   final Selector selector;
+  final SourceInformation sourceInformation;
 
-  InvokeStatic(this.target, this.selector, this.arguments);
+  InvokeStatic(this.target, this.selector, this.arguments,
+               {this.sourceInformation});
 
   accept(ExpressionVisitor visitor) => visitor.visitInvokeStatic(this);
   accept1(ExpressionVisitor1 visitor, arg) {
@@ -158,15 +185,19 @@ class InvokeMethod extends Expression implements Invoke {
   }
 }
 
-class InvokeSuperMethod extends Expression implements Invoke {
+/// Invoke [target] on [receiver], bypassing ordinary dispatch semantics.
+class InvokeMethodDirectly extends Expression implements Invoke {
+  Expression receiver;
+  final Element target;
   final Selector selector;
   final List<Expression> arguments;
 
-  InvokeSuperMethod(this.selector, this.arguments);
+  InvokeMethodDirectly(this.receiver, this.target, this.selector,
+      this.arguments);
 
-  accept(ExpressionVisitor visitor) => visitor.visitInvokeSuperMethod(this);
+  accept(ExpressionVisitor visitor) => visitor.visitInvokeMethodDirectly(this);
   accept1(ExpressionVisitor1 visitor, arg) {
-    return visitor.visitInvokeSuperMethod(this, arg);
+    return visitor.visitInvokeMethodDirectly(this, arg);
   }
 }
 
@@ -178,6 +209,8 @@ class InvokeConstructor extends Expression implements Invoke {
   final FunctionElement target;
   final List<Expression> arguments;
   final Selector selector;
+  /// TODO(karlklose): get rid of this field.  Instead use the constant's
+  /// expression to find the constructor to be called in dart2dart.
   final values.ConstantValue constant;
 
   InvokeConstructor(this.type, this.target, this.selector, this.arguments,
@@ -194,9 +227,8 @@ class InvokeConstructor extends Expression implements Invoke {
 /// Calls [toString] on each argument and concatenates the results.
 class ConcatenateStrings extends Expression {
   final List<Expression> arguments;
-  final values.ConstantValue constant;
 
-  ConcatenateStrings(this.arguments, [this.constant]);
+  ConcatenateStrings(this.arguments);
 
   accept(ExpressionVisitor visitor) => visitor.visitConcatenateStrings(this);
   accept1(ExpressionVisitor1 visitor, arg) {
@@ -326,7 +358,7 @@ class Not extends Expression {
   accept1(ExpressionVisitor1 visitor, arg) => visitor.visitNot(this, arg);
 }
 
-class FunctionExpression extends Expression {
+class FunctionExpression extends Expression implements DartSpecificNode {
   final FunctionDefinition definition;
 
   FunctionExpression(this.definition) {
@@ -344,7 +376,7 @@ class FunctionExpression extends Expression {
 /// being recursive or having a return type.
 /// The [variable] must not occur as the left-hand side of an [Assign] or
 /// any other [FunctionDeclaration].
-class FunctionDeclaration extends Statement {
+class FunctionDeclaration extends Statement implements DartSpecificNode {
   Variable variable;
   final FunctionDefinition definition;
   Statement next;
@@ -488,11 +520,13 @@ class Assign extends Statement {
   Variable variable;
   Expression definition;
 
-  /// If true, this declares a new copy of the closure variable.
-  /// The consequences are similar to [cps_ir.SetClosureVariable].
-  /// All uses of the variable must be nested inside the [next] statement.
+  /// If true, this assignes to a fresh variable scoped to the [next]
+  /// statement.
+  ///
+  /// Variable declarations themselves are hoisted to function level.
   bool isDeclaration;
 
+  /// Creates an assignment to [variable] and updates its `writeCount`.
   Assign(this.variable, this.definition, this.next,
          { this.isDeclaration: false }) {
     variable.writeCount++;
@@ -555,6 +589,29 @@ class ExpressionStatement extends Statement {
   }
 }
 
+// TODO(kmillikin): Do we want this 'TryStatement'?  Other than
+// LabeledStatement and EmptyStatement, the statement class names are not
+// suffixed with 'Statement'.
+class Try extends Statement {
+  Statement tryBody;
+  List<Variable> catchParameters;
+  Statement catchBody;
+
+  Statement get next => null;
+  void set next(Statement s) => throw 'UNREACHABLE';
+
+  Try(this.tryBody, this.catchParameters, this.catchBody) {
+    for (Variable variable in catchParameters) {
+      variable.writeCount++; // Being a catch parameter counts as a write.
+    }
+  }
+
+  accept(StatementVisitor visitor) => visitor.visitTry(this);
+  accept1(StatementVisitor1 visitor, arg) {
+    return visitor.visitTry(this, arg);
+  }
+}
+
 abstract class ExecutableDefinition {
   ExecutableElement get element;
   Statement body;
@@ -597,8 +654,13 @@ class FunctionDefinition extends Node implements ExecutableDefinition {
   final List<ConstDeclaration> localConstants;
   final List<ConstantExpression> defaultParameterValues;
 
+  /// Creates a function definition and updates `writeCount` for [parameters].
   FunctionDefinition(this.element, this.parameters, this.body,
-      this.localConstants, this.defaultParameterValues);
+      this.localConstants, this.defaultParameterValues) {
+    for (Variable param in parameters) {
+      param.writeCount++; // Being a parameter counts as a write.
+    }
+  }
 
   /// Returns `true` if this function is abstract.
   ///
@@ -607,7 +669,7 @@ class FunctionDefinition extends Node implements ExecutableDefinition {
   applyPass(Pass pass) => pass.rewriteFunctionDefinition(this);
 }
 
-abstract class Initializer implements Expression {}
+abstract class Initializer implements Expression, DartSpecificNode {}
 
 class FieldInitializer extends Initializer {
   final FieldElement element;
@@ -650,12 +712,55 @@ class ConstructorDefinition extends FunctionDefinition {
   applyPass(Pass pass) => pass.rewriteConstructorDefinition(this);
 }
 
+abstract class JsSpecificNode implements Node {}
+
+abstract class DartSpecificNode implements Node {}
+
+class CreateBox extends Expression implements JsSpecificNode {
+  accept(ExpressionVisitor visitor) => visitor.visitCreateBox(this);
+  accept1(ExpressionVisitor1 visitor, arg) => visitor.visitCreateBox(this, arg);
+}
+
+class CreateInstance extends Expression implements JsSpecificNode {
+  ClassElement classElement;
+  List<Expression> arguments;
+
+  CreateInstance(this.classElement, this.arguments);
+
+  accept(ExpressionVisitor visitor) => visitor.visitCreateInstance(this);
+  accept1(ExpressionVisitor1 visitor, arg) {
+    return visitor.visitCreateInstance(this, arg);
+  }
+}
+
+class GetField extends Expression implements JsSpecificNode {
+  Expression object;
+  Element field;
+
+  GetField(this.object, this.field);
+
+  accept(ExpressionVisitor visitor) => visitor.visitGetField(this);
+  accept1(ExpressionVisitor1 visitor, arg) => visitor.visitGetField(this, arg);
+}
+
+class SetField extends Statement implements JsSpecificNode {
+  Expression object;
+  Element field;
+  Expression value;
+  Statement next;
+
+  SetField(this.object, this.field, this.value, this.next);
+
+  accept(StatementVisitor visitor) => visitor.visitSetField(this);
+  accept1(StatementVisitor1 visitor, arg) => visitor.visitSetField(this, arg);
+}
+
 abstract class ExpressionVisitor<E> {
   E visitExpression(Expression e) => e.accept(this);
-  E visitVariable(Variable node);
+  E visitVariableUse(VariableUse node);
   E visitInvokeStatic(InvokeStatic node);
   E visitInvokeMethod(InvokeMethod node);
-  E visitInvokeSuperMethod(InvokeSuperMethod node);
+  E visitInvokeMethodDirectly(InvokeMethodDirectly node);
   E visitInvokeConstructor(InvokeConstructor node);
   E visitConcatenateStrings(ConcatenateStrings node);
   E visitConstant(Constant node);
@@ -670,14 +775,17 @@ abstract class ExpressionVisitor<E> {
   E visitFunctionExpression(FunctionExpression node);
   E visitFieldInitializer(FieldInitializer node);
   E visitSuperInitializer(SuperInitializer node);
+  E visitGetField(GetField node);
+  E visitCreateBox(CreateBox node);
+  E visitCreateInstance(CreateInstance node);
 }
 
 abstract class ExpressionVisitor1<E, A> {
   E visitExpression(Expression e, A arg) => e.accept1(this, arg);
-  E visitVariable(Variable node, A arg);
+  E visitVariableUse(VariableUse node, A arg);
   E visitInvokeStatic(InvokeStatic node, A arg);
   E visitInvokeMethod(InvokeMethod node, A arg);
-  E visitInvokeSuperMethod(InvokeSuperMethod node, A arg);
+  E visitInvokeMethodDirectly(InvokeMethodDirectly node, A arg);
   E visitInvokeConstructor(InvokeConstructor node, A arg);
   E visitConcatenateStrings(ConcatenateStrings node, A arg);
   E visitConstant(Constant node, A arg);
@@ -692,6 +800,9 @@ abstract class ExpressionVisitor1<E, A> {
   E visitFunctionExpression(FunctionExpression node, A arg);
   E visitFieldInitializer(FieldInitializer node, A arg);
   E visitSuperInitializer(SuperInitializer node, A arg);
+  E visitGetField(GetField node, A arg);
+  E visitCreateBox(CreateBox node, A arg);
+  E visitCreateInstance(CreateInstance node, A arg);
 }
 
 abstract class StatementVisitor<S> {
@@ -706,6 +817,8 @@ abstract class StatementVisitor<S> {
   S visitWhileCondition(WhileCondition node);
   S visitFunctionDeclaration(FunctionDeclaration node);
   S visitExpressionStatement(ExpressionStatement node);
+  S visitTry(Try node);
+  S visitSetField(SetField node);
 }
 
 abstract class StatementVisitor1<S, A> {
@@ -720,6 +833,8 @@ abstract class StatementVisitor1<S, A> {
   S visitWhileCondition(WhileCondition node, A arg);
   S visitFunctionDeclaration(FunctionDeclaration node, A arg);
   S visitExpressionStatement(ExpressionStatement node, A arg);
+  S visitTry(Try node, A arg);
+  S visitSetField(SetField node, A arg);
 }
 
 abstract class Visitor<S, E> implements ExpressionVisitor<E>,
@@ -736,10 +851,15 @@ abstract class Visitor1<S, E, A> implements ExpressionVisitor1<E, A>,
 
 class RecursiveVisitor extends Visitor {
   visitFunctionDefinition(FunctionDefinition node) {
+    node.parameters.forEach(visitVariable);
     visitStatement(node.body);
   }
 
   visitVariable(Variable node) {}
+
+  visitVariableUse(VariableUse node) {
+    visitVariable(node.variable);
+  }
 
   visitInvokeStatic(InvokeStatic node) {
     node.arguments.forEach(visitExpression);
@@ -750,7 +870,8 @@ class RecursiveVisitor extends Visitor {
     node.arguments.forEach(visitExpression);
   }
 
-  visitInvokeSuperMethod(InvokeSuperMethod node) {
+  visitInvokeMethodDirectly(InvokeMethodDirectly node) {
+    visitExpression(node.receiver);
     node.arguments.forEach(visitExpression);
   }
 
@@ -847,11 +968,33 @@ class RecursiveVisitor extends Visitor {
     visitStatement(node.next);
   }
 
+  visitTry(Try node) {
+    visitStatement(node.tryBody);
+    visitStatement(node.catchBody);
+  }
+
   visitFieldInitializer(FieldInitializer node) {
     visitStatement(node.body);
   }
 
   visitSuperInitializer(SuperInitializer node) {
     node.arguments.forEach(visitStatement);
+  }
+
+  visitGetField(GetField node) {
+    visitExpression(node.object);
+  }
+
+  visitSetField(SetField node) {
+    visitExpression(node.object);
+    visitExpression(node.value);
+    visitStatement(node.next);
+  }
+
+  visitCreateBox(CreateBox node) {
+  }
+
+  visitCreateInstance(CreateInstance node) {
+    node.arguments.forEach(visitExpression);
   }
 }

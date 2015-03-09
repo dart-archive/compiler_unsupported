@@ -49,6 +49,8 @@ class DartBackend extends Backend {
   final Set<ClassElement> _userImplementedPlatformClasses =
       new Set<ClassElement>();
 
+  bool get canHandleCompilationFailed => false;
+
   /**
    * Tells whether it is safe to remove type declarations from variables,
    * functions parameters. It becomes not safe if:
@@ -231,7 +233,7 @@ class DartBackend extends Backend {
         computeElementAst: computeElementAst,
         shouldOutput: shouldOutput,
         isSafeToRemoveTypeDeclarations: isSafeToRemoveTypeDeclarations,
-        sortElements: sortElements,
+        sortElements: Elements.sortedByPosition,
         mirrorRenamer: mirrorRenamer,
         mainFunction: compiler.mainFunction,
         outputUri: compiler.outputUri);
@@ -465,9 +467,6 @@ compareElements(e0, e1) {
   if (result != 0) return result;
   return compareBy((e) => e.position.charOffset)(e0, e1);
 }
-
-List<Element> sortElements(Iterable<Element> elements) =>
-    sorted(elements, compareElements);
 
 /// [ConstantCompilerTask] for compilation of constants for the Dart backend.
 ///

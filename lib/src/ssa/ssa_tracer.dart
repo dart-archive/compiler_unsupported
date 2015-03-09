@@ -289,7 +289,8 @@ class HInstructionStringifier implements HVisitor<String> {
     String value = temporaryId(node.inputs[0]);
     if (node.interceptedClasses != null) {
       JavaScriptBackend backend = compiler.backend;
-      String cls = backend.namer.getInterceptorSuffix(node.interceptedClasses);
+      String cls =
+          backend.namer.suffixForGetInterceptor(node.interceptedClasses);
       return "Intercept ($cls): $value";
     }
     return "Intercept: $value";
@@ -518,5 +519,13 @@ class HInstructionStringifier implements HVisitor<String> {
 
   String visitDynamicType(HDynamicType node) {
     return "DynamicType";
+  }
+
+  String visitAwait(HAwait node) {
+    return "await ${temporaryId(node.inputs[0])}";
+  }
+
+  String visitYield(HYield node) {
+    return "yield${node.hasStar ? "*" : ""} ${temporaryId(node.inputs[0])}";
   }
 }

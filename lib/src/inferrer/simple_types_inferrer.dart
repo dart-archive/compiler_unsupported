@@ -541,10 +541,11 @@ class SimpleTypeInferrerVisitor<T>
         locals.update(element, parameterType, node);
       });
       ClassElement cls = analyzedElement.enclosingClass;
+      Spannable spannable = node;
       if (analyzedElement.isSynthesized) {
-        node = analyzedElement;
+        spannable = analyzedElement;
         ConstructorElement constructor = analyzedElement;
-        synthesizeForwardingCall(node, constructor.definingConstructor);
+        synthesizeForwardingCall(spannable, constructor.definingConstructor);
       } else {
         visitingInitializers = true;
         visit(node.initializers);
@@ -556,9 +557,7 @@ class SimpleTypeInferrerVisitor<T>
         if (!isConstructorRedirect
             && !seenSuperConstructorCall
             && !cls.isObject) {
-          Selector selector =
-              new Selector.callDefaultConstructor(analyzedElement.library);
-          FunctionElement target = cls.superclass.lookupConstructor(selector);
+          FunctionElement target = cls.superclass.lookupDefaultConstructor();
           analyzeSuperConstructorCall(target, new ArgumentsTypes([], {}));
           synthesizeForwardingCall(analyzedElement, target);
         }
@@ -572,7 +571,8 @@ class SimpleTypeInferrerVisitor<T>
           if (field.isFinal) return;
           T type = locals.fieldScope.readField(field);
           if (type == null && field.initializer == null) {
-            inferrer.recordTypeOfNonFinalField(node, field, types.nullType);
+            inferrer.recordTypeOfNonFinalField(
+                spannable, field, types.nullType);
           }
         });
       }
@@ -582,7 +582,12 @@ class SimpleTypeInferrerVisitor<T>
         locals.update(element, inferrer.typeOfElement(element), node);
       });
       visit(node.body);
-      if (returnType == null) {
+      if (function.asyncMarker != AsyncMarker.SYNC) {
+        // TODO(herhut): Should be type Future/Iterable/Stream instead of
+        // dynamic.
+        returnType = inferrer.addReturnTypeFor(
+            analyzedElement, returnType, types.dynamicType);
+      } else if (returnType == null) {
         // No return in the body.
         returnType = locals.seenReturnOrThrow
             ? types.nonNullEmpty()  // Body always throws.
@@ -855,7 +860,7 @@ class SimpleTypeInferrerVisitor<T>
       ArgumentsTypes operatorArguments = new ArgumentsTypes<T>([rhsType], null);
       T getterType;
       T newType;
-      if (Elements.isErroneousElement(element)) {
+      if (Elements.isErroneous(element)) {
         getterType = types.dynamicType;
         newType = types.dynamicType;
       } else if (Elements.isStaticOrTopLevelField(element)) {
@@ -904,7 +909,7 @@ class SimpleTypeInferrerVisitor<T>
                           T rhsType,
                           ast.Node rhs) {
     ArgumentsTypes arguments = new ArgumentsTypes<T>([rhsType], null);
-    if (Elements.isErroneousElement(element)) {
+    if (Elements.isErroneous(element)) {
       // Code will always throw.
     } else if (Elements.isStaticOrTopLevelField(element)) {
       handleStaticSend(node, setterSelector, element, arguments);
@@ -995,6 +1000,12 @@ class SimpleTypeInferrerVisitor<T>
       }
     }
     return null;
+  }
+
+  T visitAwait(ast.Await node) {
+    T futureType = node.expression.accept(this);
+    // TODO(herhut): Return a better type here if possible.
+    return types.dynamicType;
   }
 
   T visitStaticSend(ast.Send node) {
@@ -1123,7 +1134,7 @@ class SimpleTypeInferrerVisitor<T>
       return visitDynamicSend(node);
     } else if (Elements.isStaticOrTopLevelFunction(element)) {
       return handleStaticSend(node, selector, element, null);
-    } else if (Elements.isErroneousElement(element)) {
+    } else if (Elements.isErroneous(element)) {
       return types.dynamicType;
     } else if (element.isLocal) {
       LocalElement local = element;
@@ -1282,7 +1293,7 @@ class SimpleTypeInferrerVisitor<T>
   }
   T visitRedirectingFactoryBody(ast.RedirectingFactoryBody node) {
     Element element = elements.getRedirectingTargetConstructor(node);
-    if (Elements.isErroneousElement(element)) {
+    if (Elements.isErroneous(element)) {
       recordReturnType(types.dynamicType);
     } else {
       // We don't create a selector for redirecting factories, and

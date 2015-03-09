@@ -139,6 +139,7 @@ class TreePrinter {
   final Token withToken = makeIdToken('with');
   final Token implementsToken = makeIdToken('implements');
   final Token typedefToken = makeIdToken('typedef');
+  final Token enumToken = makeIdToken('enum');
 
   static tree.Identifier makeIdentifier(String name) {
     return new tree.Identifier(
@@ -839,10 +840,10 @@ class TreePrinter {
     } else if (stmt is Try) {
       return new tree.TryStatement(
           makeBlock(stmt.tryBlock),
-          braceList('', stmt.catchBlocks.map(makeCatchBlock)),
+          makeList(null, stmt.catchBlocks.map(makeCatchBlock)),
           stmt.finallyBlock == null ? null : makeBlock(stmt.finallyBlock),
           tryToken,
-          finallyToken);
+          stmt.finallyBlock == null ? null : finallyToken);
     } else if (stmt is VariableDeclarations) {
       return makeVariableDeclarations(stmt, useVar: true, endToken: semicolon);
     } else if (stmt is While) {
@@ -889,16 +890,20 @@ class TreePrinter {
   tree.CatchBlock makeCatchBlock(CatchBlock block) {
     List<tree.VariableDefinitions> formals = [];
     if (block.exceptionVar != null) {
+      tree.Node exceptionName = makeIdentifier(block.exceptionVar.name);
+      setElement(exceptionName, block.exceptionVar.element, block.exceptionVar);
       formals.add(new tree.VariableDefinitions(
           null,
           makeEmptyModifiers(),
-          singleton(makeIdentifier(block.exceptionVar))));
+          singleton(exceptionName)));
     }
     if (block.stackVar != null) {
+      tree.Node stackTraceName = makeIdentifier(block.stackVar.name);
+      setElement(stackTraceName, block.stackVar.element, block.stackVar);
       formals.add(new tree.VariableDefinitions(
           null,
           makeEmptyModifiers(),
-          singleton(makeIdentifier(block.stackVar))));
+          singleton(stackTraceName)));
     }
     return new tree.CatchBlock(
         block.onType == null ? null : makeType(block.onType),
@@ -1060,6 +1065,8 @@ class TreePrinter {
   tree.Node makeNodeForClassElement(elements.ClassElement cls) {
     if (cls.isMixinApplication) {
       return makeNamedMixinApplication(cls);
+    } else if (cls.isEnumClass) {
+      return makeEnum(cls);
     } else {
       return makeClassNode(cls);
     }
@@ -1179,6 +1186,14 @@ class TreePrinter {
     return new tree.NamedMixinApplication(
         name, typeParameters, modifiers, supernode,
         interfaces, classToken, semicolon);
+  }
+
+  tree.Enum makeEnum(elements.EnumClassElement cls) {
+    return new tree.Enum(
+        enumToken,
+        makeIdentifier(cls.name),
+        makeList(',', cls.enumValues.map((e) => makeIdentifier(e.name)),
+                 open: openBrace, close: closeBrace));
   }
 
   /// Creates a [tree.ClassNode] node for [cls].

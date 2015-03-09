@@ -93,8 +93,6 @@ class Universe {
    */
   final Set<Element> closurizedMembers = new Set<Element>();
 
-  bool usingFactoryWithTypeArguments = false;
-
   /// All directly instantiated classes, that is, classes with a generative
   /// constructor that has been called directly and not only through a
   /// super-call.
@@ -118,7 +116,9 @@ class Universe {
   Iterable<DartType> get instantiatedTypes => _instantiatedTypes;
 
   /// Returns `true` if [cls] is considered to be instantiated, either directly,
-  /// through subclasses or throught subtypes.
+  /// through subclasses or through subtypes. The latter case only contains
+  /// spurious information from instatiations through factory constructors and
+  /// mixins.
   // TODO(johnniwinther): Improve semantic precision.
   bool isInstantiated(ClassElement cls) {
     return _allInstantiatedClasses.contains(cls);
@@ -326,6 +326,8 @@ class Selector {
       return new Selector.getter(name, element.library);
     } else if (element.isField) {
       return new Selector.getter(name, element.library);
+    } else if (element.isConstructor) {
+      return new Selector.callConstructor(name, element.library);
     } else {
       throw new SpannableAssertionFailure(
           element, "Can't get selector from $element");
@@ -381,8 +383,8 @@ class Selector {
       => new Selector(SelectorKind.CALL, name, library,
                       arity, namedArguments);
 
-  factory Selector.callDefaultConstructor(LibraryElement library)
-      => new Selector(SelectorKind.CALL, "", library, 0);
+  factory Selector.callDefaultConstructor()
+      => new Selector(SelectorKind.CALL, "", null, 0);
 
   bool get isGetter => identical(kind, SelectorKind.GETTER);
   bool get isSetter => identical(kind, SelectorKind.SETTER);
@@ -504,49 +506,7 @@ class Selector {
    *
    * Invariant: [element] must be the implementation element.
    */
-  /*<S, T>*/ List/*<T>*/ makeArgumentsList(
-        FunctionElement element,
-        List/*<T>*/ compiledArguments,
-        /*T*/ compileDefaultValue(ParameterElement element)) {
-    assert(invariant(element, element.isImplementation));
-    List/*<T>*/ result = new List();
-    FunctionSignature parameters = element.functionSignature;
-    int i = 0;
-    parameters.forEachRequiredParameter((ParameterElement element) {
-      result.add(compiledArguments[i]);
-      ++i;
-    });
-
-    if (!parameters.optionalParametersAreNamed) {
-      parameters.forEachOptionalParameter((ParameterElement element) {
-        if (i < compiledArguments.length) {
-          result.add(compiledArguments[i]);
-          ++i;
-        } else {
-          result.add(compileDefaultValue(element));
-        }
-      });
-    } else {
-      int offset = i;
-      // Iterate over the optional parameters of the signature, and try to
-      // find them in [compiledNamedArguments]. If found, we use the
-      // value in the temporary list, otherwise the default value.
-      parameters.orderedOptionalParameters
-          .forEach((ParameterElement element) {
-        int foundIndex = namedArguments.indexOf(element.name);
-        if (foundIndex != -1) {
-          result.add(compiledArguments[offset + foundIndex]);
-        } else {
-          result.add(compileDefaultValue(element));
-        }
-      });
-    }
-    return result;
-  }
-
-  /// This is a version of [makeArgumentsList] that works for a `Link`
-  /// representation of arguments.
-  /*<T>*/ List/*<T>*/ makeArgumentsList2(
+  /*<T>*/ List/*<T>*/ makeArgumentsList(
       Link<Node> arguments,
       FunctionElement element,
       /*T*/ compileArgument(Node argument),
@@ -590,7 +550,6 @@ class Selector {
     }
     return result;
   }
-
 
   /**
    * Fills [list] with the arguments in the order expected by
@@ -659,10 +618,10 @@ class Selector {
                                           namedParameters);
 
     if (!selector.applies(callee, world)) return false;
-    list.addAll(selector.makeArgumentsList2(nodes,
-                                            callee,
-                                            internalCompileArgument,
-                                            compileConstant));
+    list.addAll(selector.makeArgumentsList(nodes,
+                                           callee,
+                                           internalCompileArgument,
+                                           compileConstant));
 
     return true;
   }

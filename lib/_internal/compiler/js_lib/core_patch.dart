@@ -6,6 +6,8 @@
 import "dart:_internal" as _symbol_dev;
 import 'dart:_interceptors';
 import 'dart:_js_helper' show patch,
+                              patch_new,
+                              patch_old,
                               checkInt,
                               getRuntimeType,
                               jsonEncodeNative,
@@ -13,6 +15,8 @@ import 'dart:_js_helper' show patch,
                               Primitives,
                               stringJoinUnchecked,
                               objectHashCode;
+
+import 'dart:_native_typed_data' show NativeUint8List;
 
 String _symbolToString(Symbol symbol) => _symbol_dev.Symbol.getName(symbol);
 
@@ -54,13 +58,21 @@ class Object {
 // Patch for Function implementation.
 @patch
 class Function {
-  @patch
+  @patch_old
   static apply(Function function,
                List positionalArguments,
                [Map<Symbol, dynamic> namedArguments]) {
     return Primitives.applyFunction(
         function, positionalArguments,
         namedArguments == null ? null : _toMangledNames(namedArguments));
+  }
+
+  @patch_new
+  static apply(Function function,
+               List positionalArguments,
+               [Map<Symbol, dynamic> namedArguments]) {
+    return Primitives.applyFunctionNewEmitter(function, positionalArguments,
+        namedArguments == null ? null : _symbolMapToStringMap(namedArguments));
   }
 
   static Map<String, dynamic> _toMangledNames(
@@ -275,26 +287,14 @@ class String {
   @patch
   factory String.fromCharCodes(Iterable<int> charCodes,
                                [int start = 0, int end]) {
-    // If possible, recognize typed lists too.
-    if (charCodes is! JSArray) {
-      return _stringFromIterable(charCodes, start, end);
-    }
 
-    List list = charCodes;
-    int len = list.length;
-    if (start < 0 || start > len) {
-      throw new RangeError.range(start, 0, len);
+    if (charCodes is JSArray) {
+      return _stringFromJSArray(charCodes, start, end);
     }
-    if (end == null) {
-      end = len;
-    } else if (end < start || end > len) {
-      throw new RangeError.range(end, start, len);
+    if (charCodes is NativeUint8List) {
+      return _stringFromUint8List(charCodes, start, end);
     }
-
-    if (start > 0 || end < len) {
-      list = list.sublist(start, end);
-    }
-    return Primitives.stringFromCharCodes(list);
+    return _stringFromIterable(charCodes, start, end);
   }
 
   @patch
@@ -306,6 +306,34 @@ class String {
   factory String.fromEnvironment(String name, {String defaultValue}) {
     throw new UnsupportedError(
         'String.fromEnvironment can only be used as a const constructor');
+  }
+
+  static String _stringFromJSArray(List list, int start, int endOrNull) {
+    int len = list.length;
+    int end = _checkBounds(len, start, endOrNull);
+    if (start > 0 || end < len) {
+      list = list.sublist(start, end);
+    }
+    return Primitives.stringFromCharCodes(list);
+  }
+
+  static String _stringFromUint8List(
+      NativeUint8List charCodes, int start, int endOrNull) {
+    int len = charCodes.length;
+    int end = _checkBounds(len, start, endOrNull);
+    return Primitives.stringFromNativeUint8List(charCodes, start, end);
+  }
+
+  static int _checkBounds(int len, int start, int end) {
+    if (start < 0 || start > len) {
+      throw new RangeError.range(start, 0, len);
+    }
+    if (end == null) {
+      end = len;
+    } else if (end < start || end > len) {
+      throw new RangeError.range(end, start, len);
+    }
+    return end;
   }
 
   static String _stringFromIterable(Iterable<int> charCodes,

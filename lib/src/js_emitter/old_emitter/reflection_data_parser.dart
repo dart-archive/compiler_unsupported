@@ -18,12 +18,12 @@ const bool VALIDATE_DATA = false;
 String get parseReflectionDataName => 'parseReflectionData';
 
 jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
-                                         JavaScriptBackend backend) {
+                                         JavaScriptBackend backend,
+                                         bool needsNativeSupport) {
   Namer namer = backend.namer;
   Compiler compiler = backend.compiler;
   CodeEmitterTask emitter = backend.emitter;
 
-  String metadataField = '"${namer.metadataField}"';
   String reflectableField = namer.reflectableField;
   String reflectionInfoField = namer.reflectionInfoField;
   String reflectionNameField = namer.reflectionNameField;
@@ -57,19 +57,18 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
   function processClassData(cls, descriptor, processedClasses) {
     var newDesc = {};
     var previousProperty;
-    for (var property in descriptor) {
-      if (!hasOwnProperty.call(descriptor, property)) continue;
+    var properties = Object.keys(descriptor);
+    for (var i = 0; i < properties.length; i++) {
+      var property = properties[i];
       var firstChar = property.substring(0, 1);
       if (property === "static") {
-        processStatics(#embeddedStatics[cls] = descriptor[property], 
+        processStatics(#embeddedStatics[cls] = descriptor[property],
                        processedClasses);
       } else if (firstChar === "+") {
         mangledNames[previousProperty] = property.substring(1);
         var flag = descriptor[property];
         if (flag > 0)
           descriptor[previousProperty].$reflectableField = flag;
-      } else if (firstChar === "@" && property !== "@") {
-        newDesc[property.substring(1)][$metadataField] = descriptor[property];
       } else if (firstChar === "*") {
         newDesc[previousProperty].$defaultValuesField = descriptor[property];
         var optionalMethods = newDesc.$methodsWithOptionalArgumentsField;
@@ -137,8 +136,9 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
   // TODO(zarah): Remove empty else branches in output when if(#hole) is false.
   jsAst.Statement processStatics = js.statement('''
     function processStatics(descriptor, processedClasses) {
-      for (var property in descriptor) {
-        if (!hasOwnProperty.call(descriptor, property)) continue;
+      var properties = Object.keys(descriptor);
+      for (var i = 0; i < properties.length; i++) {
+        var property = properties[i];
         if (property === "${namer.classDescriptorProperty}") continue;
         var element = descriptor[property];
         var firstChar = property.substring(0, 1);
@@ -150,9 +150,6 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
             descriptor[previousProperty].$reflectableField = flag;
           if (element && element.length)
             #typeInformation[previousProperty] = element;
-        } else if (firstChar === "@") {
-          property = property.substring(1);
-          ${namer.currentIsolate}[property][$metadataField] = element;
         } else if (firstChar === "*") {
           globalObject[previousProperty].$defaultValuesField = element;
           var optionalMethods = descriptor.$methodsWithOptionalArgumentsField;
@@ -165,7 +162,7 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
           functions.push(property);
           #globalFunctions[property] = element;
         } else if (element.constructor === Array) {
-          if (#needsArrayInitializerSupport) {
+          if (#needsStructuredMemberInfo) {
             addStubs(globalObject, element, property,
                      true, descriptor, functions);
           }
@@ -181,7 +178,7 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
 ''', {'typeInformation': typeInformationAccess,
       'globalFunctions': globalFunctionsAccess,
       'hasClasses': oldEmitter.needsClassSupport,
-      'needsArrayInitializerSupport': oldEmitter.needsArrayInitializerSupport});
+      'needsStructuredMemberInfo': oldEmitter.needsStructuredMemberInfo});
 
 
   /**
@@ -241,7 +238,10 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
       if (getterStubName) functions.push(getterStubName);
       f.\$stubName = getterStubName;
       f.\$callName = null;
-      if (isIntercepted) #interceptedNames[getterStubName] = true;
+      // Update the interceptedNames map (which only exists if `invokeOn` was
+      // enabled).
+      if (#enabledInvokeOn)
+        if (isIntercepted) #interceptedNames[getterStubName] = 1;
     }
 
     if (#usesMangledNames) {
@@ -271,7 +271,8 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
       }
     }
   }
-''', {'globalFunctions' : globalFunctionsAccess,
+''', {'globalFunctions': globalFunctionsAccess,
+      'enabledInvokeOn': compiler.enabledInvokeOn,
       'interceptedNames': interceptedNamesAccess,
       'usesMangledNames':
           compiler.mirrorsLibrary != null || compiler.enabledFunctionApply,
@@ -279,6 +280,9 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
       'mangledNames': mangledNamesAccess});
 
   List<jsAst.Statement> tearOffCode = buildTearOffCode(backend);
+
+  jsAst.ObjectInitializer interceptedNamesSet =
+      oldEmitter.interceptorEmitter.generateInterceptedNamesSet();
 
   jsAst.Statement init = js.statement('''{
   var functionCounter = 0;
@@ -288,7 +292,8 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
   if (!#statics) #statics = map();
   if (!#typeInformation) #typeInformation = map(); 
   if (!#globalFunctions) #globalFunctions = map();
-  if (!#interceptedNames) #interceptedNames = map();
+  if (#enabledInvokeOn)
+    if (!#interceptedNames) #interceptedNames = #interceptedNamesSet;
   var libraries = #libraries;
   var mangledNames = #mangledNames;
   var mangledGlobalNames = #mangledGlobalNames;
@@ -340,14 +345,14 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
        'statics': staticsAccess,
        'typeInformation': typeInformationAccess,
        'globalFunctions': globalFunctionsAccess,
+       'enabledInvokeOn': compiler.enabledInvokeOn,
        'interceptedNames': interceptedNamesAccess,
+       'interceptedNamesSet': interceptedNamesSet,
        'notInCspMode': !compiler.useContentSecurityPolicy,
        'needsClassSupport': oldEmitter.needsClassSupport});
 
   jsAst.Expression allClassesAccess =
       emitter.generateEmbeddedGlobalAccess(embeddedNames.ALL_CLASSES);
-
-  String specProperty = '"${namer.nativeSpecProperty}"';  // "%"
 
   // Class descriptions are collected in a JS object.
   // 'finishClasses' takes all collected descriptions and sets up
@@ -370,7 +375,7 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
     var allClasses = #allClasses;
 
     if (#inCspMode) {
-      var constructors = dart_precompiled(processedClasses.collected);
+      var constructors = #precompiled(processedClasses.collected);
     }
 
     if (#notInCspMode) {
@@ -404,21 +409,24 @@ jsAst.Expression getReflectionDataParser(OldEmitter oldEmitter,
 
     #trivialNsmHandlers;
 
-    for (var cls in processedClasses.pending) finishClass(cls);
+    var properties = Object.keys(processedClasses.pending);
+    for (var i = 0; i < properties.length; i++) finishClass(properties[i]);
   }
 }''', {'allClasses': allClassesAccess,
        'debugFastObjects': DEBUG_FAST_OBJECTS,
        'isTreeShakingDisabled': backend.isTreeShakingDisabled,
-       'finishClassFunction': oldEmitter.buildFinishClass(),
+       'finishClassFunction': oldEmitter.buildFinishClass(needsNativeSupport),
        'trivialNsmHandlers': oldEmitter.buildTrivialNsmHandlers(),
        'inCspMode': compiler.useContentSecurityPolicy,
-       'notInCspMode': !compiler.useContentSecurityPolicy});
+       'notInCspMode': !compiler.useContentSecurityPolicy,
+       'precompiled': oldEmitter
+           .generateEmbeddedGlobalAccess(embeddedNames.PRECOMPILED)});
 
   List<jsAst.Statement> incrementalSupport = <jsAst.Statement>[];
   if (compiler.hasIncrementalSupport) {
     incrementalSupport.add(
         js.statement(
-            r'self.$dart_unsafe_eval.addStubs = addStubs;'));
+            '#.addStubs = addStubs;', [namer.accessIncrementalHelper]));
   }
 
   return js('''
@@ -431,7 +439,7 @@ function $parseReflectionDataName(reflectionData) {
     #processClassData;
   }
   #processStatics;
-  if (#needsArrayInitializerSupport) {
+  if (#needsStructuredMemberInfo) {
     #addStubs;
     #tearOffCode;
   }
@@ -448,92 +456,7 @@ function $parseReflectionDataName(reflectionData) {
       'init': init,
       'finishClasses': finishClasses,
       'needsClassSupport': oldEmitter.needsClassSupport,
-      'needsArrayInitializerSupport': oldEmitter.needsArrayInitializerSupport});
-}
-
-
-List<jsAst.Statement> buildTearOffCode(JavaScriptBackend backend) {
-  Namer namer = backend.namer;
-  Compiler compiler = backend.compiler;
-
-  Element closureFromTearOff = backend.findHelper('closureFromTearOff');
-  String tearOffAccessText;
-  jsAst.Expression tearOffAccessExpression;
-  String tearOffGlobalObjectName;
-  String tearOffGlobalObject;
-  if (closureFromTearOff != null) {
-    // We need both the AST that references [closureFromTearOff] and a string
-    // for the NoCsp version that constructs a function.
-    tearOffAccessExpression =
-        backend.emitter.staticFunctionAccess(closureFromTearOff);
-    tearOffAccessText =
-        jsAst.prettyPrint(tearOffAccessExpression, compiler).getText();
-    tearOffGlobalObjectName = tearOffGlobalObject =
-        namer.globalObjectFor(closureFromTearOff);
-  } else {
-    // Default values for mocked-up test libraries.
-    tearOffAccessText =
-        r'''function() { throw 'Helper \'closureFromTearOff\' missing.' }''';
-    tearOffAccessExpression = js(tearOffAccessText);
-    tearOffGlobalObjectName = 'MissingHelperFunction';
-    tearOffGlobalObject = '($tearOffAccessText())';
-  }
-
-  jsAst.Statement tearOffGetter;
-  if (!compiler.useContentSecurityPolicy) {
-    // This template is uncached because it is constructed from code fragments
-    // that can change from compilation to compilation.  Some of these could be
-    // avoided, except for the string literals that contain the compiled access
-    // path to 'closureFromTearOff'.
-    tearOffGetter = js.uncachedStatementTemplate('''
-        function tearOffGetter(funcs, reflectionInfo, name, isIntercepted) {
-          return isIntercepted
-              ? new Function("funcs", "reflectionInfo", "name",
-                             "$tearOffGlobalObjectName", "c",
-                  "return function tearOff_" + name + (functionCounter++)+ "(x) {" +
-                    "if (c === null) c = $tearOffAccessText(" +
-                        "this, funcs, reflectionInfo, false, [x], name);" +
-                    "return new c(this, funcs[0], x, name);" +
-                  "}")(funcs, reflectionInfo, name, $tearOffGlobalObject, null)
-              : new Function("funcs", "reflectionInfo", "name",
-                             "$tearOffGlobalObjectName", "c",
-                  "return function tearOff_" + name + (functionCounter++)+ "() {" +
-                    "if (c === null) c = $tearOffAccessText(" +
-                        "this, funcs, reflectionInfo, false, [], name);" +
-                    "return new c(this, funcs[0], null, name);" +
-                  "}")(funcs, reflectionInfo, name, $tearOffGlobalObject, null);
-        }''').instantiate([]);
-  } else {
-    tearOffGetter = js.statement('''
-        function tearOffGetter(funcs, reflectionInfo, name, isIntercepted) {
-          var cache = null;
-          return isIntercepted
-              ? function(x) {
-                  if (cache === null) cache = #(
-                      this, funcs, reflectionInfo, false, [x], name);
-                  return new cache(this, funcs[0], x, name);
-                }
-              : function() {
-                  if (cache === null) cache = #(
-                      this, funcs, reflectionInfo, false, [], name);
-                  return new cache(this, funcs[0], null, name);
-                };
-        }''', [tearOffAccessExpression, tearOffAccessExpression]);
-  }
-
-  jsAst.Statement tearOff = js.statement('''
-    function tearOff(funcs, reflectionInfo, isStatic, name, isIntercepted) {
-      var cache;
-      return isStatic
-          ? function() {
-              if (cache === void 0) cache = #tearOff(
-                  this, funcs, reflectionInfo, true, [], name).prototype;
-              return cache;
-            }
-          : tearOffGetter(funcs, reflectionInfo, name, isIntercepted);
-    }''',  {'tearOff': tearOffAccessExpression});
-
-  return <jsAst.Statement>[tearOffGetter, tearOff];
+      'needsStructuredMemberInfo': oldEmitter.needsStructuredMemberInfo});
 }
 
 String readString(String array, String index) {

@@ -53,6 +53,7 @@ class TypeMaskSystem implements TypeSystem<TypeMask> {
   TypeMask get listType => inferrer.listType;
   TypeMask get mapType => inferrer.mapType;
 
+  // TODO(karlklose): remove compiler here.
   TypeMaskSystem(dart2js.Compiler compiler)
     : inferrer = compiler.typesTask,
       classWorld = compiler.world;
@@ -92,8 +93,6 @@ class TypeMaskSystem implements TypeSystem<TypeMask> {
  * by Wegman, Zadeck.
  */
 class TypePropagator<T> extends PassMixin {
-  // TODO(karlklose): remove reference to _compiler. It is currently used to
-  // compute [TypeMask]s.
   final types.DartTypes _dartTypes;
 
   // The constant system is used for evaluation of expressions with constant
@@ -102,7 +101,6 @@ class TypePropagator<T> extends PassMixin {
   final TypeSystem _typeSystem;
   final dart2js.InternalErrorFunction _internalError;
   final Map<Node, _AbstractValue> _types;
-
 
   TypePropagator(this._dartTypes,
                  this._constantSystem,
@@ -307,42 +305,43 @@ class _TypePropagationVisitor<T> extends Visitor {
   final Set<Definition> defWorkset = new Set<Definition>();
 
   final dart2js.ConstantSystem constantSystem;
-  final TypeSystem typeSystem;
+  final TypeSystem<T> typeSystem;
   final dart2js.InternalErrorFunction internalError;
   final types.DartTypes _dartTypes;
 
-  _AbstractValue unknownDynamic;
+  _AbstractValue<T> unknownDynamic;
 
-  _AbstractValue unknown([T t]) {
+  _AbstractValue<T> unknown([T t]) {
     if (t == null) {
       return unknownDynamic;
     } else {
-      return new _AbstractValue.unknown(t);
+      return new _AbstractValue<T>.unknown(t);
     }
   }
 
-  _AbstractValue nonConst([T type]) {
+  _AbstractValue<T> nonConst([T type]) {
     if (type == null) {
       type = typeSystem.dynamicType;
     }
-    return new _AbstractValue.nonConst(type);
+    return new _AbstractValue<T>.nonConst(type);
   }
 
-  _AbstractValue constantValue(ConstantValue constant, T type) {
-    return new _AbstractValue(constant, type);
+  _AbstractValue<T> constantValue(ConstantValue constant, T type) {
+    return new _AbstractValue<T>(constant, type);
   }
 
   // Stores the current lattice value for nodes. Note that it contains not only
   // definitions as keys, but also expressions such as method invokes.
   // Access through [getValue] and [setValue].
-  final Map<Node, _AbstractValue> values;
+  final Map<Node, _AbstractValue<T>> values;
 
   _TypePropagationVisitor(this.constantSystem,
                           TypeSystem typeSystem,
                           this.values,
                           this.internalError,
                           this._dartTypes)
-    : this.unknownDynamic = new _AbstractValue.unknown(typeSystem.dynamicType),
+    : this.unknownDynamic =
+          new _AbstractValue<T>.unknown(typeSystem.dynamicType),
       this.typeSystem = typeSystem;
 
   void analyze(ExecutableDefinition root) {
@@ -387,17 +386,17 @@ class _TypePropagationVisitor<T> extends Visitor {
   /// Returns the lattice value corresponding to [node], defaulting to unknown.
   ///
   /// Never returns null.
-  _AbstractValue getValue(Node node) {
-    _AbstractValue value = values[node];
+  _AbstractValue<T> getValue(Node node) {
+    _AbstractValue<T> value = values[node];
     return (value == null) ? unknown() : value;
   }
 
   /// Joins the passed lattice [updateValue] to the current value of [node],
   /// and adds it to the definition work set if it has changed and [node] is
   /// a definition.
-  void setValue(Node node, _AbstractValue updateValue) {
-    _AbstractValue oldValue = getValue(node);
-    _AbstractValue newValue = updateValue.join(oldValue, typeSystem);
+  void setValue(Node node, _AbstractValue<T> updateValue) {
+    _AbstractValue<T> oldValue = getValue(node);
+    _AbstractValue<T> newValue = updateValue.join(oldValue, typeSystem);
     if (oldValue == newValue) {
       return;
     }
@@ -415,7 +414,8 @@ class _TypePropagationVisitor<T> extends Visitor {
 
   void visitNode(Node node) {
     internalError(NO_LOCATION_SPANNABLE,
-        "_TypePropagationVisitor is stale, add missing visit overrides");
+        "_TypePropagationVisitor is stale,"
+        " add missing visit overrides ($node)");
   }
 
   void visitRunnableBody(RunnableBody node) {
@@ -445,6 +445,25 @@ class _TypePropagationVisitor<T> extends Visitor {
     setReachable(node.body);
   }
 
+  void visitLetHandler(LetHandler node) {
+    setReachable(node.body);
+    // The handler is assumed to be reachable (we could instead treat it as
+    // unreachable unless we find something reachable that might throw in the
+    // body --- it's not clear if we want to do that here or in some other
+    // pass).  The handler parameters are assumed to be unknown.
+    //
+    // TODO(kmillikin): we should set the type of the exception and stack
+    // trace here.  The way we do that depends on how we handle 'on T' catch
+    // clauses.
+    setReachable(node.handler);
+    node.handler.parameters.forEach((Parameter p) => setValue(p, nonConst()));
+  }
+
+  void visitLetMutable(LetMutable node) {
+    setValue(node.variable, getValue(node.value.definition));
+    setReachable(node.body);
+  }
+
   void visitInvokeStatic(InvokeStatic node) {
     Continuation cont = node.continuation.definition;
     setReachable(cont);
@@ -466,7 +485,7 @@ class _TypePropagationVisitor<T> extends Visitor {
     // continuation. Note that this is effectively a phi node in SSA terms.
     for (int i = 0; i < node.arguments.length; i++) {
       Definition def = node.arguments[i].definition;
-      _AbstractValue cell = getValue(def);
+      _AbstractValue<T> cell = getValue(def);
       setValue(cont.parameters[i], cell);
     }
   }
@@ -477,13 +496,13 @@ class _TypePropagationVisitor<T> extends Visitor {
 
     /// Sets the value of both the current node and the target continuation
     /// parameter.
-    void setValues(_AbstractValue updateValue) {
+    void setValues(_AbstractValue<T> updateValue) {
       setValue(node, updateValue);
       Parameter returnValue = cont.parameters[0];
       setValue(returnValue, updateValue);
     }
 
-    _AbstractValue lhs = getValue(node.receiver.definition);
+    _AbstractValue<T> lhs = getValue(node.receiver.definition);
     if (lhs.isUnknown) {
       // This may seem like a missed opportunity for evaluating short-circuiting
       // boolean operations; we are currently skipping these intentionally since
@@ -517,7 +536,7 @@ class _TypePropagationVisitor<T> extends Visitor {
     } else if (node.selector.argumentCount == 1) {
       // Binary operator.
 
-      _AbstractValue rhs = getValue(node.arguments[0].definition);
+      _AbstractValue<T> rhs = getValue(node.arguments[0].definition);
       if (!rhs.isConstant) {
         setValues(rhs);
         return;
@@ -535,11 +554,11 @@ class _TypePropagationVisitor<T> extends Visitor {
       setValues(nonConst());
     } else {
       T type = typeSystem.typeOf(result);
-      setValues(new _AbstractValue(result, type));
+      setValues(new _AbstractValue<T>(result, type));
     }
    }
 
-  void visitInvokeSuperMethod(InvokeSuperMethod node) {
+  void visitInvokeMethodDirectly(InvokeMethodDirectly node) {
     Continuation cont = node.continuation.definition;
     setReachable(cont);
 
@@ -562,7 +581,7 @@ class _TypePropagationVisitor<T> extends Visitor {
     Continuation cont = node.continuation.definition;
     setReachable(cont);
 
-    void setValues(_AbstractValue updateValue) {
+    void setValues(_AbstractValue<T> updateValue) {
       setValue(node, updateValue);
       Parameter returnValue = cont.parameters[0];
       setValue(returnValue, updateValue);
@@ -589,7 +608,7 @@ class _TypePropagationVisitor<T> extends Visitor {
       });
       LiteralDartString dartString = new LiteralDartString(allStrings.join());
       ConstantValue constant = new StringConstantValue(dartString);
-      setValues(new _AbstractValue(constant, type));
+      setValues(new _AbstractValue<T>(constant, type));
     } else {
       setValues(nonConst(type));
     }
@@ -597,7 +616,7 @@ class _TypePropagationVisitor<T> extends Visitor {
 
   void visitBranch(Branch node) {
     IsTrue isTrue = node.condition;
-    _AbstractValue conditionCell = getValue(isTrue.value.definition);
+    _AbstractValue<T> conditionCell = getValue(isTrue.value.definition);
 
     if (conditionCell.isUnknown) {
       return;  // And come back later.
@@ -624,7 +643,7 @@ class _TypePropagationVisitor<T> extends Visitor {
     Continuation cont = node.continuation.definition;
     setReachable(cont);
 
-    void setValues(_AbstractValue updateValue) {
+    void setValues(_AbstractValue<T> updateValue) {
       setValue(node, updateValue);
       Parameter returnValue = cont.parameters[0];
       setValue(returnValue, updateValue);
@@ -635,7 +654,7 @@ class _TypePropagationVisitor<T> extends Visitor {
       setValues(nonConst());
     }
 
-    _AbstractValue cell = getValue(node.receiver.definition);
+    _AbstractValue<T> cell = getValue(node.receiver.definition);
     if (cell.isUnknown) {
       return;  // And come back later.
     } else if (cell.isNonConst) {
@@ -649,7 +668,7 @@ class _TypePropagationVisitor<T> extends Visitor {
       types.DartType constantType = constant.getType(_dartTypes.coreTypes);
 
       T type = typeSystem.boolType;
-      _AbstractValue result;
+      _AbstractValue<T> result;
       if (constant.isNull &&
           checkedType != _dartTypes.coreTypes.nullType &&
           checkedType != _dartTypes.coreTypes.objectType) {
@@ -667,7 +686,8 @@ class _TypePropagationVisitor<T> extends Visitor {
     }
   }
 
-  void visitSetClosureVariable(SetClosureVariable node) {
+  void visitSetMutableVariable(SetMutableVariable node) {
+    setValue(node.variable.definition, getValue(node.value.definition));
     setReachable(node.body);
   }
 
@@ -710,11 +730,28 @@ class _TypePropagationVisitor<T> extends Visitor {
     setValue(node, constantValue(constant, typeSystem.functionType));
   }
 
-  void visitGetClosureVariable(GetClosureVariable node) {
-    setValue(node, nonConst());
+  void visitGetMutableVariable(GetMutableVariable node) {
+    setValue(node, getValue(node.variable.definition));
   }
 
-  void visitClosureVariable(ClosureVariable node) {
+  void visitMutableVariable(MutableVariable node) {
+    // [MutableVariable]s are bound either as parameters to
+    // [FunctionDefinition]s, by [LetMutable], or by [DeclareFunction].
+    if (node.parent is FunctionDefinition) {
+      // Just like immutable parameters, the values of mutable parameters are
+      // never constant.
+      // TODO(karlklose): remove reference to the element model.
+      Entity source = node.hint;
+      T type = (source is ParameterElement)
+          ? typeSystem.getParameterType(source)
+          : typeSystem.dynamicType;
+      setValue(node, nonConst(type));
+    } else if (node.parent is LetMutable || node.parent is DeclareFunction) {
+      // Mutable values bound by LetMutable or DeclareFunction could have
+      // known values.
+    } else {
+      internalError(node.hint, "Unexpected parent of MutableVariable");
+    }
   }
 
   void visitParameter(Parameter node) {
@@ -723,24 +760,18 @@ class _TypePropagationVisitor<T> extends Visitor {
     T type = (source is ParameterElement) ? typeSystem.getParameterType(source)
         : typeSystem.dynamicType;
     if (node.parent is FunctionDefinition) {
-      // Functions may escape and thus their parameters must be initialized to
-      // NonConst.
+      // Functions may escape and thus their parameters must be non-constant.
       setValue(node, nonConst(type));
     } else if (node.parent is Continuation) {
-      // Continuations on the other hand are local, and parameters are
-      // initialized to Unknown.
-      setValue(node, unknown());
+      // Continuations on the other hand are local, and parameters can have
+      // some other abstract value than non-constant.
     } else {
       internalError(node.hint, "Unexpected parent of Parameter");
     }
   }
 
   void visitContinuation(Continuation node) {
-    node.parameters.forEach((Parameter p) {
-      // TODO(karlklose): join parameter types from use sites.
-      setValue(p, unknown());
-      defWorkset.add(p);
-    });
+    node.parameters.forEach(visit);
 
     if (node.body != null) {
       setReachable(node.body);
@@ -757,8 +788,8 @@ class _TypePropagationVisitor<T> extends Visitor {
   // JavaScript specific nodes.
 
   void visitIdentical(Identical node) {
-    _AbstractValue leftConst = getValue(node.left.definition);
-    _AbstractValue rightConst = getValue(node.right.definition);
+    _AbstractValue<T> leftConst = getValue(node.left.definition);
+    _AbstractValue<T> rightConst = getValue(node.right.definition);
     ConstantValue leftValue = leftConst.constant;
     ConstantValue rightValue = rightConst.constant;
     if (leftConst.isUnknown || rightConst.isUnknown) {
@@ -779,12 +810,28 @@ class _TypePropagationVisitor<T> extends Visitor {
       PrimitiveConstantValue right = rightValue;
       ConstantValue result =
           new BoolConstantValue(left.primitiveValue == right.primitiveValue);
-      setValue(node, new _AbstractValue(result, typeSystem.boolType));
+      setValue(node, new _AbstractValue<T>(result, typeSystem.boolType));
     }
   }
 
   void visitInterceptor(Interceptor node) {
     setReachable(node.input.definition);
+  }
+
+  void visitGetField(GetField node) {
+    setValue(node, nonConst());
+  }
+
+  void visitSetField(SetField node) {
+    setReachable(node.body);
+  }
+
+  void visitCreateBox(CreateBox node) {
+    setValue(node, nonConst());
+  }
+
+  void visitCreateInstance(CreateInstance node) {
+    setValue(node, nonConst());
   }
 }
 

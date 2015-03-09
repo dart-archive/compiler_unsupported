@@ -12,7 +12,7 @@ import 'dart:io'
          stdin, stderr;
 
 import '../compiler.dart' as api;
-import 'source_file.dart';
+import 'io/source_file.dart';
 import 'source_file_provider.dart';
 import 'filenames.dart';
 import 'util/uri_extras.dart';
@@ -114,7 +114,6 @@ Future<api.CompilationResult> compile(List<String> argv) {
   bool stripArgumentSet = false;
   bool analyzeOnly = false;
   bool analyzeAll = false;
-  bool enableAsyncAwait = false;
   bool allowNativeExtensions = false;
   bool trustTypeAnnotations = false;
   bool trustPrimitives = false;
@@ -170,8 +169,8 @@ Future<api.CompilationResult> compile(List<String> argv) {
     passThrough(argument);
   }
 
-  String getDepsOutput(Map<String, SourceFile> sourceFiles) {
-    var filenames = new List.from(sourceFiles.keys);
+  String getDepsOutput(Map<Uri, SourceFile> sourceFiles) {
+    var filenames = sourceFiles.keys.map((uri) => '$uri').toList();
     filenames.sort();
     return filenames.join("\n");
   }
@@ -189,11 +188,6 @@ Future<api.CompilationResult> compile(List<String> argv) {
 
   setAnalyzeAll(String argument) {
     analyzeAll = true;
-    passThrough(argument);
-  }
-
-  setEnableAsync(String argument) {
-    enableAsyncAwait = true;
     passThrough(argument);
   }
 
@@ -333,18 +327,30 @@ Future<api.CompilationResult> compile(List<String> argv) {
     new OptionHandler('--categories=.*', setCategories),
     new OptionHandler('--disable-type-inference', implyCompilation),
     new OptionHandler('--terse', passThrough),
+    new OptionHandler('--deferred-map=.+', implyCompilation),
     new OptionHandler('--dump-info', implyCompilation),
     new OptionHandler('--disallow-unsafe-eval',
                       (_) => hasDisallowUnsafeEval = true),
     new OptionHandler('--show-package-warnings', passThrough),
     new OptionHandler('--csp', passThrough),
     new OptionHandler('--enable-experimental-mirrors', passThrough),
-    new OptionHandler('--enable-async', setEnableAsync),
-    new OptionHandler('--enable-enum', passThrough),
+    new OptionHandler('--enable-async', (_) {
+      diagnosticHandler.info(
+          "Option '--enable-async' is no longer needed. "
+          "Async-await is supported by default.",
+          api.Diagnostic.HINT);
+    }),
+    new OptionHandler('--enable-enum', (_) {
+      diagnosticHandler.info(
+          "Option '--enable-enum' is no longer needed. "
+          "Enums are supported by default.",
+          api.Diagnostic.HINT);
+    }),
     new OptionHandler('--allow-native-extensions', setAllowNativeExtensions),
-    new OptionHandler('-D.+=.*', addInEnvironment),
+    new OptionHandler('--generate-code-with-compile-time-errors', passThrough),
 
-    // The following two options must come last.
+    // The following three options must come last.
+    new OptionHandler('-D.+=.*', addInEnvironment),
     new OptionHandler('-.*', (String argument) {
       helpAndFail("Unknown option '$argument'.");
     }),
@@ -403,10 +409,6 @@ Future<api.CompilationResult> compile(List<String> argv) {
   }
   if (analyzeAll) analyzeOnly = true;
   if (!analyzeOnly) {
-    if (enableAsyncAwait) {
-      helpAndFail("Option '--enable-async' is currently only supported in "
-                  "combination with the '--analyze-only' option.");
-    }
     if (allowNativeExtensions) {
       helpAndFail("Option '--allow-native-extensions' is only supported in "
                   "combination with the '--analyze-only' option.");
@@ -586,9 +588,6 @@ be removed in a future version:
     Do not generate a call to main if either of the following
     libraries are used: dart:dom, dart:html dart:io.
 
-  --enable-concrete-type-inference
-    Enable experimental concrete type inference.
-
   --disable-native-live-type-analysis
     Disable the optimization that removes unused native types from dart:html
     and related libraries.
@@ -599,11 +598,18 @@ be removed in a future version:
     unsupported category, for example, --categories=help.  To enable
     all categories, use --categories=all.
 
+  --deferred-map=<file>
+    Generates a json file with a mapping from each deferred import to a list of
+    the part.js files that will be loaded.
+
   --dump-info
     Generates an out.info.json file with information about the generated code.
     You can inspect the generated file with the viewer at:
     https://dart-lang.github.io/dump-info-visualizer/
 
+  --generate-code-with-compile-time-errors
+    Generates output even if the program contains compile-time errors. Use the
+    exit code to determine if compilation failed.
 '''.trim());
 }
 
@@ -645,6 +651,9 @@ var compileFunc = api.compile;
 
 Future<api.CompilationResult> internalMain(List<String> arguments) {
   Future onError(exception, trace) {
+    // If we are already trying to exit, just continue exiting.
+    if (exception == _EXIT_SIGNAL) throw exception;
+
     try {
       print('The compiler crashed: $exception');
     } catch (ignored) {
@@ -668,7 +677,11 @@ Future<api.CompilationResult> internalMain(List<String> arguments) {
   }
 }
 
-const _EXIT_SIGNAL = const Object();
+class _ExitSignal {
+  const _ExitSignal();
+}
+
+const _EXIT_SIGNAL = const _ExitSignal();
 
 void batchMain(List<String> batchArguments) {
   int exitCode;

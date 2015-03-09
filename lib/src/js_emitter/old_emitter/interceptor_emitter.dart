@@ -13,7 +13,7 @@ class InterceptorEmitter extends CodeEmitterHelper {
     }
   }
 
-  void emitGetInterceptorMethod(CodeBuffer buffer,
+  void emitGetInterceptorMethod(CodeOutput output,
                                 String key,
                                 Set<ClassElement> classes) {
     InterceptorStubGenerator stubGenerator =
@@ -21,27 +21,27 @@ class InterceptorEmitter extends CodeEmitterHelper {
     jsAst.Expression function =
         stubGenerator.generateGetInterceptorMethod(classes);
 
-    buffer.write(jsAst.prettyPrint(
+    output.addBuffer(jsAst.prettyPrint(
         js('${namer.globalObjectFor(backend.interceptorsLibrary)}.# = #',
            [key, function]),
         compiler));
-    buffer.write(N);
+    output.add(N);
   }
 
   /**
    * Emit all versions of the [:getInterceptor:] method.
    */
-  void emitGetInterceptorMethods(CodeBuffer buffer) {
-    emitter.addComment('getInterceptor methods', buffer);
+  void emitGetInterceptorMethods(CodeOutput output) {
+    emitter.addComment('getInterceptor methods', output);
     Map<String, Set<ClassElement>> specializedGetInterceptors =
         backend.specializedGetInterceptors;
     for (String name in specializedGetInterceptors.keys.toList()..sort()) {
       Set<ClassElement> classes = specializedGetInterceptors[name];
-      emitGetInterceptorMethod(buffer, name, classes);
+      emitGetInterceptorMethod(output, name, classes);
     }
   }
 
-  void emitOneShotInterceptors(CodeBuffer buffer) {
+  void emitOneShotInterceptors(CodeOutput output) {
     List<String> names = backend.oneShotInterceptors.keys.toList();
     names.sort();
 
@@ -54,102 +54,48 @@ class InterceptorEmitter extends CodeEmitterHelper {
       jsAst.Expression assignment =
           js('${globalObject}.# = #', [name, function]);
 
-      buffer.write(jsAst.prettyPrint(assignment, compiler));
-      buffer.write(N);
+      output.addBuffer(jsAst.prettyPrint(assignment, compiler));
+      output.add(N);
     }
   }
 
   /**
    * If [JSInvocationMirror._invokeOn] has been compiled, emit all the
    * possible selector names that are intercepted into the
-   * [interceptedNames] top-level variable. The implementation of
+   * [interceptedNames] embedded global. The implementation of
    * [_invokeOn] will use it to determine whether it should call the
    * method with an extra parameter.
    */
-  void emitInterceptedNames(CodeBuffer buffer) {
-    // TODO(ahe): We should not generate the list of intercepted names at
-    // compile time, it can be generated automatically at runtime given
-    // subclasses of Interceptor (which can easily be identified).
-    if (!compiler.enabledInvokeOn) return;
+  jsAst.ObjectInitializer generateInterceptedNamesSet() {
+    // We could also generate the list of intercepted names at
+    // runtime, by running through the subclasses of Interceptor
+    // (which can easily be identified).
+    if (!compiler.enabledInvokeOn) return null;
 
-    // TODO(ahe): We should roll this into
-    // [emitStaticNonFinalFieldInitializations].
-    String name = backend.namer.getNameOfGlobalField(backend.interceptedNames);
-
-    int index = 0;
-    var invocationNames = interceptorInvocationNames.toList()..sort();
-    List<jsAst.Expression> elements = invocationNames.map(js.string).toList();
-    jsAst.ArrayInitializer array =
-        new jsAst.ArrayInitializer(elements);
-
-    jsAst.Expression assignment =
-        js('${emitter.isolateProperties}.# = #', [name, array]);
-
-    buffer.write(jsAst.prettyPrint(assignment, compiler));
-    buffer.write(N);
+    List<String> invocationNames = interceptorInvocationNames.toList()..sort();
+    List<jsAst.Property> properties =
+        new List<jsAst.Property>(invocationNames.length);
+    for (int i = 0; i < invocationNames.length; i++) {
+      String name = invocationNames[i];
+      properties[i] = new jsAst.Property(js.string(name), js.number(1));
+    }
+    return new jsAst.ObjectInitializer(properties, isOneLiner: true);
   }
 
   /**
-   * Emit initializer for [mapTypeToInterceptor] data structure used by
-   * [findInterceptorForType].  See declaration of [mapTypeToInterceptor] in
+   * Emit initializer for `typeToInterceptorMap` data structure used by
+   * `findInterceptorForType`.  See declaration of `typeToInterceptor` in
    * `interceptors.dart`.
    */
-  void emitMapTypeToInterceptor(CodeBuffer buffer) {
-    // TODO(sra): Perhaps inject a constant instead?
-    CustomElementsAnalysis analysis = backend.customElementsAnalysis;
-    if (!analysis.needsTable) return;
+  void emitTypeToInterceptorMap(Program program, CodeOutput output) {
+    jsAst.Expression array = program.typeToInterceptorMap;
+    if (array == null) return;
 
-    List<jsAst.Expression> elements = <jsAst.Expression>[];
-    JavaScriptConstantCompiler handler = backend.constants;
-    List<ConstantValue> constants =
-        handler.getConstantsForEmission(emitter.compareConstants);
-    for (ConstantValue constant in constants) {
-      if (constant is TypeConstantValue) {
-        TypeConstantValue typeConstant = constant;
-        Element element = typeConstant.representedType.element;
-        if (element is ClassElement) {
-          ClassElement classElement = element;
-          if (!analysis.needsClass(classElement)) continue;
+    jsAst.Expression typeToInterceptorMap = emitter
+        .generateEmbeddedGlobalAccess(embeddedNames.TYPE_TO_INTERCEPTOR_MAP);
+    jsAst.Expression assignment = js('# = #', [typeToInterceptorMap, array]);
 
-          elements.add(emitter.constantReference(constant));
-          elements.add(backend.emitter.interceptorClassAccess(classElement));
-
-          // Create JavaScript Object map for by-name lookup of generative
-          // constructors.  For example, the class A has three generative
-          // constructors
-          //
-          //     class A {
-          //       A() {}
-          //       A.foo() {}
-          //       A.bar() {}
-          //     }
-          //
-          // Which are described by the map
-          //
-          //     {"": A.A$, "foo": A.A$foo, "bar": A.A$bar}
-          //
-          // We expect most of the time the map will be a singleton.
-          var properties = [];
-          for (Element member in analysis.constructors(classElement)) {
-            properties.add(
-                new jsAst.Property(
-                    js.string(member.name),
-                    backend.emitter.staticFunctionAccess(member)));
-          }
-
-          var map = new jsAst.ObjectInitializer(properties);
-          elements.add(map);
-        }
-      }
-    }
-
-    jsAst.ArrayInitializer array = new jsAst.ArrayInitializer(elements);
-    String name =
-        backend.namer.getNameOfGlobalField(backend.mapTypeToInterceptor);
-    jsAst.Expression assignment =
-        js('${emitter.isolateProperties}.# = #', [name, array]);
-
-    buffer.write(jsAst.prettyPrint(assignment, compiler));
-    buffer.write(N);
+    output.addBuffer(jsAst.prettyPrint(assignment, compiler));
+    output.add(N);
   }
 }

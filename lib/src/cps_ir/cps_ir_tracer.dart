@@ -112,9 +112,26 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
   visitLetCont(cps_ir.LetCont node) {
     if (IR_TRACE_LET_CONT) {
       String dummy = names.name(node);
-      String id = names.name(node.continuation);
-      printStmt(dummy, "LetCont $id = <$id>");
+      for (cps_ir.Continuation continuation in node.continuations) {
+        String id = names.name(continuation);
+        printStmt(dummy, "LetCont $id = <$id>");
+      }
     }
+    visit(node.body);
+  }
+
+  visitLetHandler(cps_ir.LetHandler node) {
+    if (IR_TRACE_LET_CONT) {
+      String dummy = names.name(node);
+      String id = names.name(node.handler);
+      printStmt(dummy, "LetHandler $id = <$id>");
+    }
+    visit(node.body);
+  }
+
+  visitLetMutable(cps_ir.LetMutable node) {
+    String id = names.name(node.variable);
+    printStmt(id, "${node.runtimeType} $id = ${formatReference(node.value)}");
     visit(node.body);
   }
 
@@ -136,13 +153,14 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
         "InvokeMethod $receiver $callName ($args) $kont");
   }
 
-  visitInvokeSuperMethod(cps_ir.InvokeSuperMethod node) {
+  visitInvokeMethodDirectly(cps_ir.InvokeMethodDirectly node) {
     String dummy = names.name(node);
+    String receiver = formatReference(node.receiver);
     String callName = node.selector.name;
     String args = node.arguments.map(formatReference).join(', ');
     String kont = formatReference(node.continuation);
     printStmt(dummy,
-        "InvokeSuperMethod $callName ($args) $kont");
+        "InvokeMethodDirectly $receiver $callName ($args) $kont");
   }
 
   visitInvokeConstructor(cps_ir.InvokeConstructor node) {
@@ -205,17 +223,17 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     printStmt(dummy, "Branch $condition ($trueCont, $falseCont)");
   }
 
-  visitSetClosureVariable(cps_ir.SetClosureVariable node) {
+  visitSetMutableVariable(cps_ir.SetMutableVariable node) {
     String dummy = names.name(node);
     String variable = names.name(node.variable.definition);
     String value = formatReference(node.value);
-    printStmt(dummy, 'SetClosureVariable $variable = $value');
+    printStmt(dummy, '${node.runtimeType} $variable := $value');
     visit(node.body);
   }
 
   visitDeclareFunction(cps_ir.DeclareFunction node) {
     String dummy = names.name(node);
-    String variable = names.name(node.variable.definition);
+    String variable = names.name(node.variable);
     printStmt(dummy, 'DeclareFunction $variable');
     visit(node.body);
   }
@@ -239,8 +257,8 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     return "Parameter ${names.name(node)}";
   }
 
-  visitClosureVariable(cps_ir.ClosureVariable node) {
-    return "ClosureVariable ${names.name(node)}";
+  visitMutableVariable(cps_ir.MutableVariable node) {
+    return "${node.runtimeType} ${names.name(node)}";
   }
 
   visitContinuation(cps_ir.Continuation node) {
@@ -251,6 +269,31 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     return "IsTrue(${names.name(node.value.definition)})";
   }
 
+  visitSetField(cps_ir.SetField node) {
+    String dummy = names.name(node);
+    String object = formatReference(node.object);
+    String field = node.field.name;
+    String value = formatReference(node.value);
+    printStmt(dummy, 'SetField $object.$field = $value');
+    visit(node.body);
+  }
+
+  visitGetField(cps_ir.GetField node) {
+    String object = formatReference(node.object);
+    String field = node.field.name;
+    return 'GetField($object.$field)';
+  }
+
+  visitCreateBox(cps_ir.CreateBox node) {
+    return 'CreateBox';
+  }
+
+  visitCreateInstance(cps_ir.CreateInstance node) {
+    String className = node.classElement.name;
+    String arguments = node.arguments.map(formatReference).join(', ');
+    return 'CreateInstance $className ($arguments)';
+  }
+
   visitIdentical(cps_ir.Identical node) {
     String left = formatReference(node.left);
     String right = formatReference(node.right);
@@ -258,7 +301,7 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
   }
 
   visitInterceptor(cps_ir.Interceptor node) {
-    return "Interceptor(${node.input})";
+    return "Interceptor(${formatReference(node.input)})";
   }
 
   visitThis(cps_ir.This node) {
@@ -273,9 +316,9 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     return "CreateFunction ${node.definition.element.name}";
   }
 
-  visitGetClosureVariable(cps_ir.GetClosureVariable node) {
+  visitGetMutableVariable(cps_ir.GetMutableVariable node) {
     String variable = names.name(node.variable.definition);
-    return 'GetClosureVariable $variable';
+    return '${node.runtimeType} $variable';
   }
 
   visitRunnableBody(cps_ir.RunnableBody node) {}
@@ -309,7 +352,7 @@ class Names {
     if (x is cps_ir.Parameter) return 'r';
     if (x is cps_ir.Continuation || x is cps_ir.FunctionDefinition) return 'B';
     if (x is cps_ir.Primitive) return 'v';
-    if (x is cps_ir.ClosureVariable) return 'c';
+    if (x is cps_ir.MutableVariable) return 'c';
     return 'x';
   }
 
@@ -397,7 +440,16 @@ class BlockCollector extends cps_ir.Visitor {
   }
 
   visitLetCont(cps_ir.LetCont exp) {
-    visit(exp.continuation);
+    exp.continuations.forEach(visit);
+    visit(exp.body);
+  }
+
+  visitLetHandler(cps_ir.LetHandler exp) {
+    visit(exp.handler);
+    visit(exp.body);
+  }
+
+  visitLetMutable(cps_ir.LetMutable exp) {
     visit(exp.body);
   }
 
@@ -428,7 +480,11 @@ class BlockCollector extends cps_ir.Visitor {
     addEdgeToContinuation(exp.continuation);
   }
 
-  visitSetClosureVariable(cps_ir.SetClosureVariable exp) {
+  visitSetMutableVariable(cps_ir.SetMutableVariable exp) {
+    visit(exp.body);
+  }
+
+  visitSetField(cps_ir.SetField exp) {
     visit(exp.body);
   }
 

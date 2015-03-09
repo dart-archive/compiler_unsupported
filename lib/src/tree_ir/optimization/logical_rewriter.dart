@@ -171,14 +171,19 @@ class LogicalRewriter extends Visitor<Statement, Expression> with PassMixin {
     return node;
   }
 
+  Statement visitTry(Try node) {
+    node.tryBody = visitStatement(node.tryBody);
+    node.catchBody = visitStatement(node.catchBody);
+    return node;
+  }
+
   Statement visitExpressionStatement(ExpressionStatement node) {
     node.expression = visitExpression(node.expression);
     node.next = visitStatement(node.next);
     return node;
   }
 
-
-  Expression visitVariable(Variable node) {
+  Expression visitVariableUse(VariableUse node) {
     return node;
   }
 
@@ -193,7 +198,8 @@ class LogicalRewriter extends Visitor<Statement, Expression> with PassMixin {
     return node;
   }
 
-  Expression visitInvokeSuperMethod(InvokeSuperMethod node) {
+  Expression visitInvokeMethodDirectly(InvokeMethodDirectly node) {
+    node.receiver = visitExpression(node.receiver);
     _rewriteList(node.arguments);
     return node;
   }
@@ -312,6 +318,27 @@ class LogicalRewriter extends Visitor<Statement, Expression> with PassMixin {
   Expression visitLogicalOperator(LogicalOperator node) {
     node.left = makeCondition(node.left, true);
     node.right = makeCondition(node.right, true);
+    return node;
+  }
+
+  Statement visitSetField(SetField node) {
+    node.object = visitExpression(node.object);
+    node.value = visitExpression(node.value);
+    node.next = visitStatement(node.next);
+    return node;
+  }
+
+  Expression visitGetField(GetField node) {
+    node.object = visitExpression(node.object);
+    return node;
+  }
+
+  Expression visitCreateBox(CreateBox node) {
+    return node;
+  }
+
+  Expression visitCreateInstance(CreateInstance node) {
+    _rewriteList(node.arguments);
     return node;
   }
 

@@ -17,6 +17,7 @@ class CodeEmitterTask extends CompilerTask {
   final Namer namer;
   final TypeTestRegistry typeTestRegistry;
   NativeEmitter nativeEmitter;
+  MetadataCollector metadataCollector;
   OldEmitter oldEmitter;
   Emitter emitter;
 
@@ -27,6 +28,8 @@ class CodeEmitterTask extends CompilerTask {
       new Map<OutputUnit, List<ConstantValue>>();
   final Map<OutputUnit, List<Element>> outputStaticLists =
       new Map<OutputUnit, List<Element>>();
+  final Map<OutputUnit, List<VariableElement>> outputStaticNonFinalFieldLists =
+      new Map<OutputUnit, List<VariableElement>>();
   final Map<OutputUnit, Set<LibraryElement>> outputLibraryLists =
       new Map<OutputUnit, Set<LibraryElement>>();
 
@@ -35,7 +38,7 @@ class CodeEmitterTask extends CompilerTask {
   /// This flag is updated in [computeNeededConstants].
   bool outputContainsConstantList = false;
 
-  final List<ClassElement> nativeClasses = <ClassElement>[];
+  final List<ClassElement> nativeClassesAndSubclasses = <ClassElement>[];
 
   /// Records if a type variable is read dynamically for type tests.
   final Set<TypeVariableElement> readTypeVariables =
@@ -49,12 +52,15 @@ class CodeEmitterTask extends CompilerTask {
       : super(compiler),
         this.namer = namer,
         this.typeTestRegistry = new TypeTestRegistry(compiler) {
+    nativeEmitter = new NativeEmitter(this);
     oldEmitter = new OldEmitter(compiler, namer, generateSourceMap, this);
     emitter = USE_NEW_EMITTER
-        ? new new_js_emitter.Emitter(compiler, namer)
+        ? new new_js_emitter.Emitter(compiler, namer, nativeEmitter)
         : oldEmitter;
-    nativeEmitter = new NativeEmitter(this);
+    metadataCollector = new MetadataCollector(compiler, emitter);
   }
+
+  String get name => 'Code emitter';
 
   /// Returns the closure expression of a static function.
   jsAst.Expression isolateStaticClosureAccess(FunctionElement element) {
@@ -122,7 +128,7 @@ class CodeEmitterTask extends CompilerTask {
     readTypeVariables.add(element);
   }
 
-  Set<ClassElement> interceptorsReferencedFromConstants() {
+  Set<ClassElement> computeInterceptorsReferencedFromConstants() {
     Set<ClassElement> classes = new Set<ClassElement>();
     JavaScriptConstantCompiler handler = backend.constants;
     List<ConstantValue> constants = handler.getConstantsForEmission();
@@ -157,7 +163,7 @@ class CodeEmitterTask extends CompilerTask {
     );
 
     // Add interceptors referenced by constants.
-    needed.addAll(interceptorsReferencedFromConstants());
+    needed.addAll(computeInterceptorsReferencedFromConstants());
 
     // Add unneeded interceptors to the [unneededClasses] set.
     for (ClassElement interceptor in backend.interceptedClasses) {
@@ -277,24 +283,7 @@ class CodeEmitterTask extends CompilerTask {
         .toSet();
     neededClasses.addAll(mixinClasses);
 
-    // 3. If we need noSuchMethod support, we run through all needed
-    // classes to figure out if we need the support on any native
-    // class. If so, we let the native emitter deal with it.
-    if (compiler.enabledNoSuchMethod) {
-      String noSuchMethodName = Compiler.NO_SUCH_METHOD;
-      Selector noSuchMethodSelector = compiler.noSuchMethodSelector;
-      for (ClassElement element in neededClasses) {
-        if (!element.isNative) continue;
-        Element member = element.lookupLocalMember(noSuchMethodName);
-        if (member == null) continue;
-        if (noSuchMethodSelector.applies(member, compiler.world)) {
-          nativeEmitter.handleNoSuchMethod = true;
-          break;
-        }
-      }
-    }
-
-    // 4. Find all classes needed for rti.
+    // 3. Find all classes needed for rti.
     // It is important that this is the penultimate step, at this point,
     // neededClasses must only contain classes that have been resolved and
     // codegen'd. The rtiNeededClasses may contain additional classes, but
@@ -329,20 +318,18 @@ class CodeEmitterTask extends CompilerTask {
       neededClasses.add(compiler.listClass);
     }
 
-    // 5. Finally, sort the classes.
+    // 4. Finally, sort the classes.
     List<ClassElement> sortedClasses = Elements.sortedByPosition(neededClasses);
 
     for (ClassElement element in sortedClasses) {
       if (Elements.isNativeOrExtendsNative(element) &&
           !typeTestRegistry.rtiNeededClasses.contains(element)) {
         // For now, native classes and related classes cannot be deferred.
-        nativeClasses.add(element);
-        if (!element.isNative) {
-          assert(invariant(element,
-                           !compiler.deferredLoadTask.isDeferred(element)));
-          outputClassLists.putIfAbsent(compiler.deferredLoadTask.mainOutputUnit,
-              () => new List<ClassElement>()).add(element);
-        }
+        nativeClassesAndSubclasses.add(element);
+        assert(invariant(element,
+                         !compiler.deferredLoadTask.isDeferred(element)));
+        outputClassLists.putIfAbsent(compiler.deferredLoadTask.mainOutputUnit,
+            () => new List<ClassElement>()).add(element);
       } else {
         outputClassLists.putIfAbsent(
             compiler.deferredLoadTask.outputUnitForElement(element),
@@ -360,10 +347,22 @@ class CodeEmitterTask extends CompilerTask {
         backend.generatedCode.keys.where(isStaticFunction);
 
     for (Element element in Elements.sortedByPosition(elements)) {
-      outputStaticLists.putIfAbsent(
+      List<Element> list = outputStaticLists.putIfAbsent(
           compiler.deferredLoadTask.outputUnitForElement(element),
-          () => new List<Element>())
-          .add(element);
+          () => new List<Element>());
+      list.add(element);
+    }
+  }
+
+  void computeNeededStaticNonFinalFields() {
+    JavaScriptConstantCompiler handler = backend.constants;
+    Iterable<VariableElement> staticNonFinalFields =
+        handler.getStaticNonFinalFieldsForEmission();
+    for (Element element in Elements.sortedByPosition(staticNonFinalFields)) {
+      List<VariableElement> list = outputStaticNonFinalFieldLists.putIfAbsent(
+            compiler.deferredLoadTask.outputUnitForElement(element),
+            () => new List<VariableElement>());
+      list.add(element);
     }
   }
 
@@ -387,6 +386,7 @@ class CodeEmitterTask extends CompilerTask {
     computeNeededDeclarations();
     computeNeededConstants();
     computeNeededStatics();
+    computeNeededStaticNonFinalFields();
     computeNeededLibraries();
   }
 
@@ -396,18 +396,16 @@ class CodeEmitterTask extends CompilerTask {
 
       computeAllNeededEntities();
 
-      Program program;
-      if (USE_NEW_EMITTER) {
-        program = new ProgramBuilder(compiler, namer, this).buildProgram();
-      }
-      return emitter.emitProgram(program);
+      ProgramBuilder programBuilder = new ProgramBuilder(compiler, namer, this);
+      return emitter.emitProgram(programBuilder);
     });
   }
 }
 
 abstract class Emitter {
-  /// Emits [program] and returns the size of the generated output.
-  int emitProgram(Program program);
+  /// Uses the [programBuilder] to generate a model of the program, emits
+  /// the program, and returns the size of the generated output.
+  int emitProgram(ProgramBuilder programBuilder);
 
   /// Returns the JS function that must be invoked to get the value of the
   /// lazily initialized static.
@@ -418,9 +416,6 @@ abstract class Emitter {
 
   /// Returns the JS code for accessing the embedded [global].
   jsAst.Expression generateEmbeddedGlobalAccess(String global);
-
-  /// Returns the JS code for accessing the given [constant].
-  jsAst.Expression constantReference(ConstantValue constant);
 
   /// Returns the JS function representing the given function.
   ///
@@ -443,8 +438,14 @@ abstract class Emitter {
   /// Returns the JS expression representing the type [e].
   jsAst.Expression typeAccess(Element e);
 
+  /// Returns the JS expression representing a function that returns 'null'
+  jsAst.Expression generateFunctionThatReturnsNull();
+
   int compareConstants(ConstantValue a, ConstantValue b);
   bool isConstantInlinedOrAlreadyEmitted(ConstantValue constant);
+
+  /// Returns the JS code for accessing the given [constant].
+  jsAst.Expression constantReference(ConstantValue constant);
 
   void invalidateCaches();
 }

@@ -7,8 +7,9 @@ import 'dart:io';
 import 'package:grinder/grinder.dart' as grinder;
 import 'package:unittest/unittest.dart';
 
+import 'package:compiler_unsupported/sdk_io.dart';
+
 import '../example/compiler.dart';
-import '../lib/sdk_io.dart';
 
 void main(List<String> args) {
   Directory sdkDir = grinder.getSdkDir(args);
@@ -47,6 +48,14 @@ void main(List<String> args) {
       });
     });
 
+    test('helloworld html async', () {
+      return compiler.compile(sampleCodeAsync).then((CompilationResults results) {
+        expect(results.success, true);
+        expect(results.hasOutput, true);
+        expect(results.getOutput(), isNotEmpty);
+      });
+    });
+
     test('handles errors', () {
       return compiler.compile(hasErrors).then((CompilationResults results) {
         expect(results.success, false);
@@ -75,6 +84,17 @@ import 'dart:math';
 void main() {
   print("hello");
   querySelector('#foo').text = 'bar';
+}
+""";
+
+final String sampleCodeAsync = """
+import 'dart:async';
+import 'dart:html';
+
+void main() async {
+  print("hello");
+  querySelector('#foo').text = 'bar';
+  var foo = await HttpClient.get('http://www.google.com');
 }
 """;
 

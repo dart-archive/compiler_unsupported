@@ -12,21 +12,22 @@ import '../util/util.dart';
 import '../resolution/resolution.dart';
 import '../resolution/class_members.dart' show ClassMemberMixin;
 
-import '../dart2jslib.dart' show invariant,
-                                 InterfaceType,
-                                 DartType,
-                                 TypeVariableType,
-                                 TypedefType,
-                                 DualKind,
-                                 MessageKind,
-                                 DiagnosticListener,
-                                 Script,
-                                 FunctionType,
-                                 Selector,
-                                 Constant,
-                                 Compiler,
-                                 Backend,
-                                 isPrivateName;
+import '../dart2jslib.dart' show
+    Backend,
+    Compiler,
+    Constant,
+    DartType,
+    DiagnosticListener,
+    DualKind,
+    FunctionType,
+    InterfaceType,
+    MessageKind,
+    Script,
+    Selector,
+    TypeVariableType,
+    TypedefType,
+    invariant,
+    isPrivateName;
 
 import '../dart_types.dart';
 
@@ -298,6 +299,7 @@ class ErroneousElementX extends ElementX implements ErroneousElement {
   get type => unsupported();
   get cachedNode => unsupported();
   get functionSignature => unsupported();
+  get parameters => unsupported();
   get patch => null;
   get origin => this;
   get immediateRedirectionTarget => unsupported();
@@ -325,6 +327,92 @@ class ErroneousElementX extends ElementX implements ErroneousElement {
   String toString() => '<$name: $message>';
 
   accept(ElementVisitor visitor) => visitor.visitErroneousElement(this);
+}
+
+/// A constructor that was synthesized to recover from a compile-time error.
+class ErroneousConstructorElementX extends ErroneousElementX
+    with PatchMixin<FunctionElement>, AnalyzableElementX
+    implements ConstructorElementX {
+  // TODO(ahe): Instead of subclassing [ErroneousElementX], this class should
+  // be more like [ErroneousFieldElementX]. In particular, its kind should be
+  // [ElementKind.GENERATIVE_CONSTRUCTOR], and it shouldn't throw as much.
+
+  ErroneousConstructorElementX(
+      MessageKind messageKind,
+      Map messageArguments,
+      String name,
+      Element enclosing)
+      : super(messageKind, messageArguments, name, enclosing);
+
+  bool get isRedirectingFactory => false;
+
+  get definingElement {
+    throw new UnsupportedError("definingElement");
+  }
+
+  get asyncMarker {
+    throw new UnsupportedError("asyncMarker");
+  }
+
+  set asyncMarker(_) {
+    throw new UnsupportedError("asyncMarker=");
+  }
+
+  get internalEffectiveTarget {
+    throw new UnsupportedError("internalEffectiveTarget");
+  }
+
+  set internalEffectiveTarget(_) {
+    throw new UnsupportedError("internalEffectiveTarget=");
+  }
+
+  get effectiveTargetType {
+    throw new UnsupportedError("effectiveTargetType");
+  }
+
+  set effectiveTargetType(_) {
+    throw new UnsupportedError("effectiveTargetType=");
+  }
+
+  get typeCache {
+    throw new UnsupportedError("typeCache");
+  }
+
+  set typeCache(_) {
+    throw new UnsupportedError("typeCache=");
+  }
+
+  get immediateRedirectionTarget {
+    throw new UnsupportedError("immediateRedirectionTarget");
+  }
+
+  set immediateRedirectionTarget(_) {
+    throw new UnsupportedError("immediateRedirectionTarget=");
+  }
+
+  get functionSignatureCache {
+    throw new UnsupportedError("functionSignatureCache");
+  }
+
+  set functionSignatureCache(_) {
+    throw new UnsupportedError("functionSignatureCache=");
+  }
+
+  get nestedClosures {
+    throw new UnsupportedError("nestedClosures");
+  }
+
+  set nestedClosures(_) {
+    throw new UnsupportedError("nestedClosures=");
+  }
+
+  bool get hasNoBody => false;
+
+  bool get _hasNoBody => false;
+
+  void set effectiveTarget(_) {
+    throw new UnsupportedError("effectiveTarget=");
+  }
 }
 
 /// A message attached to a [WarnOnUseElementX].
@@ -384,7 +472,7 @@ class WarnOnUseElementX extends ElementX implements WarnOnUseElement {
   accept(ElementVisitor visitor) => visitor.visitWarnOnUseElement(this);
 }
 
-class AmbiguousElementX extends ElementX implements AmbiguousElement {
+abstract class AmbiguousElementX extends ElementX implements AmbiguousElement {
   /**
    * The message to report on resolving this element.
    */
@@ -423,6 +511,22 @@ class AmbiguousElementX extends ElementX implements AmbiguousElement {
     return set;
   }
 
+  accept(ElementVisitor visitor) => visitor.visitAmbiguousElement(this);
+
+  bool get isTopLevel => false;
+
+  DynamicType get type => const DynamicType();
+}
+
+/// Element synthesized to diagnose an ambiguous import.
+class AmbiguousImportX extends AmbiguousElementX {
+  AmbiguousImportX(
+      MessageKind messageKind,
+      Map messageArguments,
+      Element enclosingElement, Element existingElement, Element newElement)
+      : super(messageKind, messageArguments, enclosingElement, existingElement,
+              newElement);
+
   void diagnose(Element context, DiagnosticListener listener) {
     Setlet ambiguousElements = flatten();
     MessageKind code = (ambiguousElements.length == 1)
@@ -440,10 +544,18 @@ class AmbiguousElementX extends ElementX implements AmbiguousElement {
       });
     }
   }
+}
 
-  accept(ElementVisitor visitor) => visitor.visitAmbiguousElement(this);
+/// Element synthesized to recover from a duplicated member of an element.
+class DuplicatedElementX extends AmbiguousElementX {
+  DuplicatedElementX(
+      MessageKind messageKind,
+      Map messageArguments,
+      Element enclosingElement, Element existingElement, Element newElement)
+      : super(messageKind, messageArguments, enclosingElement, existingElement,
+              newElement);
 
-  bool get isTopLevel => false;
+  bool get isErroneous => true;
 }
 
 class ScopeX {
@@ -491,27 +603,32 @@ class ScopeX {
       listener.reportError(accessor,
                            MessageKind.DUPLICATE_DEFINITION,
                            {'name': accessor.name});
-      // TODO(johnniwinther): Make this an info instead of a fatal error.
-      listener.reportFatalError(other,
-                                MessageKind.EXISTING_DEFINITION,
-                                {'name': accessor.name});
+      listener.reportInfo(
+          other, MessageKind.EXISTING_DEFINITION, {'name': accessor.name});
+
+      contents[accessor.name] = new DuplicatedElementX(
+          MessageKind.DUPLICATE_DEFINITION, {'name': accessor.name},
+          accessor.memberContext.enclosingElement, other, accessor);
     }
 
     if (existing != null) {
       if (!identical(existing.kind, ElementKind.ABSTRACT_FIELD)) {
         reportError(existing);
+        return;
       } else {
         AbstractFieldElementX field = existing;
         accessor.abstractField = field;
         if (accessor.isGetter) {
           if (field.getter != null && field.getter != accessor) {
             reportError(field.getter);
+            return;
           }
           field.getter = accessor;
         } else {
           assert(accessor.isSetter);
           if (field.setter != null && field.setter != accessor) {
             reportError(field.setter);
+            return;
           }
           field.setter = accessor;
         }
@@ -699,7 +816,7 @@ class ImportScope {
               import, MessageKind.HIDDEN_IMPORT, existing, element);
         }
       } else {
-        Element ambiguousElement = new AmbiguousElementX(
+        Element ambiguousElement = new AmbiguousImportX(
             MessageKind.DUPLICATE_IMPORT, {'name': name},
             enclosingElement, existing, element);
         importScope[name] = ambiguousElement;
@@ -716,6 +833,10 @@ class LibraryElementX
     extends ElementX with AnalyzableElementX, PatchMixin<LibraryElementX>
     implements LibraryElement {
   final Uri canonicalUri;
+
+  /// True if the constructing script was synthesized.
+  final bool isSynthesized;
+
   CompilationUnitElement entryCompilationUnit;
   Link<CompilationUnitElement> compilationUnits =
       const Link<CompilationUnitElement>();
@@ -747,6 +868,7 @@ class LibraryElementX
                   [Uri canonicalUri, LibraryElementX origin])
     : this.canonicalUri =
           ((canonicalUri == null) ? script.readableUri : canonicalUri),
+      this.isSynthesized = script.isSynthesized,
       super(script.name, ElementKind.LIBRARY, null) {
     entryCompilationUnit = new CompilationUnitElementX(script, this);
     if (origin != null) {
@@ -1237,7 +1359,7 @@ class LocalVariableElementX extends VariableElementX
 
   ExecutableElement get executableContext => enclosingElement;
 
-  ExecutableElement get memberContext => executableContext.memberContext;
+  MemberElement get memberContext => executableContext.memberContext;
 
   bool get isLocal => true;
 }
@@ -1265,6 +1387,81 @@ class FieldElementX extends VariableElementX
     return new FieldElementX(
         new Identifier(token), enclosingElement, variables);
   }
+}
+
+/// A field that was synthesized to recover from a compile-time error.
+class ErroneousFieldElementX extends ElementX implements FieldElementX {
+  final VariableList variables;
+
+  ErroneousFieldElementX(Identifier name, Element enclosingElement)
+      : variables = new VariableList(Modifiers.EMPTY)
+            ..definitions = new VariableDefinitions(
+                null, Modifiers.EMPTY, new NodeList.singleton(name))
+            ..type = const DynamicType(),
+        super(name.source, ElementKind.FIELD, enclosingElement);
+
+  VariableDefinitions get definitionsCache => variables.definitions;
+
+  set definitionsCache(VariableDefinitions _) {
+    throw new UnsupportedError("definitionsCache=");
+  }
+
+  bool get hasNode => true;
+
+  VariableDefinitions get node => definitionsCache;
+
+  bool get hasResolvedAst => false;
+
+  ResolvedAst get resolvedAst {
+    throw new UnsupportedError("resolvedAst");
+  }
+
+  DynamicType get type => const DynamicType();
+
+  Token get token => node.getBeginToken();
+
+  get initializerCache {
+    throw new UnsupportedError("initializerCache");
+  }
+
+  set initializerCache(_) {
+    throw new UnsupportedError("initializerCache=");
+  }
+
+  void createDefinitions(VariableDefinitions definitions) {
+    throw new UnsupportedError("createDefinitions");
+  }
+
+  get initializer => null;
+
+  bool get isErroneous => true;
+
+  get nestedClosures {
+    throw new UnsupportedError("nestedClosures");
+  }
+
+  set nestedClosures(_) {
+    throw new UnsupportedError("nestedClosures=");
+  }
+
+  // TODO(ahe): Should this throw or do nothing?
+  accept(ElementVisitor visitor) => visitor.visitFieldElement(this);
+
+  // TODO(ahe): Should return the context of the error site?
+  MemberElement get memberContext => this;
+
+  // TODO(ahe): Should return the definingElement of the error site?
+  AstElement get definingElement => this;
+
+  void reuseElement() {
+    throw new UnsupportedError("reuseElement");
+  }
+
+  FieldElementX copyWithEnclosing(Element enclosingElement) {
+    throw new UnsupportedError("copyWithEnclosing");
+  }
+
+  DartType computeType(Compiler compiler) => type;
 }
 
 /// [Element] for a parameter-like element.
@@ -1336,12 +1533,16 @@ class FormalElementX extends ElementX
 abstract class ParameterElementX extends FormalElementX
   with PatchMixin<ParameterElement> implements ParameterElement {
   final Expression initializer;
+  final bool isOptional;
+  final bool isNamed;
 
   ParameterElementX(ElementKind elementKind,
                     FunctionElement functionDeclaration,
                     VariableDefinitions definitions,
                     Identifier identifier,
-                    this.initializer)
+                    this.initializer,
+                    {this.isOptional: false,
+                     this.isNamed: false})
       : super(elementKind, functionDeclaration, definitions, identifier);
 
   FunctionElement get functionDeclaration => enclosingElement;
@@ -1357,27 +1558,35 @@ abstract class ParameterElementX extends FormalElementX
 
 class LocalParameterElementX extends ParameterElementX
     implements LocalParameterElement {
+
+
   LocalParameterElementX(FunctionElement functionDeclaration,
                          VariableDefinitions definitions,
                          Identifier identifier,
-                         Expression initializer)
+                         Expression initializer,
+                         {bool isOptional: false,
+                          bool isNamed: false})
       : super(ElementKind.PARAMETER, functionDeclaration,
-              definitions, identifier, initializer);
+              definitions, identifier, initializer,
+              isOptional: isOptional, isNamed: isNamed);
 }
 
 /// Parameters in constructors that directly initialize fields. For example:
 /// `A(this.field)`.
 class InitializingFormalElementX extends ParameterElementX
     implements InitializingFormalElement {
-  FieldElement fieldElement;
+  final FieldElement fieldElement;
 
   InitializingFormalElementX(ConstructorElement constructorDeclaration,
                              VariableDefinitions variables,
                              Identifier identifier,
                              Expression initializer,
-                             this.fieldElement)
+                             this.fieldElement,
+                             {bool isOptional: false,
+                              bool isNamed: false})
       : super(ElementKind.INITIALIZING_FORMAL, constructorDeclaration,
-              variables, identifier, initializer);
+              variables, identifier, initializer,
+              isOptional: isOptional, isNamed: isNamed);
 
   accept(ElementVisitor visitor) => visitor.visitFieldParameterElement(this);
 
@@ -1386,6 +1595,29 @@ class InitializingFormalElementX extends ParameterElementX
   bool get isLocal => false;
 }
 
+class ErroneousInitializingFormalElementX extends ParameterElementX
+    implements InitializingFormalElementX {
+  final ErroneousFieldElementX fieldElement;
+
+  ErroneousInitializingFormalElementX(
+      Identifier identifier,
+      Element enclosingElement)
+      : this.fieldElement =
+            new ErroneousFieldElementX(identifier, enclosingElement),
+        super(
+            ElementKind.INITIALIZING_FORMAL,
+            enclosingElement, null, identifier, null);
+
+  VariableDefinitions get definitions => fieldElement.node;
+
+  MemberElement get memberContext => enclosingElement;
+
+  bool get isLocal => false;
+
+  bool get isErroneous => true;
+
+  DynamicType get type => const DynamicType();
+}
 
 class AbstractFieldElementX extends ElementX implements AbstractFieldElement {
   FunctionElementX getter;
@@ -1587,6 +1819,14 @@ abstract class BaseFunctionElementX
     return functionSignatureCache;
   }
 
+  List<ParameterElement> get parameters {
+    // TODO(johnniwinther): Store the list directly, possibly by using List
+    // instead of Link in FunctionSignature.
+    List<ParameterElement> list = <ParameterElement>[];
+    functionSignature.forEachParameter((e) => list.add(e));
+    return list;
+  }
+
   FunctionType computeType(Compiler compiler) {
     if (typeCache != null) return typeCache;
     typeCache = computeSignature(compiler).type;
@@ -1624,7 +1864,7 @@ abstract class BaseFunctionElementX
 }
 
 abstract class FunctionElementX extends BaseFunctionElementX
-    with AnalyzableElementX implements MemberElement {
+    with AnalyzableElementX implements MethodElement {
   FunctionElementX(String name,
                    ElementKind kind,
                    Modifiers modifiers,
@@ -1696,7 +1936,7 @@ abstract class ConstructorElementX extends FunctionElementX
   }
 
   ConstructorElement get effectiveTarget {
-    if (Elements.isErroneousElement(immediateRedirectionTarget)) {
+    if (Elements.isErroneous(immediateRedirectionTarget)) {
       return immediateRedirectionTarget;
     }
     assert(!isRedirectingFactory || internalEffectiveTarget != null);
@@ -2181,24 +2421,22 @@ abstract class BaseClassElementX extends ElementX
     return false;
   }
 
-  Element validateConstructorLookupResults(Selector selector,
-                                           Element result,
-                                           Element noMatch(Element)) {
-    if (result == null
-        || !result.isConstructor
-        || (isPrivateName(selector.name)
-            && result.library != selector.library)) {
-      result = noMatch != null ? noMatch(result) : null;
+  ConstructorElement lookupDefaultConstructor() {
+    ConstructorElement constructor = lookupConstructor("");
+    // This method might be called on constructors that have not been
+    // resolved. As we query the live world, we return `null` in such cases
+    // as no default constructor exists in the live world.
+    if (constructor != null &&
+        constructor.hasFunctionSignature &&
+        constructor.functionSignature.requiredParameterCount == 0) {
+      return constructor;
     }
-    return result;
+    return null;
   }
 
-  // TODO(aprelev@gmail.com): Peter believes that it would be great to
-  // make noMatch a required argument. Peter's suspicion is that most
-  // callers of this method would benefit from using the noMatch method.
-  Element lookupConstructor(Selector selector, [Element noMatch(Element)]) {
-    Element result = localLookup(selector.name);
-    return validateConstructorLookupResults(selector, result, noMatch);
+  ConstructorElement lookupConstructor(String name) {
+    Element result = localLookup(name);
+    return result != null && result.isConstructor ? result : null;
   }
 
   Link<Element> get constructors {
@@ -2432,7 +2670,7 @@ abstract class ClassElementX extends BaseClassElementX {
 
 class EnumClassElementX extends ClassElementX implements EnumClassElement {
   final Enum node;
-  Iterable<FieldElement> _enumValues;
+  List<FieldElement> _enumValues;
 
   EnumClassElementX(String name, Element enclosing, int id, this.node)
       : super(name, enclosing, id, STATE_NOT_STARTED);
@@ -2454,13 +2692,13 @@ class EnumClassElementX extends ClassElementX implements EnumClassElement {
 
   List<DartType> computeTypeParameters(Compiler compiler) => const <DartType>[];
 
-  Iterable<FieldElement> get enumValues {
+  List<FieldElement> get enumValues {
     assert(invariant(this, _enumValues != null,
         message: "enumValues has not been computed for $this."));
     return _enumValues;
   }
 
-  void set enumValues(Iterable<FieldElement> values) {
+  void set enumValues(List<FieldElement> values) {
     assert(invariant(this, _enumValues == null,
         message: "enumValues has already been computed for $this."));
     _enumValues = values;
@@ -2696,8 +2934,6 @@ class TypeVariableElementX extends ElementX with AstElementMixin
   bool get hasNode => true;
 
   Node parseNode(compiler) => node;
-
-  String toString() => "${enclosingElement.toString()}.${name}";
 
   Token get position => node.getBeginToken();
 

@@ -33,6 +33,7 @@ import 'elements/modelx.dart'
          DeferredLoaderGetterElementX;
 import 'helpers/helpers.dart';  // Included for debug helpers.
 import 'io/code_output.dart' show CodeBuffer;
+import 'io/source_information.dart' show SourceInformation;
 import 'js/js.dart' as js;
 import 'js_backend/js_backend.dart' as js_backend;
 import 'library_loader.dart'
@@ -47,7 +48,7 @@ import 'resolution/class_members.dart' show MembersCreator;
 import 'resolution/resolution.dart';
 import 'scanner/scannerlib.dart';
 import 'ssa/ssa.dart';
-import 'source_file.dart' show SourceFile;
+import 'io/source_file.dart' show SourceFile;
 import 'tracer.dart' show Tracer;
 import 'tree/tree.dart';
 import 'types/types.dart' as ti;

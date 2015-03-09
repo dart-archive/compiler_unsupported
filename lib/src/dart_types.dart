@@ -218,7 +218,7 @@ class TypeVariableType extends DartType {
 
   DartType unalias(Compiler compiler) => this;
 
-  DartType get typeVariableOccurrence => this;
+  TypeVariableType get typeVariableOccurrence => this;
 
   void forEachTypeVariable(f(TypeVariableType variable)) {
     f(this);
@@ -475,7 +475,7 @@ class InterfaceType extends GenericType {
    * Returns the type as an instance of class [other], if possible, null
    * otherwise.
    */
-  DartType asInstanceOf(ClassElement other) {
+  InterfaceType asInstanceOf(ClassElement other) {
     other = other.declaration;
     if (element == other) return this;
     InterfaceType supertype = element.asInstanceOf(other);
@@ -661,7 +661,7 @@ class FunctionType extends DartType {
 
   DartType unalias(Compiler compiler) => this;
 
-  DartType get typeVariableOccurrence {
+  TypeVariableType get typeVariableOccurrence {
     TypeVariableType typeVariableType = returnType.typeVariableOccurrence;
     if (typeVariableType != null) return typeVariableType;
 
@@ -1479,8 +1479,9 @@ class Types implements DartTypes {
         return intersection.first;
       }
     }
-    invariant(CURRENT_ELEMENT_SPANNABLE, false,
-        message: 'No least upper bound computed for $a and $b.');
+
+    compiler.internalError(CURRENT_ELEMENT_SPANNABLE,
+        'No least upper bound computed for $a and $b.');
     return null;
   }
 

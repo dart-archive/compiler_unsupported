@@ -12,7 +12,7 @@ import 'tree/tree.dart' as tree;
 import 'elements/elements.dart' as elements;
 import 'package:compiler_unsupported/libraries.dart' hide LIBRARIES;
 import 'package:compiler_unsupported/libraries.dart' as library_info show LIBRARIES;
-import 'source_file.dart';
+import 'io/source_file.dart';
 
 const bool forceIncrementalSupport =
     const bool.fromEnvironment('DART2JS_EXPERIMENTAL_INCREMENTAL_SUPPORT');
@@ -70,6 +70,7 @@ class Compiler extends leg.Compiler {
             sourceMapUri: extractUriOption(options, '--source-map='),
             outputUri: extractUriOption(options, '--out='),
             terseDiagnostics: hasOption(options, '--terse'),
+            deferredMapUri: extractUriOption(options, '--deferred-map='),
             dumpInfo: hasOption(options, '--dump-info'),
             buildId: extractStringOption(
                 options, '--build-id=',
@@ -83,25 +84,27 @@ class Compiler extends leg.Compiler {
             suppressWarnings: hasOption(options, '--suppress-warnings'),
             enableExperimentalMirrors:
                 hasOption(options, '--enable-experimental-mirrors'),
-            enableAsyncAwait: hasOption(options, '--enable-async'),
-            enableEnums: hasOption(options, '--enable-enum'),
+            generateCodeWithCompileTimeErrors:
+                hasOption(options, '--generate-code-with-compile-time-errors'),
             allowNativeExtensions:
                 hasOption(options, '--allow-native-extensions')) {
     tasks.addAll([
         userHandlerTask = new leg.GenericTask('Diagnostic handler', this),
         userProviderTask = new leg.GenericTask('Input provider', this),
     ]);
-    if (!libraryRoot.path.endsWith("/")) {
-      throw new ArgumentError("libraryRoot must end with a /");
+    if (libraryRoot == null) {
+      throw new ArgumentError("[libraryRoot] is null.");
     }
-    if (packageRoot != null && !packageRoot.path.endsWith("/")) {
-      throw new ArgumentError("packageRoot must end with a /");
+    if (!libraryRoot.path.endsWith("/")) {
+      throw new ArgumentError("[libraryRoot] must end with a /.");
+    }
+    if (packageRoot == null) {
+      throw new ArgumentError("[packageRoot] is null.");
+    }
+    if (!packageRoot.path.endsWith("/")) {
+      throw new ArgumentError("[packageRoot] must end with a /.");
     }
     if (!analyzeOnly) {
-      if (enableAsyncAwait) {
-        throw new ArgumentError(
-            "--enable-async is currently only supported with --analyze-only");
-      }
       if (allowNativeExtensions) {
         throw new ArgumentError(
             "--allow-native-extensions is only supported in combination with "
@@ -201,24 +204,29 @@ class Compiler extends leg.Compiler {
     // [node] to be valid.
     elements.Element element = currentElement;
     void reportReadError(exception) {
-      withCurrentElement(element, () {
-        reportError(node,
-                    leg.MessageKind.READ_SCRIPT_ERROR,
-                    {'uri': readableUri, 'exception': exception});
-      });
+      if (element == null || node == null) {
+        reportError(
+            new leg.SourceSpan(readableUri, 0, 0),
+            leg.MessageKind.READ_SELF_ERROR,
+            {'uri': readableUri, 'exception': exception});
+      } else {
+        withCurrentElement(element, () {
+          reportError(
+              node,
+              leg.MessageKind.READ_SCRIPT_ERROR,
+              {'uri': readableUri, 'exception': exception});
+        });
+      }
     }
 
     Uri resourceUri = translateUri(node, readableUri);
-    String resourceUriString = resourceUri.toString();
     if (resourceUri.scheme == 'dart-ext') {
       if (!allowNativeExtensions) {
         withCurrentElement(element, () {
           reportError(node, leg.MessageKind.DART_EXT_NOT_SUPPORTED);
         });
       }
-      return new Future.value(new leg.Script(readableUri, resourceUri,
-          new StringSourceFile(resourceUriString,
-              "// Synthetic source file generated for '$readableUri'.")));
+      return synthesizeScript(node, readableUri);
     }
 
     // TODO(johnniwinther): Wrap the result from [provider] in a specialized
@@ -227,9 +235,9 @@ class Compiler extends leg.Compiler {
     return new Future.sync(() => callUserProvider(resourceUri)).then((data) {
       SourceFile sourceFile;
       if (data is List<int>) {
-        sourceFile = new Utf8BytesSourceFile(resourceUriString, data);
+        sourceFile = new Utf8BytesSourceFile(resourceUri, data);
       } else if (data is String) {
-        sourceFile = new StringSourceFile(resourceUriString, data);
+        sourceFile = new StringSourceFile.fromUri(resourceUri, data);
       } else {
         String message = "Expected a 'String' or a 'List<int>' from the input "
                          "provider, but got: ${Error.safeToString(data)}.";
@@ -242,8 +250,19 @@ class Compiler extends leg.Compiler {
       return new leg.Script(readableUri, resourceUri, sourceFile);
     }).catchError((error) {
       reportReadError(error);
-      return null;
+      return synthesizeScript(node, readableUri);
     });
+  }
+
+  Future<leg.Script> synthesizeScript(leg.Spannable node, Uri readableUri) {
+    Uri resourceUri = translateUri(node, readableUri);
+    return new Future.value(
+        new leg.Script(
+            readableUri, resourceUri,
+            new StringSourceFile.fromUri(
+                resourceUri,
+                "// Synthetic source file generated for '$readableUri'."),
+            isSynthesized: true));
   }
 
   /**
@@ -309,10 +328,6 @@ class Compiler extends leg.Compiler {
   }
 
   Uri translatePackageUri(leg.Spannable node, Uri uri) {
-    if (packageRoot == null) {
-      reportFatalError(
-          node, leg.MessageKind.PACKAGE_ROOT_NOT_SET, {'uri': uri});
-    }
     return packageRoot.resolve(uri.path);
   }
 

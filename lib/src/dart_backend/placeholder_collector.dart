@@ -189,7 +189,6 @@ class PlaceholderCollector extends Visitor {
       FunctionElement element, FunctionExpression node) {
     if (element.isConstructor) {
       ConstructorElement constructor = element;
-      DartType type = element.enclosingClass.thisType.asRaw();
       tryMakeConstructorPlaceholder(node.name, element);
       RedirectingFactoryBody bodyAsRedirectingFactoryBody =
           node.body.asRedirectingFactoryBody();
@@ -197,7 +196,6 @@ class PlaceholderCollector extends Visitor {
         // Factory redirection.
         FunctionElement redirectTarget = constructor.immediateRedirectionTarget;
         assert(redirectTarget != null && redirectTarget != element);
-        type = redirectTarget.enclosingClass.thisType.asRaw();
         tryMakeConstructorPlaceholder(
             bodyAsRedirectingFactoryBody.constructorReference,
             redirectTarget);
@@ -279,7 +277,7 @@ class PlaceholderCollector extends Visitor {
   void tryMakeMemberPlaceholder(Identifier node) {
     assert(node != null);
     if (node is Operator) return;
-    final identifier = node.source;
+    String identifier = node.source;
     if (fixedMemberNames.contains(identifier)) return;
     memberPlaceholders.putIfAbsent(
         identifier, () => new Set<Identifier>()).add(node);
@@ -345,6 +343,14 @@ class PlaceholderCollector extends Visitor {
     if (library.isPlatformLibrary && !element.isTopLevel) {
       return;
     }
+
+    ClassElement cls = element.enclosingClass;
+    if (cls != null && cls.isEnumClass) {
+      // Enums and enum values cannot be changed, since the semantics of
+      // `toString` is defined by the names of the declarations.
+      return;
+    }
+
     if (element.isGetter || element.isSetter) {
       element = (element as FunctionElement).abstractField;
     }
@@ -469,7 +475,7 @@ class PlaceholderCollector extends Visitor {
     Element constructor = treeElements[send];
     assert(constructor != null);
     assert(send.receiver == null);
-    if (!Elements.isErroneousElement(constructor)) {
+    if (!Elements.isErroneous(constructor)) {
       tryMakeConstructorPlaceholder(node.send.selector, constructor);
       // TODO(smok): Should this be in visitNamedArgument?
       // Field names can be exposed as names of optional arguments, e.g.
@@ -510,7 +516,7 @@ class PlaceholderCollector extends Visitor {
 
   visitSendSet(SendSet send) {
     Element element = treeElements[send];
-    if (Elements.isErroneousElement(element)) {
+    if (Elements.isErroneous(element)) {
       // Complicated case: constructs like receiver.selector++ can resolve
       // to ErroneousElement.  Fortunately, receiver.selector still
       // can be resoved via treeElements[send.selector], that's all

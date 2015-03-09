@@ -145,10 +145,6 @@ class CodegenRegistry extends Registry {
     world.registerSelectorUse(selector);
   }
 
-  void registerFactoryWithTypeArguments() {
-    world.registerFactoryWithTypeArguments(this);
-  }
-
   void registerConstSymbol(String name) {
     backend.registerConstSymbol(name, this);
   }
@@ -173,9 +169,18 @@ class CodegenRegistry extends Registry {
     world.registerStaticUse(element);
   }
 
+  void registerDirectInvocation(Element element) {
+    world.registerStaticUse(element);
+  }
+
   void registerInstantiation(InterfaceType type) {
     world.registerInstantiatedType(type, this);
   }
+
+  void registerAsyncMarker(FunctionElement element) {
+    backend.registerAsyncMarker(element, world, this);
+  }
+
 }
 
 /// [WorkItem] used exclusively by the [CodegenEnqueuer].
@@ -229,6 +234,8 @@ abstract class Registry {
   void registerInstantiation(InterfaceType type);
 
   void registerGetOfStaticFunction(FunctionElement element);
+
+  void registerAsyncMarker(FunctionElement element);
 }
 
 abstract class Backend {
@@ -250,6 +257,9 @@ abstract class Backend {
 
   /// Backend callback methods for the resolution phase.
   ResolutionCallbacks get resolutionCallbacks;
+
+  // TODO(johnniwinther): Move this to the JavaScriptBackend.
+  String get patchVersion => null;
 
   /// Set of classes that need to be considered for reflection although not
   /// otherwise visible during resolution.
@@ -277,6 +287,8 @@ abstract class Backend {
   int assembleProgram();
 
   List<CompilerTask> get tasks;
+
+  bool get canHandleCompilationFailed;
 
   void onResolutionComplete() {}
 
@@ -511,6 +523,10 @@ abstract class Backend {
   void forgetElement(Element element) {}
 
   void registerMainHasArguments(Enqueuer enqueuer) {}
+
+  void registerAsyncMarker(FunctionElement element,
+                             Enqueuer enqueuer,
+                             Registry registry) {}
 }
 
 /// Backend callbacks function specific to the resolution phase.
@@ -573,7 +589,7 @@ class ResolutionCallbacks {
   void onSuperNoSuchMethod(Registry registry) {}
 
   /// Register that the application creates a constant map.
-  void onConstantMap(Registry registry) {}
+  void onMapLiteral(Registry registry, DartType type, bool isConstant) {}
 
   /// Called when resolving the `Symbol` constructor.
   void onSymbolConstructor(Registry registry) {}
@@ -669,6 +685,7 @@ abstract class Compiler implements DiagnosticListener {
   final bool trustPrimitives;
   final bool enableConcreteTypeInference;
   final bool disableTypeInferenceFlag;
+  final Uri deferredMapUri;
   final bool dumpInfo;
   final bool useContentSecurityPolicy;
   final bool enableExperimentalMirrors;
@@ -734,12 +751,6 @@ abstract class Compiler implements DiagnosticListener {
 
   final bool suppressWarnings;
 
-  /// `true` if async/await features are supported.
-  final bool enableAsyncAwait;
-
-  /// `true` if enum declarations are supported.
-  final bool enableEnums;
-
   /// If `true`, some values are cached for reuse in incremental compilation.
   /// Incremental compilation is basically calling [run] more than once.
   final bool hasIncrementalSupport;
@@ -747,13 +758,13 @@ abstract class Compiler implements DiagnosticListener {
   /// If `true` native extension syntax is supported by the frontend.
   final bool allowNativeExtensions;
 
-  api.CompilerOutputProvider outputProvider;
+  /// Output provider from user of Compiler API.
+  api.CompilerOutputProvider userOutputProvider;
+
+  /// Generate output even when there are compile-time errors.
+  final bool generateCodeWithCompileTimeErrors;
 
   bool disableInlining = false;
-
-  /// True if compilation was aborted with a [CompilerCancelledException]. Only
-  /// set after Future retuned by [run] has completed.
-  bool compilerWasCancelled = false;
 
   List<Uri> librariesToAnalyzeWhenRun;
 
@@ -762,6 +773,7 @@ abstract class Compiler implements DiagnosticListener {
   CompilerTask measuredTask;
   Element _currentElement;
   LibraryElement coreLibrary;
+  LibraryElement asyncLibrary;
 
   LibraryElement mainApp;
   FunctionElement mainFunction;
@@ -797,8 +809,8 @@ abstract class Compiler implements DiagnosticListener {
   ConstantValue proxyConstant;
 
   // TODO(johnniwinther): Move this to the JavaScriptBackend.
-  /// The constant for the [patch] variable defined in dart:_js_helper.
-  ConstantValue patchConstant;
+  /// The class for patch annotation defined in dart:_js_helper.
+  ClassElement patchAnnotationClass;
 
   // TODO(johnniwinther): Move this to the JavaScriptBackend.
   ClassElement nativeAnnotationClass;
@@ -836,6 +848,9 @@ abstract class Compiler implements DiagnosticListener {
   Element boolEnvironment;
   Element stringEnvironment;
 
+  /// Tracks elements with compile-time errors.
+  final Set<Element> elementsWithCompileTimeErrors = new Set<Element>();
+
   fromEnvironment(String name) => null;
 
   Element get currentElement => _currentElement;
@@ -864,8 +879,6 @@ abstract class Compiler implements DiagnosticListener {
         pleaseReportCrash();
       }
       hasCrashed = true;
-      rethrow;
-    } on CompilerCancelledException catch (ex) {
       rethrow;
     } on StackOverflowError catch (ex) {
       // We cannot report anything useful in this case, because we
@@ -918,6 +931,7 @@ abstract class Compiler implements DiagnosticListener {
   static const int NO_SUCH_METHOD_ARG_COUNT = 1;
   static const String CREATE_INVOCATION_MIRROR =
       'createInvocationMirror';
+  static const String FROM_ENVIRONMENT = 'fromEnvironment';
 
   static const String RUNTIME_TYPE = 'runtimeType';
 
@@ -934,8 +948,6 @@ abstract class Compiler implements DiagnosticListener {
       Compiler.NO_SUCH_METHOD, null, Compiler.NO_SUCH_METHOD_ARG_COUNT);
   final Selector symbolValidatedConstructorSelector = new Selector.call(
       'validated', null, 1);
-  final Selector fromEnvironmentSelector = new Selector.callConstructor(
-      'fromEnvironment', null, 2);
 
   bool enabledNoSuchMethod = false;
   bool enabledRuntimeType = false;
@@ -955,7 +967,16 @@ abstract class Compiler implements DiagnosticListener {
   static const int PHASE_COMPILING = 3;
   int phase;
 
-  bool compilationFailed = false;
+  bool compilationFailedInternal = false;
+
+  bool get compilationFailed => compilationFailedInternal;
+
+  void set compilationFailed(bool value) {
+    if (value) {
+      elementsWithCompileTimeErrors.add(currentElement);
+    }
+    compilationFailedInternal = value;
+  }
 
   bool hasCrashed = false;
 
@@ -985,15 +1006,15 @@ abstract class Compiler implements DiagnosticListener {
             this.outputUri: null,
             this.buildId: UNDETERMINED_BUILD_ID,
             this.terseDiagnostics: false,
+            this.deferredMapUri: null,
             this.dumpInfo: false,
             this.showPackageWarnings: false,
             this.useContentSecurityPolicy: false,
             this.suppressWarnings: false,
             bool hasIncrementalSupport: false,
             this.enableExperimentalMirrors: false,
-            this.enableAsyncAwait: false,
-            this.enableEnums: false,
             this.allowNativeExtensions: false,
+            this.generateCodeWithCompileTimeErrors: false,
             api.CompilerOutputProvider outputProvider,
             List<String> strips: const []})
       : this.disableTypeInferenceFlag =
@@ -1004,7 +1025,7 @@ abstract class Compiler implements DiagnosticListener {
         this.analyzeAllFlag = analyzeAllFlag,
         this.hasIncrementalSupport = hasIncrementalSupport,
         cacheStrategy = new CacheStrategy(hasIncrementalSupport),
-        this.outputProvider = (outputProvider == null)
+        this.userOutputProvider = (outputProvider == null)
             ? NullSink.outputProvider
             : outputProvider {
     if (hasIncrementalSupport) {
@@ -1071,7 +1092,9 @@ abstract class Compiler implements DiagnosticListener {
 
   bool get compileAll => false;
 
-  bool get disableTypeInference => disableTypeInferenceFlag;
+  bool get disableTypeInference {
+    return disableTypeInferenceFlag || compilationFailed;
+  }
 
   int getNextFreeClassId() => nextFreeClassId++;
 
@@ -1160,12 +1183,6 @@ abstract class Compiler implements DiagnosticListener {
     totalCompileTime.start();
 
     return new Future.sync(() => runCompiler(uri)).catchError((error) {
-      if (error is CompilerCancelledException) {
-        compilerWasCancelled = true;
-        log('Error: $error');
-        return false;
-      }
-
       try {
         if (!hasCrashed) {
           hasCrashed = true;
@@ -1228,12 +1245,14 @@ abstract class Compiler implements DiagnosticListener {
       mirrorSystemClass = findRequiredElement(library, 'MirrorSystem');
       mirrorsUsedClass = findRequiredElement(library, 'MirrorsUsed');
     } else if (uri == DART_ASYNC) {
+      asyncLibrary = library;
       deferredLibraryClass = findRequiredElement(library, 'DeferredLibrary');
       _coreTypes.futureClass = findRequiredElement(library, 'Future');
       _coreTypes.streamClass = findRequiredElement(library, 'Stream');
     } else if (uri == DART_NATIVE_TYPED_DATA) {
       typedDataClass = findRequiredElement(library, 'NativeTypedData');
     } else if (uri == js_backend.JavaScriptBackend.DART_JS_HELPER) {
+      patchAnnotationClass = findRequiredElement(library, '_Patch');
       nativeAnnotationClass = findRequiredElement(library, 'Native');
     }
     return backend.onLibraryScanned(library, loader);
@@ -1303,10 +1322,16 @@ abstract class Compiler implements DiagnosticListener {
           }
           return true;
         });
-        reportWarning(NO_LOCATION_SPANNABLE,
-            MessageKind.IMPORT_EXPERIMENTAL_MIRRORS,
-            {'importChain': importChains.join(
-                 MessageKind.IMPORT_EXPERIMENTAL_MIRRORS_PADDING)});
+
+        if (const bool.fromEnvironment("dart2js.use.new.emitter")) {
+          reportError(NO_LOCATION_SPANNABLE,
+                      MessageKind.MIRRORS_LIBRARY_NEW_EMITTER);
+        } else {
+          reportWarning(NO_LOCATION_SPANNABLE,
+             MessageKind.IMPORT_EXPERIMENTAL_MIRRORS,
+              {'importChain': importChains.join(
+                   MessageKind.IMPORT_EXPERIMENTAL_MIRRORS_PADDING)});
+        }
       }
 
       functionClass.ensureResolved(this);
@@ -1315,14 +1340,6 @@ abstract class Compiler implements DiagnosticListener {
       proxyConstant =
           resolver.constantCompiler.compileConstant(
               coreLibrary.find('proxy')).value;
-
-      // TODO(johnniwinther): Move this to the JavaScript backend.
-      LibraryElement jsHelperLibrary = loadedLibraries.getLibrary(
-              js_backend.JavaScriptBackend.DART_JS_HELPER);
-      if (jsHelperLibrary != null) {
-        patchConstant = resolver.constantCompiler.compileConstant(
-            jsHelperLibrary.find('patch')).value;
-      }
 
       if (preserveComments) {
         return libraryLoader.loadLibrary(DART_MIRRORS)
@@ -1343,6 +1360,10 @@ abstract class Compiler implements DiagnosticListener {
     return element;
   }
 
+  // TODO(johnniwinther): Move this to [PatchParser] when it is moved to the
+  // [JavaScriptBackend]. Currently needed for testing.
+  String get patchVersion => backend.patchVersion;
+
   void onClassResolved(ClassElement cls) {
     if (mirrorSystemClass == cls) {
       mirrorSystemGetNameFunction =
@@ -1351,16 +1372,17 @@ abstract class Compiler implements DiagnosticListener {
       symbolConstructor = cls.constructors.head;
     } else if (symbolImplementationClass == cls) {
       symbolValidatedConstructor = symbolImplementationClass.lookupConstructor(
-          symbolValidatedConstructorSelector);
+          symbolValidatedConstructorSelector.name);
     } else if (mirrorsUsedClass == cls) {
       mirrorsUsedConstructor = cls.constructors.head;
     } else if (intClass == cls) {
-      intEnvironment = intClass.lookupConstructor(fromEnvironmentSelector);
+      intEnvironment = intClass.lookupConstructor(FROM_ENVIRONMENT);
     } else if (stringClass == cls) {
       stringEnvironment =
-          stringClass.lookupConstructor(fromEnvironmentSelector);
+          stringClass.lookupConstructor(FROM_ENVIRONMENT);
     } else if (boolClass == cls) {
-      boolEnvironment = boolClass.lookupConstructor(fromEnvironmentSelector);
+      boolEnvironment =
+          boolClass.lookupConstructor(FROM_ENVIRONMENT);
     }
   }
 
@@ -1388,7 +1410,8 @@ abstract class Compiler implements DiagnosticListener {
     _coreTypes.iterableClass = lookupCoreClass('Iterable');
     _coreTypes.symbolClass = lookupCoreClass('Symbol');
     if (!missingCoreClasses.isEmpty) {
-      internalError(coreLibrary,
+      internalError(
+          coreLibrary,
           'dart:core library does not contain required classes: '
           '$missingCoreClasses');
     }
@@ -1397,19 +1420,13 @@ abstract class Compiler implements DiagnosticListener {
   Element _unnamedListConstructor;
   Element get unnamedListConstructor {
     if (_unnamedListConstructor != null) return _unnamedListConstructor;
-    Selector callConstructor = new Selector.callConstructor(
-        "", listClass.library);
-    return _unnamedListConstructor =
-        listClass.lookupConstructor(callConstructor);
+    return _unnamedListConstructor = listClass.lookupDefaultConstructor();
   }
 
   Element _filledListConstructor;
   Element get filledListConstructor {
     if (_filledListConstructor != null) return _filledListConstructor;
-    Selector callConstructor = new Selector.callConstructor(
-        "filled", listClass.library);
-    return _filledListConstructor =
-        listClass.lookupConstructor(callConstructor);
+    return _filledListConstructor = listClass.lookupConstructor("filled");
   }
 
   /**
@@ -1447,11 +1464,7 @@ abstract class Compiler implements DiagnosticListener {
         });
       }
     }).then((_) {
-      if (!compilationFailed) {
-        // TODO(johnniwinther): Reenable analysis of programs with load failures
-        // when these are handled as erroneous libraries/compilation units.
-        compileLoadedLibraries();
-      }
+      compileLoadedLibraries();
     });
   }
 
@@ -1514,7 +1527,9 @@ abstract class Compiler implements DiagnosticListener {
         mainFunction = errorElement;
       }
     }
-    if (errorElement != null && errorElement.isSynthesized) {
+    if (errorElement != null &&
+        errorElement.isSynthesized &&
+        !mainApp.isSynthesized) {
       reportWarning(
           errorElement, errorElement.messageKind,
           errorElement.messageArguments);
@@ -1531,7 +1546,7 @@ abstract class Compiler implements DiagnosticListener {
     // compile-time constants that are metadata.  This means adding
     // something to the resolution queue.  So we cannot wait with
     // this until after the resolution queue is processed.
-    deferredLoadTask.ensureMetadataResolved(this);
+    deferredLoadTask.beforeResolution(this);
 
     phase = PHASE_RESOLVING;
     if (analyzeAll) {
@@ -1550,7 +1565,6 @@ abstract class Compiler implements DiagnosticListener {
     processQueue(enqueuer.resolution, mainFunction);
     enqueuer.resolution.logSummary(log);
 
-    if (compilationFailed) return;
     if (!showPackageWarnings && !suppressWarnings) {
       suppressedWarnings.forEach((Uri uri, SuppressionInfo info) {
         MessageKind kind = MessageKind.HIDDEN_WARNINGS_HINTS;
@@ -1567,10 +1581,18 @@ abstract class Compiler implements DiagnosticListener {
             api.Diagnostic.HINT);
       });
     }
+
+    // TODO(sigurdm): The dart backend should handle failed compilations.
+    if (compilationFailed && !backend.canHandleCompilationFailed) {
+      return;
+    }
+
     if (analyzeOnly) {
-      if (!analyzeAll) {
+      if (!analyzeAll && !compilationFailed) {
         // No point in reporting unused code when [analyzeAll] is true: all
         // code is artificially used.
+        // If compilation failed, it is possible that the error prevents the
+        // compiler from analyzing all the code.
         reportUnusedCode();
       }
       return;
@@ -1611,8 +1633,6 @@ abstract class Compiler implements DiagnosticListener {
     }
     processQueue(enqueuer.codegen, mainFunction);
     enqueuer.codegen.logSummary(log);
-
-    if (compilationFailed) return;
 
     int programSize = backend.assembleProgram();
 
@@ -1677,8 +1697,7 @@ abstract class Compiler implements DiagnosticListener {
       withCurrentElement(work.element, () => work.run(this, world));
     });
     world.queueIsClosed = true;
-    if (compilationFailed) return;
-    assert(world.checkNoEnqueuedInvokedInstanceMethods());
+    assert(compilationFailed || world.checkNoEnqueuedInvokedInstanceMethods());
   }
 
   /**
@@ -1786,34 +1805,6 @@ abstract class Compiler implements DiagnosticListener {
                    [Map arguments = const {}]) {
     reportDiagnosticInternal(
         node, messageKind, arguments, api.Diagnostic.ERROR);
-  }
-
-  /**
-   * Reports an error and then aborts the compiler. Avoid using this method.
-   *
-   * In order to support incremental compilation, it is preferable to use
-   * [reportError]. However, care must be taken to leave the compiler in a
-   * consistent state, for example, by creating synthetic erroneous objects.
-   *
-   * If there's absolutely no way to leave the compiler in a consistent state,
-   * calling this method is preferred as it will set [compilerWasCancelled] to
-   * true which alerts the incremental compiler to discard all state and start
-   * a new compiler. Throwing an exception is also better, as this will set
-   * [hasCrashed] which the incremental compiler also listens too (but don't
-   * throw exceptions, it creates a really bad user experience).
-   *
-   * In any case, calling this method is a last resort, as it essentially
-   * breaks the user experience of the incremental compiler. The purpose of the
-   * incremental compiler is to improve developer productivity. Developers
-   * frequently make mistakes, so syntax errors and spelling errors are
-   * considered normal to the incremental compiler.
-   */
-  void reportFatalError(Spannable node, MessageKind messageKind,
-                        [Map arguments = const {}]) {
-    reportError(node, messageKind, arguments);
-    // TODO(ahe): Make this only abort the current method.
-    throw new CompilerCancelledException(
-        'Error: Cannot continue due to previous error.');
   }
 
   void reportWarning(Spannable node, MessageKind messageKind,
@@ -1925,12 +1916,9 @@ abstract class Compiler implements DiagnosticListener {
   SourceSpan spanFromHInstruction(HInstruction instruction) {
     Element element = _elementFromHInstruction(instruction);
     if (element == null) element = currentElement;
-    var position = instruction.sourcePosition;
+    SourceInformation position = instruction.sourceInformation;
     if (position == null) return spanFromElement(element);
-    Token token = position.token;
-    if (token == null) return spanFromElement(element);
-    Uri uri = element.compilationUnit.script.readableUri;
-    return spanFromTokens(token, token, uri);
+    return position.sourceSpan;
   }
 
   /**
@@ -1959,6 +1947,13 @@ abstract class Compiler implements DiagnosticListener {
    */
   Future<Script> readScript(Spannable node, Uri readableUri) {
     unimplemented(node, 'Compiler.readScript');
+    return null;
+  }
+
+  /// Compatible with [readScript] and used by [LibraryLoader] to create
+  /// synthetic scripts to recover from read errors and bad URIs.
+  Future<Script> synthesizeScript(Spannable node, Uri readableUri) {
+    unimplemented(node, 'Compiler.synthesizeScript');
     return null;
   }
 
@@ -2110,6 +2105,15 @@ abstract class Compiler implements DiagnosticListener {
     }
     backend.forgetElement(element);
   }
+
+  bool elementHasCompileTimeError(Element element) {
+    return elementsWithCompileTimeErrors.contains(element);
+  }
+
+  EventSink<String> outputProvider(String name, String extension) {
+    if (compilationFailed) return new NullSink('$name.$extension');
+    return userOutputProvider(name, extension);
+  }
 }
 
 class CompilerTask {
@@ -2121,7 +2125,7 @@ class CompilerTask {
       : this.compiler = compiler,
         watch = (compiler.verbose) ? new Stopwatch() : null;
 
-  String get name => 'Unknown task';
+  String get name => "Unknown task '${this.runtimeType}'";
   int get timing => (watch != null) ? watch.elapsedMilliseconds : 0;
 
   int get timingMicroseconds => (watch != null) ? watch.elapsedMicroseconds : 0;
@@ -2152,16 +2156,6 @@ class CompilerTask {
 
   measureElement(Element element, action()) {
     compiler.withCurrentElement(element, () => measure(action));
-  }
-}
-
-class CompilerCancelledException implements Exception {
-  final String reason;
-  CompilerCancelledException(this.reason);
-
-  String toString() {
-    String banner = 'compiler cancelled';
-    return (reason != null) ? '$banner: $reason' : '$banner';
   }
 }
 
@@ -2234,6 +2228,9 @@ bool invariant(Spannable spannable, var condition, {var message: null}) {
 
 /// Returns `true` when [s] is private if used as an identifier.
 bool isPrivateName(String s) => !s.isEmpty && s.codeUnitAt(0) == $_;
+
+/// Returns `true` when [s] is public if used as an identifier.
+bool isPublicName(String s) => !isPrivateName(s);
 
 /// A sink that drains into /dev/null.
 class NullSink implements EventSink<String> {
@@ -2408,6 +2405,22 @@ class _CompilerCoreTypes implements CoreTypes {
 
   @override
   InterfaceType get stringType =>  stringClass.computeType(compiler);
+
+  @override
+  InterfaceType iterableType([DartType elementType = const DynamicType()]) {
+    return iterableClass.computeType(compiler)
+        .createInstantiation([elementType]);
+  }
+
+  @override
+  InterfaceType futureType([DartType elementType = const DynamicType()]) {
+    return futureClass.computeType(compiler).createInstantiation([elementType]);
+  }
+
+  @override
+  InterfaceType streamType([DartType elementType = const DynamicType()]) {
+    return streamClass.computeType(compiler).createInstantiation([elementType]);
+  }
 }
 
 typedef void InternalErrorFunction(Spannable location, String message);
