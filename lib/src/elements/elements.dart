@@ -349,6 +349,8 @@ abstract class Element implements Entity {
   Element get enclosingClassOrCompilationUnit;
   Element get outermostEnclosingMemberOrTopLevel;
 
+  // TODO(johnniwinther): Replace uses of this with [enclosingClass] when
+  // [ClosureClassElement] has been removed.
   /// The enclosing class that defines the type environment for this element.
   ClassElement get contextClass;
 
@@ -428,7 +430,7 @@ class Elements {
   static bool isUnresolved(Element e) {
     return e == null || e.isErroneous;
   }
-  static bool isErroneousElement(Element e) => e != null && e.isErroneous;
+  static bool isErroneous(Element e) => e != null && e.isErroneous;
 
   /// Unwraps [element] reporting any warnings attached to it, if any.
   static Element unwrap(Element element,
@@ -1053,6 +1055,12 @@ abstract class ParameterElement extends Element
 
   /// The function on which this parameter is declared.
   FunctionElement get functionDeclaration;
+
+  /// `true` if this parameter is named.
+  bool get isNamed;
+
+  /// `true` if this parameter is optional.
+  bool get isOptional;
 }
 
 /// A formal parameter on a function or constructor that introduces a local
@@ -1133,6 +1141,9 @@ abstract class FunctionElement extends Element
 
   bool get hasFunctionSignature;
 
+  /// The parameters of this functions.
+  List<ParameterElement> get parameters;
+
   /// The type of this function.
   FunctionType get type;
 
@@ -1146,16 +1157,16 @@ abstract class FunctionElement extends Element
 /// Enum for the synchronous/asynchronous function body modifiers.
 class AsyncMarker {
   /// The default function body marker.
-  static AsyncMarker SYNC = const AsyncMarker._();
+  static const AsyncMarker SYNC = const AsyncMarker._();
 
   /// The `sync*` function body marker.
-  static AsyncMarker SYNC_STAR = const AsyncMarker._(isYielding: true);
+  static const AsyncMarker SYNC_STAR = const AsyncMarker._(isYielding: true);
 
   /// The `async` function body marker.
-  static AsyncMarker ASYNC = const AsyncMarker._(isAsync: true);
+  static const AsyncMarker ASYNC = const AsyncMarker._(isAsync: true);
 
   /// The `async*` function body marker.
-  static AsyncMarker ASYNC_STAR =
+  static const AsyncMarker ASYNC_STAR =
       const AsyncMarker._(isAsync: true, isYielding: true);
 
   /// Is `true` if this marker defines the function body to have an
@@ -1374,11 +1385,8 @@ abstract class ClassElement extends TypeDeclarationElement
   Element lookupSuperMemberInLibrary(String memberName,
                                      LibraryElement library);
 
-  Element validateConstructorLookupResults(Selector selector,
-                                           Element result,
-                                           Element noMatch(Element));
-
-  Element lookupConstructor(Selector selector, [Element noMatch(Element)]);
+  ConstructorElement lookupDefaultConstructor();
+  ConstructorElement lookupConstructor(String name);
 
   void forEachMember(void f(ClassElement enclosingClass, Element member),
                      {bool includeBackendMembers: false,
@@ -1422,7 +1430,7 @@ abstract class MixinApplicationElement extends ClassElement {
 /// Enum declaration.
 abstract class EnumClassElement extends ClassElement {
   /// The static fields implied by the enum values.
-  Iterable<FieldElement> get enumValues;
+  List<FieldElement> get enumValues;
 }
 
 /// The label entity defined by a labeled statement.

@@ -30,6 +30,10 @@ class Glue {
     return _emitter.constantReference(value);
   }
 
+  Element getStringConversion() {
+    return _backend.getStringInterpolationHelper();
+  }
+
   reportInternalError(String message) {
     _compiler.internalError(_compiler.currentElement, message);
   }
@@ -72,11 +76,43 @@ class Glue {
     return _backend.isInterceptedSelector(selector);
   }
 
+  bool isInterceptedMethod(Element element) {
+    return _backend.isInterceptedMethod(element);
+  }
+
   Set<ClassElement> getInterceptedClassesOn(Selector selector) {
     return _backend.getInterceptedClassesOn(selector.name);
   }
 
   void registerSpecializedGetInterceptor(Set<ClassElement> classes) {
     _backend.registerSpecializedGetInterceptor(classes);
+  }
+
+  js.Expression constructorAccess(ClassElement element) {
+    return _backend.emitter.constructorAccess(element);
+  }
+
+  String instanceFieldPropertyName(Element field) {
+    return _namer.instanceFieldPropertyName(field);
+  }
+
+  String instanceMethodName(FunctionElement element) {
+    return _namer.instanceMethodName(element);
+  }
+
+  js.Expression prototypeAccess(ClassElement e,
+                                {bool hasBeenInstantiated: false}) {
+    return _emitter.prototypeAccess(e,
+        hasBeenInstantiated: hasBeenInstantiated);
+  }
+
+
+  String getInterceptorName(Set<ClassElement> interceptedClasses) {
+    return _backend.namer.nameForGetInterceptor(interceptedClasses);
+  }
+
+  js.Expression getInterceptorLibrary() {
+    return new js.VariableUse(
+        _backend.namer.globalObjectFor(_backend.interceptorsLibrary));
   }
 }

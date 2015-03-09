@@ -184,6 +184,10 @@ class _RandomAccessFile {
   static _flush(int id) {
     throw new UnsupportedError("RandomAccessFile._flush");
   }
+  @patch
+  static _lock(int id, int lock, int start, int end) {
+    throw new UnsupportedError("RandomAccessFile._lock");
+  }
 }
 
 @patch
@@ -271,7 +275,8 @@ class Process {
       {String workingDirectory,
        Map<String, String> environment,
        bool includeParentEnvironment: true,
-       bool runInShell: false}) {
+       bool runInShell: false,
+       ProcessStartMode mode: ProcessStartMode.NORMAL}) {
     throw new UnsupportedError("Process.start");
   }
 
@@ -299,6 +304,12 @@ class Process {
        Encoding stdoutEncoding: SYSTEM_ENCODING,
        Encoding stderrEncoding: SYSTEM_ENCODING}) {
     throw new UnsupportedError("Process.runSync");
+  }
+
+  @patch
+  static bool killPid(
+      int pid, [ProcessSignal signal = ProcessSignal.SIGTERM]) {
+    throw new UnsupportedError("Process.killPid");
   }
 }
 
@@ -348,7 +359,8 @@ class RawServerSocket {
   static Future<RawServerSocket> bind(address,
                                       int port,
                                       {int backlog: 0,
-                                       bool v6Only: false}) {
+                                       bool v6Only: false,
+                                       bool shared: false}) {
     throw new UnsupportedError("RawServerSocket.bind");
   }
 }
@@ -359,7 +371,8 @@ class ServerSocket {
   static Future<ServerSocket> bind(address,
                                    int port,
                                    {int backlog: 0,
-                                    bool v6Only: false}) {
+                                    bool v6Only: false,
+                                    bool shared: false}) {
     throw new UnsupportedError("ServerSocket.bind");
   }
 }
@@ -367,7 +380,7 @@ class ServerSocket {
 @patch
 class RawSocket {
   @patch
-  static Future<RawSocket> connect(host, int port) {
+  static Future<RawSocket> connect(host, int port, {sourceAddress}) {
     throw new UnsupportedError("RawSocket constructor");
   }
 }
@@ -375,7 +388,7 @@ class RawSocket {
 @patch
 class Socket {
   @patch
-  static Future<Socket> connect(host, int port) {
+  static Future<Socket> connect(host, int port, {sourceAddress}) {
     throw new UnsupportedError("Socket constructor");
   }
 }
@@ -451,16 +464,16 @@ class _WindowsCodePageEncoder {
 @patch
 class _Filter {
   @patch
-  static _Filter newZLibDeflateFilter(bool gzip, int level,
-                                      int windowBits, int memLevel,
-                                      int strategy,
-                                      List<int> dictionary, bool raw) {
-    throw new UnsupportedError("newZLibDeflateFilter");
+  static _Filter _newZLibDeflateFilter(bool gzip, int level,
+                                       int windowBits, int memLevel,
+                                       int strategy,
+                                       List<int> dictionary, bool raw) {
+    throw new UnsupportedError("_newZLibDeflateFilter");
   }
   @patch
-  static _Filter newZLibInflateFilter(int windowBits,
-                                      List<int> dictionary, bool raw) {
-    throw new UnsupportedError("newZLibInflateFilter");
+  static _Filter _newZLibInflateFilter(int windowBits,
+                                       List<int> dictionary, bool raw) {
+    throw new UnsupportedError("_newZLibInflateFilter");
   }
 }
 
@@ -491,15 +504,15 @@ class Stdin {
 @patch
 class Stdout {
   @patch
-  bool get hasTerminal {
+  bool _hasTerminal(int fd) {
     throw new UnsupportedError("Stdout.hasTerminal");
   }
   @patch
-  int get terminalColumns {
+  int _terminalColumns(int fd) {
     throw new UnsupportedError("Stdout.terminalColumns");
   }
   @patch
-  int get terminalLines {
+  int _terminalLines(int fd) {
     throw new UnsupportedError("Stdout.terminalLines");
   }
 }
@@ -507,7 +520,7 @@ class Stdout {
 @patch
 class _FileSystemWatcher {
   @patch
-  static Stream<FileSystemEvent> watch(
+  static Stream<FileSystemEvent> _watch(
       String path, int events, bool recursive) {
     throw new UnsupportedError("_FileSystemWatcher.watch");
   }
@@ -520,7 +533,7 @@ class _FileSystemWatcher {
 @patch
 class _IOService {
   @patch
-  static Future dispatch(int request, List data) {
-    throw new UnsupportedError("_IOService.dispatch");
+  static Future _dispatch(int request, List data) {
+    throw new UnsupportedError("_IOService._dispatch");
   }
 }

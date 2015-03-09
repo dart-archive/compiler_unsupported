@@ -47,16 +47,24 @@ class Builder extends cps_ir.Visitor<Node> {
   final dart2js.InternalErrorFunction internalError;
 
   /// Maps variable/parameter elements to the Tree variables that represent it.
-  final Map<Element, List<Variable>> element2variables =
-      <Element,List<Variable>>{};
+  final Map<Local, List<Variable>> local2variables = <Local, List<Variable>>{};
 
-  /// Like [element2variables], except for closure variables.
-  final Map<cps_ir.ClosureVariable, Variable> local2closure =
-      <cps_ir.ClosureVariable, Variable>{};
+  /// Like [local2variables], except for mutable variables.
+  final Map<cps_ir.MutableVariable, Variable> local2mutable =
+      <cps_ir.MutableVariable, Variable>{};
 
   // Continuations with more than one use are replaced with Tree labels.  This
   // is the mapping from continuations to labels.
   final Map<cps_ir.Continuation, Label> labels = <cps_ir.Continuation, Label>{};
+
+  /// A stack of singly-used labels that can be safely inlined at their use
+  /// site.
+  ///
+  /// Code for continuations with exactly one use is inlined at the use site.
+  /// This is not safe if the code is moved inside the scope of an exception
+  /// handler (i.e., into a try block).  We keep a stack of singly-referenced
+  /// continuations that are in scope without crossing a binding for a handler.
+  List<cps_ir.Continuation> safeForInlining = <cps_ir.Continuation>[];
 
   ExecutableElement currentElement;
   cps_ir.Continuation returnContinuation;
@@ -73,12 +81,27 @@ class Builder extends cps_ir.Visitor<Node> {
   /// variables.
   Variable phiTempVar;
 
-  Variable getClosureVariable(cps_ir.ClosureVariable irVariable) {
+  Variable addMutableVariable(cps_ir.MutableVariable irVariable) {
     if (irVariable.host != currentElement) {
-      return parent.getClosureVariable(irVariable);
+      return parent.addMutableVariable(irVariable);
     }
-    return local2closure.putIfAbsent(irVariable,
-        () => new Variable(currentElement, irVariable.hint));
+    assert(!local2mutable.containsKey(irVariable));
+    Variable variable = new Variable(currentElement, irVariable.hint);
+    local2mutable[irVariable] = variable;
+    return variable;
+  }
+
+  Variable getMutableVariable(cps_ir.MutableVariable mutableVariable) {
+    if (mutableVariable.host != currentElement) {
+      return parent.getMutableVariable(mutableVariable);
+    }
+    return local2mutable[mutableVariable];
+  }
+
+  VariableUse getMutableVariableUse(
+        cps_ir.Reference<cps_ir.MutableVariable> reference) {
+    Variable variable = getMutableVariable(reference.definition);
+    return new VariableUse(variable);
   }
 
   /// Obtains the variable representing the given primitive. Returns null for
@@ -87,7 +110,7 @@ class Builder extends cps_ir.Visitor<Node> {
     if (primitive.registerIndex == null) {
       return null; // variable is unused
     }
-    List<Variable> variables = element2variables.putIfAbsent(primitive.hint,
+    List<Variable> variables = local2variables.putIfAbsent(primitive.hint,
         () => <Variable>[]);
     while (variables.length <= primitive.registerIndex) {
       variables.add(new Variable(currentElement, primitive.hint));
@@ -99,15 +122,14 @@ class Builder extends cps_ir.Visitor<Node> {
   /// referred to by [reference].
   /// This increments the reference count for the given variable, so the
   /// returned expression must be used in the tree.
-  Expression getVariableReference(cps_ir.Reference reference) {
+  VariableUse getVariableUse(cps_ir.Reference<cps_ir.Primitive> reference) {
     Variable variable = getVariable(reference.definition);
     if (variable == null) {
       internalError(
           CURRENT_ELEMENT_SPANNABLE,
           "Reference to ${reference.definition} has no register");
     }
-    ++variable.readCount;
-    return variable;
+    return new VariableUse(variable);
   }
 
   ExecutableDefinition build(cps_ir.ExecutableDefinition node) {
@@ -138,24 +160,18 @@ class Builder extends cps_ir.Visitor<Node> {
     return new FieldDefinition(node.element, body);
   }
 
-  Variable getFunctionParameter(cps_ir.Definition variable) {
+  Variable addFunctionParameter(cps_ir.Definition variable) {
     if (variable is cps_ir.Parameter) {
       return getVariable(variable);
     } else {
-      return getClosureVariable(variable as cps_ir.ClosureVariable);
+      return addMutableVariable(variable as cps_ir.MutableVariable);
     }
   }
 
   FunctionDefinition buildFunction(cps_ir.FunctionDefinition node) {
     currentElement = node.element;
-    List<Variable> parameters = <Variable>[];
-    for (cps_ir.Definition p in node.parameters) {
-      Variable parameter = getFunctionParameter(p);
-      assert(parameter != null);
-      ++parameter.writeCount; // Being a parameter counts as a write.
-      parameters.add(parameter);
-    }
-
+    List<Variable> parameters =
+        node.parameters.map(addFunctionParameter).toList();
     Statement body;
     if (!node.isAbstract) {
       returnContinuation = node.body.returnContinuation;
@@ -169,13 +185,8 @@ class Builder extends cps_ir.Visitor<Node> {
 
   ConstructorDefinition buildConstructor(cps_ir.ConstructorDefinition node) {
     currentElement = node.element;
-    List<Variable> parameters = <Variable>[];
-    for (cps_ir.Definition p in node.parameters) {
-      Variable parameter = getFunctionParameter(p);
-      assert(parameter != null);
-      ++parameter.writeCount; // Being a parameter counts as a write.
-      parameters.add(parameter);
-    }
+    List<Variable> parameters =
+        node.parameters.map(addFunctionParameter).toList();
     List<Initializer> initializers;
     Statement body;
     if (!node.isAbstract) {
@@ -190,16 +201,28 @@ class Builder extends cps_ir.Visitor<Node> {
         body, initializers, node.localConstants, node.defaultParameterValues);
   }
 
-
+  /// Returns a list of variables corresponding to the arguments to a method
+  /// call or similar construct.
+  ///
+  /// The `readCount` for these variables will be incremented.
+  ///
+  /// The list will be typed as a list of [Expression] to allow inplace updates
+  /// on the list during the rewrite phases.
   List<Expression> translateArguments(List<cps_ir.Reference> args) {
     return new List<Expression>.generate(args.length,
-         (int index) => getVariableReference(args[index]),
+         (int index) => getVariableUse(args[index]),
          growable: false);
   }
 
+  /// Returns the list of variables corresponding to the arguments to a join
+  /// continuation.
+  ///
+  /// The `readCount` of these variables will not be incremented. Instead,
+  /// [buildPhiAssignments] will handle the increment, if necessary.
   List<Variable> translatePhiArguments(List<cps_ir.Reference> args) {
     return new List<Variable>.generate(args.length,
-         (int index) => getVariableReference(args[index]));
+         (int index) => getVariable(args[index].definition),
+         growable: false);
   }
 
   Statement buildContinuationAssignment(
@@ -249,9 +272,9 @@ class Builder extends cps_ir.Visitor<Node> {
     Statement first, current;
     void addAssignment(Variable dst, Variable src) {
       if (first == null) {
-        first = current = new Assign(dst, src, null);
+        first = current = new Assign(dst, new VariableUse(src), null);
       } else {
-        current = current.next = new Assign(dst, src, null);
+        current = current.next = new Assign(dst, new VariableUse(src), null);
       }
     }
 
@@ -346,41 +369,71 @@ class Builder extends cps_ir.Visitor<Node> {
   }
 
   Statement visitLetCont(cps_ir.LetCont node) {
-    Label label;
-    if (node.continuation.hasMultipleUses) {
-      label = new Label();
-      labels[node.continuation] = label;
+    // Introduce labels for continuations that need them.
+    int safeForInliningLengthOnEntry = safeForInlining.length;
+    for (cps_ir.Continuation continuation in node.continuations) {
+      if (continuation.hasMultipleUses) {
+        labels[continuation] = new Label();
+      } else {
+        safeForInlining.add(continuation);
+      }
     }
     Statement body = visit(node.body);
-    // The continuation's body is not always translated directly here because
-    // it may have been already translated:
+    safeForInlining.length = safeForInliningLengthOnEntry;
+    // Continuations are bound at the same level, but they have to be
+    // translated as if nested.  This is because the body can invoke any
+    // of them from anywhere, so it must be nested inside all of them.
+    //
+    // The continuation bodies are not always translated directly here because
+    // they may have been already translated:
     //   * For singly-used continuations, the continuation's body is
     //     translated at the site of the continuation invocation.
     //   * For recursive continuations, there is a single non-recursive
     //     invocation.  The continuation's body is translated at the site
     //     of the non-recursive continuation invocation.
     // See visitInvokeContinuation for the implementation.
-    if (label == null || node.continuation.isRecursive) return body;
-    return new LabeledStatement(label, body, visit(node.continuation.body));
+    Statement current = body;
+    for (cps_ir.Continuation continuation in node.continuations.reversed) {
+      Label label = labels[continuation];
+      if (label != null && !continuation.isRecursive) {
+        current =
+            new LabeledStatement(label, current, visit(continuation.body));
+      }
+    }
+    return current;
+  }
+
+  Statement visitLetHandler(cps_ir.LetHandler node) {
+    List<cps_ir.Continuation> saved = safeForInlining;
+    safeForInlining = <cps_ir.Continuation>[];
+    Statement tryBody = visit(node.body);
+    safeForInlining = saved;
+    List<Variable> catchParameters =
+        node.handler.parameters.map(getVariable).toList();
+    Statement catchBody = visit(node.handler.body);
+    return new Try(tryBody, catchParameters, catchBody);
   }
 
   Statement visitInvokeStatic(cps_ir.InvokeStatic node) {
     // Calls are translated to direct style.
     List<Expression> arguments = translateArguments(node.arguments);
-    Expression invoke = new InvokeStatic(node.target, node.selector, arguments);
+    Expression invoke = new InvokeStatic(node.target, node.selector, arguments,
+        sourceInformation: node.sourceInformation);
     return continueWithExpression(node.continuation, invoke);
   }
 
   Statement visitInvokeMethod(cps_ir.InvokeMethod node) {
-    Expression invoke = new InvokeMethod(getVariableReference(node.receiver),
+    Expression invoke = new InvokeMethod(getVariableUse(node.receiver),
                                          node.selector,
                                          translateArguments(node.arguments));
     return continueWithExpression(node.continuation, invoke);
   }
 
-  Statement visitInvokeSuperMethod(cps_ir.InvokeSuperMethod node) {
+  Statement visitInvokeMethodDirectly(cps_ir.InvokeMethodDirectly node) {
+    Expression receiver = getVariableUse(node.receiver);
     List<Expression> arguments = translateArguments(node.arguments);
-    Expression invoke = new InvokeSuperMethod(node.selector, arguments);
+    Expression invoke = new InvokeMethodDirectly(receiver, node.target,
+        node.selector, arguments);
     return continueWithExpression(node.continuation, invoke);
   }
 
@@ -404,25 +457,30 @@ class Builder extends cps_ir.Visitor<Node> {
     }
   }
 
-  Expression visitGetClosureVariable(cps_ir.GetClosureVariable node) {
-    return getClosureVariable(node.variable.definition);
+  Statement visitLetMutable(cps_ir.LetMutable node) {
+    Variable variable = addMutableVariable(node.variable);
+    Expression value = getVariableUse(node.value);
+    return new Assign(variable, value, visit(node.body), isDeclaration: true);
   }
 
-  Statement visitSetClosureVariable(cps_ir.SetClosureVariable node) {
-    Variable variable = getClosureVariable(node.variable.definition);
-    Expression value = getVariableReference(node.value);
-    return new Assign(variable, value, visit(node.body),
-                      isDeclaration: node.isDeclaration);
+  Expression visitGetMutableVariable(cps_ir.GetMutableVariable node) {
+    return getMutableVariableUse(node.variable);
+  }
+
+  Statement visitSetMutableVariable(cps_ir.SetMutableVariable node) {
+    Variable variable = getMutableVariable(node.variable.definition);
+    Expression value = getVariableUse(node.value);
+    return new Assign(variable, value, visit(node.body));
   }
 
   Statement visitDeclareFunction(cps_ir.DeclareFunction node) {
-    Variable variable = getClosureVariable(node.variable.definition);
+    Variable variable = addMutableVariable(node.variable);
     FunctionDefinition function = makeSubFunction(node.definition);
     return new FunctionDeclaration(variable, function, visit(node.body));
   }
 
   Statement visitTypeOperator(cps_ir.TypeOperator node) {
-    Expression receiver = getVariableReference(node.receiver);
+    Expression receiver = getVariableUse(node.receiver);
     Expression concat =
         new TypeOperator(receiver, node.type, isTypeTest: node.isTypeTest);
     return continueWithExpression(node.continuation, concat);
@@ -444,9 +502,9 @@ class Builder extends cps_ir.Visitor<Node> {
     cps_ir.Continuation cont = node.continuation.definition;
     if (cont == returnContinuation) {
       assert(node.arguments.length == 1);
-      return new Return(getVariableReference(node.arguments.single));
+      return new Return(getVariableUse(node.arguments.single));
     } else {
-      List<Expression> arguments = translatePhiArguments(node.arguments);
+      List<Variable> arguments = translatePhiArguments(node.arguments);
       return buildPhiAssignments(cont.parameters, arguments,
           () {
             // Translate invocations of recursive and non-recursive
@@ -465,9 +523,13 @@ class Builder extends cps_ir.Visitor<Node> {
                   ? new Continue(labels[cont])
                   : new WhileTrue(labels[cont], visit(cont.body));
             } else {
-              return cont.hasExactlyOneUse
-                  ? visit(cont.body)
-                  : new Break(labels[cont]);
+              if (cont.hasExactlyOneUse) {
+                if (safeForInlining.contains(cont)) {
+                  return visit(cont.body);
+                }
+                labels[cont] = new Label();
+              }
+              return new Break(labels[cont]);
             }
           });
     }
@@ -510,8 +572,8 @@ class Builder extends cps_ir.Visitor<Node> {
         node.type,
         new List<LiteralMapEntry>.generate(node.entries.length, (int index) {
           return new LiteralMapEntry(
-              getVariableReference(node.entries[index].key),
-              getVariableReference(node.entries[index].value));
+              getVariableUse(node.entries[index].key),
+              getVariableUse(node.entries[index].value));
         })
     );
   }
@@ -548,7 +610,7 @@ class Builder extends cps_ir.Visitor<Node> {
   }
 
   Expression visitIsTrue(cps_ir.IsTrue node) {
-    return getVariableReference(node.value);
+    return getVariableUse(node.value);
   }
 }
 

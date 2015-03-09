@@ -6,6 +6,7 @@ set -e
 
 pushd trunk > /dev/null
 svn update --parents dart/pkg/compiler
+svn update --parents dart/pkg/js_ast
 svn update --parents dart/sdk
 svn update --parents dart/tools
 

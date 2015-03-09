@@ -25,7 +25,9 @@ import 'inferrer/concrete_types_inferrer.dart' as concrete_types_inferrer;
 import 'inferrer/type_graph_inferrer.dart' as type_graph_inferrer;
 import 'io/code_output.dart' as io;
 import 'js/js.dart' as js;
+import 'js_backend/js_backend.dart' as js_backend;
 import 'js_emitter/js_emitter.dart' as js_emitter;
+import 'js_emitter/program_builder.dart' as program_builder;
 import 'source_file_provider.dart' as source_file_provider;
 import 'ssa/ssa.dart' as ssa;
 import 'tree/tree.dart' as tree;
@@ -49,10 +51,11 @@ void main(List<String> arguments) {
   useSetlet(null);
   useImmutableEmptySet(null);
   useElementVisitor(new ElementVisitor());
-  useJs(new js.Program(null));
-  useJs(new js.Blob(null));
-  useJs(new js.NamedFunction(null, null));
-  useJs(new js.ArrayHole());
+  useJsNode(new js.Program(null));
+  useJsNode(new js.NamedFunction(null, null));
+  useJsNode(new js.ArrayHole());
+  useJsOther(new js.SimpleJavaScriptPrintingContext());
+  useJsBackend(null);
   useConcreteTypesInferrer(null);
   useColor();
   useFilenames();
@@ -60,11 +63,12 @@ void main(List<String> arguments) {
   useCodeBuffer(null);
   usedByTests();
   useElements(null, null, null, null, null);
-  useIr(null, null, null);
+  useIr(null, null);
   useCompiler(null);
   useTypes();
   useCodeEmitterTask(null);
   useScript(null);
+  useProgramBuilder(null);
 }
 
 useApi() {
@@ -166,8 +170,16 @@ void useElementVisitor(ElementVisitor visitor) {
     ..visitWarnOnUseElement(null);
 }
 
-useJs(js.Node node) {
+useJsNode(js.Node node) {
   node.asVariableUse();
+}
+
+useJsOther(js.SimpleJavaScriptPrintingContext context) {
+  context.getText();
+}
+
+useJsBackend(js_backend.JavaScriptBackend backend) {
+  backend.assembleCode(null);
 }
 
 useConcreteTypesInferrer(concrete_types_inferrer.ConcreteTypesInferrer c) {
@@ -192,8 +204,6 @@ useSsa(ssa.HInstruction instruction) {
 }
 
 useCodeBuffer(io.CodeBuffer buffer) {
-  buffer.writeln();
-  new io.LineColumnCodeOutput(null);
 }
 
 usedByTests() {
@@ -228,23 +238,8 @@ useElements(
   pfe.copyWithEnclosing(null);
 }
 
-useIr(cps_ir_nodes_sexpr.SExpressionStringifier stringifier,
-      ir_builder.IrBuilderTask task,
+useIr(ir_builder.IrBuilderTask task,
       ir_builder.IrBuilder builder) {
-  new cps_ir_nodes_sexpr.SExpressionStringifier();
-  stringifier
-    ..newContinuationName(null)
-    ..newValueName(null)
-    ..visitConstant(null)
-    ..visitContinuation(null)
-    ..visitDefinition(null)
-    ..visitExpression(null)
-    ..visitFunctionDefinition(null)
-    ..visitFieldDefinition(null)
-    ..visitInvokeStatic(null)
-    ..visitLetCont(null)
-    ..visitNode(null)
-    ..visitParameter(null);
   task
     ..hasIr(null)
     ..getIr(null);
@@ -254,8 +249,7 @@ useIr(cps_ir_nodes_sexpr.SExpressionStringifier stringifier,
     ..buildBooleanLiteral(null)
     ..buildNullLiteral()
     ..buildStringLiteral(null)
-    ..buildDynamicGet(null, null)
-    ..buildSuperGet(null);
+    ..buildDynamicGet(null, null);
 }
 
 useCompiler(dart2jslib.Compiler compiler) {
@@ -276,4 +270,9 @@ useCodeEmitterTask(js_emitter.CodeEmitterTask codeEmitterTask) {
 
 useScript(dart2jslib.Script script) {
   script.copyWithFile(null);
+}
+
+useProgramBuilder(program_builder.ProgramBuilder builder) {
+  builder.buildMethodHackForIncrementalCompilation(null);
+  builder.buildFieldsHackForIncrementalCompilation(null);
 }

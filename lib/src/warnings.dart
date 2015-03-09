@@ -40,7 +40,7 @@ const DONT_KNOW_HOW_TO_FIX = "Computer says no!";
  *
  * 8. Do not try to be cute or funny. It is extremely frustrating to work on a
  * product that crashes with a "tongue-in-cheek" message, especially if you did
- * not want to use this product to begin with with.
+ * not want to use this product to begin with.
  *
  * 9. Do not lie, that is, do not write error messages containing phrases like
  * "can't happen".  If the user ever saw this message, it would be a
@@ -182,7 +182,19 @@ main() => new B();
       "Cannot resolve type '#{typeName}'.");
 
   static const MessageKind DUPLICATE_DEFINITION = const MessageKind(
-      "Duplicate definition of '#{name}'.");
+      "Duplicate definition of '#{name}'.",
+      howToFix: "Try to rename or remove this definition.",
+      examples: const ["""
+class C {
+  void f() {}
+  int get f => 1;
+}
+
+main() {
+  new C();
+}
+
+"""]);
 
   static const MessageKind EXISTING_DEFINITION = const MessageKind(
       "Existing definition of '#{name}'.");
@@ -800,7 +812,6 @@ main() => new C();
   static const MessageKind CANNOT_EXTEND_ENUM = const MessageKind(
       "Class '#{className}' can't extend the type '#{enumType}' because "
       "it is declared by an enum.",
-      options: const ['--enable-enum'],
       howToFix: "Try making '#{enumType}' a normal class or removing the "
         "'extends' clause.",
       examples: const ["""
@@ -811,7 +822,6 @@ main() => new B();"""]);
   static const MessageKind CANNOT_IMPLEMENT_ENUM = const MessageKind(
       "Class '#{className}' can't implement the type '#{enumType}' "
       "because it is declared by an enum.",
-      options: const ['--enable-enum'],
       howToFix: "Try making '#{enumType}' a normal class or removing the "
         "type from the 'implements' clause.",
       examples: const ["""
@@ -822,7 +832,6 @@ main() => new B();"""]);
   static const MessageKind CANNOT_MIXIN_ENUM = const MessageKind(
       "Class '#{className}' can't mixin the type '#{enumType}' because it "
       "is declared by an enum.",
-      options: const ['--enable-enum'],
       howToFix: "Try making '#{enumType}' a normal class or removing the "
         "type from the 'with' clause.",
       examples: const ["""
@@ -832,7 +841,6 @@ main() => new B();"""]);
 
   static const MessageKind CANNOT_INSTANTIATE_ENUM = const MessageKind(
       "Enum type '#{enumName}' cannot be instantiated.",
-      options: const ['--enable-enum'],
       howToFix: "Try making '#{enumType}' a normal class or use an enum "
                 "constant.",
       examples: const ["""
@@ -843,7 +851,6 @@ main() => const Enum(0);"""]);
 
   static const MessageKind EMPTY_ENUM_DECLARATION = const MessageKind(
       "Enum '#{enumName}' must contain at least one value.",
-      options: const ['--enable-enum'],
       howToFix: "Try adding an enum constant or making #{enumName} a "
                 "normal class.",
       examples: const ["""
@@ -852,7 +859,6 @@ main() { Enum e; }"""]);
 
   static const MessageKind MISSING_ENUM_CASES = const MessageKind(
       "Missing enum constants in switch statement: #{enumValues}.",
-      options: const ['--enable-enum'],
       howToFix: "Try adding the missing constants or a default case.",
       examples: const ["""
 enum Enum { A, B }
@@ -1265,6 +1271,11 @@ main() => A.A = 1;
   static const MessageKind MISSING_FACTORY_KEYWORD = const MessageKind(
       "Did you forget a factory keyword here?");
 
+  static const MessageKind NO_SUCH_METHOD_IN_NATIVE =
+      const MessageKind(
+          "'NoSuchMethod' is not supported for classes that extend native "
+          "classes.");
+
   static const MessageKind DEFERRED_LIBRARY_DART_2_DART =
       const MessageKind(
           "Deferred loading is not supported by the dart backend yet."
@@ -1350,9 +1361,6 @@ main() => A.A = 1;
   static const MessageKind OVERRIDE_EQUALS_NOT_HASH_CODE = const MessageKind(
       "The class '#{class}' overrides 'operator==', "
       "but not 'get hashCode'.");
-
-  static const MessageKind PACKAGE_ROOT_NOT_SET = const MessageKind(
-      "Cannot resolve '#{uri}'. Package root has not been set.");
 
   static const MessageKind INTERNAL_LIBRARY_FROM = const MessageKind(
       "Internal library '#{resolvedUri}' is not accessible from "
@@ -1505,6 +1513,11 @@ import 'foo.dart';
 
 main() {}
 """]);
+
+  static const MessageKind READ_SELF_ERROR = const MessageKind(
+      "#{exception}",
+      // Don't know how to fix since the underlying error is unknown.
+      howToFix: DONT_KNOW_HOW_TO_FIX);
 
   static const MessageKind EXTRANEOUS_MODIFIER = const MessageKind(
       "Can't have modifier '#{modifier}' here.",
@@ -2067,28 +2080,6 @@ Please include the following information:
     " require a preamble file located in:\n"
     "  <sdk>/lib/_internal/compiler/js_lib/preambles.");
 
-
-  static const MessageKind EXPERIMENTAL_ENUMS = const MessageKind(
-      "Experimental language feature 'enums' is not supported.",
-      howToFix: "Use option '--enable-enum' to use enum declarations.",
-      examples: const ["""
-enum Enum { A, B, C }
-main() => print(Enum.A);
-"""]);
-
-  static const MessageKind EXPERIMENTAL_ASYNC_AWAIT = const MessageKind(
-      "Experimental language feature 'async/await' is not supported.");
-
-  static const MessageKind INVALID_STARRED_KEYWORD = const MessageKind(
-      "Invalid '#{keyword}' keyword.",
-      options: const ['--enable-async'],
-      howToFix: "Try removing whitespace between '#{keyword}' and '*'.",
-      examples: const [
-        "main() async * {}",
-        "main() sync * {}",
-        "main() async* { yield * 0; }"
-      ]);
-
   static const MessageKind INVALID_SYNC_MODIFIER = const MessageKind(
       "Invalid modifier 'sync'.",
       options: const ['--enable-async'],
@@ -2141,9 +2132,20 @@ main() => new A();""",
 """
 class A {
   A();
-  factory A.a() async* => new A();
+  factory A.a() async* {}
 }
 main() => new A.a();"""]);
+
+  static const MessageKind ASYNC_MODIFIER_ON_SETTER =
+      const MessageKind(
+          "The modifier '#{modifier}' is not allowed on setters.",
+          options: const ['--enable-async'],
+          howToFix: "Try removing the '#{modifier}' modifier.",
+          examples: const ["""
+class A {
+  set foo(v) async {}
+}
+main() => new A().foo = 0;"""]);
 
   static const MessageKind YIELDING_MODIFIER_ON_ARROW_BODY =
       const MessageKind(
@@ -2173,6 +2175,23 @@ main() async* {
 main() sync* {
  var yield;
 }"""]);
+
+  static const MessageKind RETURN_IN_GENERATOR =
+      const MessageKind(
+          "'return' with a value is not allowed in a method body using the "
+          "'#{modifier}' modifier.",
+          howToFix: "Try removing the value, replacing 'return' with 'yield' "
+                    "or changing the method body modifier.",
+          examples: const [
+"""
+foo() async* { return 0; }
+main() => foo();
+""",
+
+"""
+foo() sync* { return 0; }
+main() => foo();
+"""]);
 
   static const MessageKind NATIVE_NOT_SUPPORTED = const MessageKind(
       "'native' modifier is not supported.",
@@ -2372,14 +2391,19 @@ main() => foo();
 * Your app imports dart:mirrors via:''''''
 $IMPORT_EXPERIMENTAL_MIRRORS_PADDING#{importChain}
 *
-* Starting with Dart 1.9, you must use the
-* --enable-experimental-mirrors command-line flag to opt-in.
-* You can begin using this flag now if mirrors support is critical.
+* You can disable this message by using the --enable-experimental-mirrors
+* command-line flag.
 *
 * To learn what to do next, please visit:
 *    http://dartlang.org/dart2js-reflection
 ****************************************************************
 ''');
+
+
+  static const MessageKind MIRRORS_LIBRARY_NEW_EMITTER =
+      const MessageKind(
+          "dart:mirrors library is not supported when using the new emitter "
+            "(DART_VM_OPTIONS='-Ddart2js.use.new.emitter=true')");
 
   static const MessageKind CALL_NOT_SUPPORTED_ON_NATIVE_CLASS =
       const MessageKind(

@@ -11,18 +11,14 @@ import 'unsugar.dart';
 
 import '../js_backend.dart';
 import '../../dart2jslib.dart';
-import '../../source_file.dart';
 import '../../cps_ir/cps_ir_nodes.dart' as cps;
 import '../../cps_ir/cps_ir_builder.dart';
 import '../../tree_ir/tree_ir_nodes.dart' as tree_ir;
-import '../../tree/tree.dart' as ast;
 import '../../types/types.dart' show TypeMask, UnionTypeMask, FlatTypeMask,
     ForwardingTypeMask;
-import '../../scanner/scannerlib.dart' as scanner;
 import '../../elements/elements.dart';
-import '../../closure.dart';
 import '../../js/js.dart' as js;
-import '../../io/source_map_builder.dart';
+import '../../io/source_information.dart' show StartEndSourceInformation;
 import '../../tree_ir/tree_ir_builder.dart' as tree_builder;
 import '../../dart_backend/backend_ast_emitter.dart' as backend_ast_emitter;
 import '../../cps_ir/optimizers.dart';
@@ -33,8 +29,7 @@ import '../../tree_ir/optimization/optimization.dart';
 import '../../cps_ir/cps_ir_nodes_sexpr.dart';
 import 'js_tree_builder.dart';
 
-class CspFunctionCompiler implements FunctionCompiler {
-  final IrBuilderTask irBuilderTask;
+class CpsFunctionCompiler implements FunctionCompiler {
   final ConstantSystem constantSystem;
   final Compiler compiler;
   final Glue glue;
@@ -44,12 +39,14 @@ class CspFunctionCompiler implements FunctionCompiler {
   // TODO(karlklose,sigurm): remove and update dart-doc of [compile].
   final FunctionCompiler fallbackCompiler;
 
-  // TODO(sigurdm): Assign this.
-  Tracer tracer;
+  Tracer get tracer => compiler.tracer;
 
-  CspFunctionCompiler(Compiler compiler, JavaScriptBackend backend)
-      : irBuilderTask = new IrBuilderTask(compiler),
-        fallbackCompiler = new ssa.SsaFunctionCompiler(backend, true),
+  IrBuilderTask get irBuilderTask => compiler.irBuilder;
+
+  CpsFunctionCompiler(Compiler compiler, JavaScriptBackend backend,
+                      {bool generateSourceMap: true})
+      : fallbackCompiler =
+            new ssa.SsaFunctionCompiler(backend, generateSourceMap),
         constantSystem = backend.constantSystem,
         compiler = compiler,
         glue = new Glue(compiler);
@@ -63,8 +60,10 @@ class CspFunctionCompiler implements FunctionCompiler {
   js.Fun compile(CodegenWorkItem work) {
     types = new TypeMaskSystem(compiler);
     AstElement element = work.element;
+    JavaScriptBackend backend = compiler.backend;
     return compiler.withCurrentElement(element, () {
-      if (element.library.isPlatformLibrary) {
+      if (element.library.isPlatformLibrary ||
+          element.library == backend.interceptorsLibrary) {
         compiler.log('Using SSA compiler for platform element $element');
         return fallbackCompiler.compile(work);
       }
@@ -97,9 +96,7 @@ class CspFunctionCompiler implements FunctionCompiler {
 
   cps.FunctionDefinition compileToCpsIR(AstElement element) {
     // TODO(sigurdm): Support these constructs.
-    if (element.isGenerativeConstructorBody ||
-        element.enclosingClass is ClosureClassElement ||
-        element.isNative ||
+    if (element.isNative ||
         element.isField) {
       giveUp('unsupported element kind: ${element.name}:${element.kind}');
     }
@@ -108,7 +105,16 @@ class CspFunctionCompiler implements FunctionCompiler {
     if (cpsNode == null) {
       giveUp('unable to build cps definition of $element');
     }
+    if (element.isInstanceMember && !element.isGenerativeConstructorBody) {
+      Selector selector = new Selector.fromElement(cpsNode.element);
+      if (glue.isInterceptedSelector(selector)) {
+        giveUp('cannot compile methods that need interceptor calling '
+            'convention.');
+      }
+    }
+    traceGraph("IR Builder", cpsNode);
     new UnsugarVisitor(glue).rewrite(cpsNode);
+    traceGraph("Unsugaring", cpsNode);
     return cpsNode;
   }
 
@@ -131,7 +137,6 @@ class CspFunctionCompiler implements FunctionCompiler {
 
   cps.FunctionDefinition optimizeCpsIR(cps.FunctionDefinition cpsNode) {
     // Transformations on the CPS IR.
-    traceGraph("IR Builder", cpsNode);
 
     TypePropagator typePropagator = new TypePropagator<TypeMask>(
         compiler.types,
@@ -201,36 +206,7 @@ class CspFunctionCompiler implements FunctionCompiler {
   }
 
   js.Node attachPosition(js.Node node, AstElement element) {
-    // TODO(sra): Attaching positions might be cleaner if the source position
-    // was on a wrapping node.
-    SourceFile sourceFile = sourceFileOfElement(element);
-    String name = element.name;
-    AstElement implementation = element.implementation;
-    ast.Node expression = implementation.node;
-    scanner.Token beginToken;
-    scanner.Token endToken;
-    if (expression == null) {
-      // Synthesized node. Use the enclosing element for the location.
-      beginToken = endToken = element.position;
-    } else {
-      beginToken = expression.getBeginToken();
-      endToken = expression.getEndToken();
-    }
-    // TODO(podivilov): find the right sourceFile here and remove offset
-    // checks below.
-    var sourcePosition, endSourcePosition;
-    if (beginToken.charOffset < sourceFile.length) {
-      sourcePosition =
-          new TokenSourceFileLocation(sourceFile, beginToken, name);
-    }
-    if (endToken.charOffset < sourceFile.length) {
-      endSourcePosition =
-          new TokenSourceFileLocation(sourceFile, endToken, name);
-    }
-    return node.withPosition(sourcePosition, endSourcePosition);
-  }
-
-  SourceFile sourceFileOfElement(Element element) {
-    return element.implementation.compilationUnit.script.file;
+    return node.withSourceInformation(
+        StartEndSourceInformation.computeSourceInformation(element));
   }
 }

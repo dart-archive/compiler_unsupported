@@ -18,12 +18,8 @@ class ClassBuilder {
   final Element element;
   final Namer namer;
 
-  /// Set to true by user if class is indistinguishable from its superclass.
-  bool isTrivial = false;
-
   ClassBuilder(this.element, this.namer);
 
-  // Has the same signature as [DefineStubFunction].
   jsAst.Property addProperty(String name, jsAst.Expression value) {
     jsAst.Property property = new jsAst.Property(js.string(name), value);
     properties.add(property);

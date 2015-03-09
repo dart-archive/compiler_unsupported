@@ -72,13 +72,33 @@ class JSNumber extends Interceptor implements num {
       return JS('int', r'# + 0', truncateToDouble());  // Converts -0.0 to +0.0.
     }
     // This is either NaN, Infinity or -Infinity.
-    throw new UnsupportedError(JS("String", "''+#", this));
+    throw new UnsupportedError(JS("String", '"" + #', this));
   }
 
   int truncate() => toInt();
+
   int ceil() => ceilToDouble().toInt();
+
   int floor() => floorToDouble().toInt();
-  int round() => roundToDouble().toInt();
+
+  int round() {
+    if (this > 0) {
+      // This path excludes the special cases -0.0, NaN and -Infinity, leaving
+      // only +Infinity, for which a direct test is faster than [isFinite].
+      if (JS('bool', r'# !== (1/0)', this)) {
+        return JS('int', r'Math.round(#)', this);
+      }
+    } else if (JS('bool', '# > (-1/0)', this)) {
+      // This test excludes NaN and -Infinity, leaving only -0.0.
+      //
+      // Subtraction from zero rather than negation forces -0.0 to 0.0 so code
+      // inside Math.round and code to handle result never sees -0.0, which on
+      // some JavaScript VMs can be a slow path.
+      return JS('int', r'0 - Math.round(0 - #)', this);
+    }
+    // This is either NaN, Infinity or -Infinity.
+    throw new UnsupportedError(JS("String", '"" + #', this));
+  }
 
   double ceilToDouble() => JS('num', r'Math.ceil(#)', this);
 
@@ -110,8 +130,7 @@ class JSNumber extends Interceptor implements num {
   toDouble() => this;
 
   String toStringAsFixed(int fractionDigits) {
-    checkNum(fractionDigits);
-    // TODO(floitsch): fractionDigits must be an integer.
+    checkInt(fractionDigits);
     if (fractionDigits < 0 || fractionDigits > 20) {
       throw new RangeError(fractionDigits);
     }
@@ -123,8 +142,7 @@ class JSNumber extends Interceptor implements num {
   String toStringAsExponential([int fractionDigits]) {
     String result;
     if (fractionDigits != null) {
-      // TODO(floitsch): fractionDigits must be an integer.
-      checkNum(fractionDigits);
+      checkInt(fractionDigits);
       if (fractionDigits < 0 || fractionDigits > 20) {
         throw new RangeError(fractionDigits);
       }
@@ -137,8 +155,7 @@ class JSNumber extends Interceptor implements num {
   }
 
   String toStringAsPrecision(int precision) {
-    // TODO(floitsch): precision must be an integer.
-    checkNum(precision);
+    checkInt(precision);
     if (precision < 1 || precision > 21) {
       throw new RangeError(precision);
     }
@@ -149,9 +166,33 @@ class JSNumber extends Interceptor implements num {
   }
 
   String toRadixString(int radix) {
-    checkNum(radix);
+    checkInt(radix);
     if (radix < 2 || radix > 36) throw new RangeError(radix);
-    return JS('String', r'#.toString(#)', this, radix);
+    String result = JS('String', r'#.toString(#)', this, radix);
+    const int rightParenCode = 0x29;
+    if (result.codeUnitAt(result.length - 1) != rightParenCode) {
+      return result;
+    }
+    return _handleIEtoString(result);
+  }
+
+  static String _handleIEtoString(String result) {
+    // Result is probably IE's untraditional format for large numbers,
+    // e.g., "8.0000000000008(e+15)" for 0x8000000000000800.toString(16).
+    var match = JS('List|Null',
+                   r'/^([\da-z]+)(?:\.([\da-z]+))?\(e\+(\d+)\)$/.exec(#)',
+                   result);
+    if (match == null) {
+      // Then we don't know how to handle it at all.
+      throw new UnsupportedError("Unexpected toString result: $result");
+    }
+    String result = JS('String', '#', match[1]);
+    int exponent = JS("int", "+#", match[3]);
+    if (match[2] != null) {
+      result = JS('String', '# + #', result, match[2]);
+      exponent -= JS('int', '#.length', match[2]);
+    }
+    return result + "0" * exponent;
   }
 
   // Note: if you change this, also change the function [S].
@@ -343,6 +384,28 @@ class JSInt extends JSNumber implements int, double {
       return _bitCount(_spread(nonneg)) + 32;
     }
     return _bitCount(_spread(nonneg));
+  }
+
+  // Returns pow(this, e) % m.
+  int modPow(int e, int m) {
+    if (e is! int) throw new ArgumentError(e);
+    if (m is! int) throw new ArgumentError(m);
+    if (e < 0) throw new RangeError(e);
+    if (m <= 0) throw new RangeError(m);
+    if (e == 0) return 1;
+    int b = this;
+    if (b < 0 || b > m) {
+      b %= m;
+    }
+    int r = 1;
+    while (e > 0) {
+      if (e.isOdd) {
+        r = (r * b) % m;
+      }
+      e ~/= 2;
+      b = (b * b) % m;
+    }
+    return r;
   }
 
   // Assumes i is <= 32-bit and unsigned.

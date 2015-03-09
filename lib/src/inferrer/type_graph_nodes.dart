@@ -392,8 +392,11 @@ class MemberTypeInformation extends ElementTypeInformation
 
   TypeMask handleSpecialCases(TypeGraphInferrerEngine inferrer) {
     if (element.isField &&
-        !inferrer.compiler.backend.canBeUsedForGlobalOptimizations(element)) {
-      // Do not infer types for fields being assigned by synthesized calls.
+        (!inferrer.backend.canBeUsedForGlobalOptimizations(element) ||
+         inferrer.annotations.assumeDynamic(element))) {
+      // Do not infer types for fields that have a corresponding annotation or
+      // are assigned by synthesized calls
+
       giveUp(inferrer);
       return safeType(inferrer);
     }
@@ -437,7 +440,9 @@ class MemberTypeInformation extends ElementTypeInformation
   TypeMask potentiallyNarrowType(TypeMask mask,
                                  TypeGraphInferrerEngine inferrer) {
     Compiler compiler = inferrer.compiler;
-    if (!compiler.trustTypeAnnotations && !compiler.enableTypeAssertions) {
+    if (!compiler.trustTypeAnnotations &&
+        !compiler.enableTypeAssertions &&
+        !inferrer.annotations.trustTypeAnnotations(element)) {
       return mask;
     }
     if (element.isGenerativeConstructor ||
@@ -496,6 +501,7 @@ class MemberTypeInformation extends ElementTypeInformation
  */
 class ParameterTypeInformation extends ElementTypeInformation {
   ParameterElement get element => super.element;
+  FunctionElement get declaration => element.functionDeclaration;
 
   ParameterTypeInformation._internal(ParameterElement element,
                                      TypeInformationSystem types)
@@ -522,9 +528,10 @@ class ParameterTypeInformation extends ElementTypeInformation {
 
   // TODO(herhut): Cleanup into one conditional.
   TypeMask handleSpecialCases(TypeGraphInferrerEngine inferrer) {
-    if (!inferrer.compiler.backend.canBeUsedForGlobalOptimizations(element)) {
-      // Do not infer types for fields and parameters being assigned
-      // by synthesized calls.
+    if (!inferrer.backend.canBeUsedForGlobalOptimizations(element) ||
+        inferrer.annotations.assumeDynamic(declaration)) {
+      // Do not infer types for parameters that have a correspondign annotation
+      // or that are assigned by synthesized calls.
       giveUp(inferrer);
       return safeType(inferrer);
     }
@@ -567,7 +574,8 @@ class ParameterTypeInformation extends ElementTypeInformation {
   TypeMask potentiallyNarrowType(TypeMask mask,
                                  TypeGraphInferrerEngine inferrer) {
     Compiler compiler = inferrer.compiler;
-    if (!compiler.trustTypeAnnotations) {
+    if (!compiler.trustTypeAnnotations &&
+        !inferrer.annotations.trustTypeAnnotations(declaration)) {
       return mask;
     }
     // When type assertions are enabled (aka checked mode), we have to always
@@ -857,19 +865,32 @@ class DynamicCallSiteTypeInformation extends CallSiteTypeInformation {
         ? compiler.world.allFunctions.filter(typedSelector)
         : targets;
 
+    // Add calls to new targets to the graph.
+    targets.where((target) => !oldTargets.contains(target)).forEach((element) {
+      MemberTypeInformation callee =
+          inferrer.types.getInferredTypeOf(element);
+      callee.addCall(caller, call);
+      callee.addUser(this);
+      inferrer.updateParameterAssignments(
+          this, element, arguments, typedSelector, remove: false,
+          addToQueue: true);
+    });
+
+    // Walk over the old targets, and remove calls that cannot happen
+    // anymore.
+    oldTargets.where((target) => !targets.contains(target)).forEach((element) {
+      MemberTypeInformation callee =
+          inferrer.types.getInferredTypeOf(element);
+      callee.removeCall(caller, call);
+      callee.removeUser(this);
+      inferrer.updateParameterAssignments(
+          this, element, arguments, typedSelector, remove: true,
+          addToQueue: true);
+    });
+
     // Walk over the found targets, and compute the joined union type mask
     // for all these targets.
-    TypeMask newType = inferrer.types.joinTypeMasks(targets.map((element) {
-      if (!oldTargets.contains(element)) {
-        MemberTypeInformation callee =
-            inferrer.types.getInferredTypeOf(element);
-        callee.addCall(caller, call);
-        callee.addUser(this);
-        inferrer.updateParameterAssignments(
-            this, element, arguments, typedSelector, remove: false,
-            addToQueue: true);
-      }
-
+    return inferrer.types.joinTypeMasks(targets.map((element) {
       // If [canReachAll] is true, then we are iterating over all
       // targets that satisfy the untyped selector. We skip the return
       // type of the targets that can only be reached through
@@ -914,22 +935,6 @@ class DynamicCallSiteTypeInformation extends CallSiteTypeInformation {
         return inferrer.typeOfElementWithSelector(element, typedSelector).type;
       }
     }));
-
-    // Walk over the old targets, and remove calls that cannot happen
-    // anymore.
-    oldTargets.forEach((element) {
-      if (!targets.contains(element)) {
-        MemberTypeInformation callee =
-            inferrer.types.getInferredTypeOf(element);
-        callee.removeCall(caller, call);
-        callee.removeUser(this);
-        inferrer.updateParameterAssignments(
-            this, element, arguments, typedSelector, remove: true,
-            addToQueue: true);
-      }
-    });
-
-    return newType;
   }
 
   void giveUp(TypeGraphInferrerEngine inferrer, {bool clearAssignments: true}) {

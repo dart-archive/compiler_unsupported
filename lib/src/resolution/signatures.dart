@@ -126,7 +126,7 @@ class SignatureResolver extends MappingVisitor<FormalElementX> {
     }
   }
 
-  Element visitIdentifier(Identifier node) {
+  FormalElementX visitIdentifier(Identifier node) {
     return createParameter(node, null);
   }
 
@@ -160,7 +160,8 @@ class SignatureResolver extends MappingVisitor<FormalElementX> {
     FormalElementX parameter;
     if (createRealParameters) {
       parameter = new LocalParameterElementX(
-        enclosingElement, currentDefinitions, name, initializer);
+        enclosingElement, currentDefinitions, name, initializer,
+        isOptional: isOptionalParameter, isNamed: optionalParametersAreNamed);
     } else {
       parameter = new FormalElementX(
         ElementKind.PARAMETER, enclosingElement, currentDefinitions, name);
@@ -172,13 +173,17 @@ class SignatureResolver extends MappingVisitor<FormalElementX> {
   InitializingFormalElementX createFieldParameter(Send node,
                                                   Expression initializer) {
     InitializingFormalElementX element;
-    if (node.receiver.asIdentifier() == null ||
-        !node.receiver.asIdentifier().isThis()) {
+    Identifier receiver = node.receiver.asIdentifier();
+    if (receiver == null || !receiver.isThis()) {
       error(node, MessageKind.INVALID_PARAMETER);
-    } else if (!identical(enclosingElement.kind,
-                          ElementKind.GENERATIVE_CONSTRUCTOR)) {
-      error(node, MessageKind.INITIALIZING_FORMAL_NOT_ALLOWED);
+      return new ErroneousInitializingFormalElementX(
+          getParameterName(node), enclosingElement);
     } else {
+      if (!enclosingElement.isGenerativeConstructor) {
+        error(node, MessageKind.INITIALIZING_FORMAL_NOT_ALLOWED);
+        return new ErroneousInitializingFormalElementX(
+            getParameterName(node), enclosingElement);
+      }
       Identifier name = getParameterName(node);
       validateName(name);
       Element fieldElement =
@@ -186,11 +191,16 @@ class SignatureResolver extends MappingVisitor<FormalElementX> {
       if (fieldElement == null ||
           !identical(fieldElement.kind, ElementKind.FIELD)) {
         error(node, MessageKind.NOT_A_FIELD, {'fieldName': name});
+        fieldElement = new ErroneousFieldElementX(
+            name, enclosingElement.enclosingClass);
       } else if (!fieldElement.isInstanceMember) {
         error(node, MessageKind.NOT_INSTANCE_FIELD, {'fieldName': name});
+        fieldElement = new ErroneousFieldElementX(
+            name, enclosingElement.enclosingClass);
       }
       element = new InitializingFormalElementX(enclosingElement,
-          currentDefinitions, name, initializer, fieldElement);
+          currentDefinitions, name, initializer, fieldElement,
+          isOptional: isOptionalParameter, isNamed: optionalParametersAreNamed);
       computeParameterType(element, fieldElement);
     }
     return element;
@@ -251,13 +261,16 @@ class SignatureResolver extends MappingVisitor<FormalElementX> {
    * real parameters implementing the [ParameterElement] interface. Otherwise,
    * the parameters will only implement [FormalElement].
    */
-  static FunctionSignature analyze(Compiler compiler,
-                                   NodeList formalParameters,
-                                   Node returnNode,
-                                   FunctionTypedElement element,
-                                   ResolutionRegistry registry,
-                                   {MessageKind defaultValuesError,
-                                    bool createRealParameters: false}) {
+  static FunctionSignature analyze(
+      Compiler compiler,
+      NodeList formalParameters,
+      Node returnNode,
+      FunctionTypedElement element,
+      ResolutionRegistry registry,
+      {MessageKind defaultValuesError,
+       bool createRealParameters: false,
+       bool isFunctionExpression: false}) {
+
     SignatureResolver visitor = new SignatureResolver(compiler, element,
         registry, defaultValuesError: defaultValuesError,
         createRealParameters: createRealParameters);
@@ -298,7 +311,27 @@ class SignatureResolver extends MappingVisitor<FormalElementX> {
         registry.registerIsCheck(returnType);
       }
     } else {
-      returnType = visitor.resolveReturnType(returnNode);
+      AsyncMarker asyncMarker = AsyncMarker.SYNC;
+      if (isFunctionExpression) {
+        // Use async marker to determine the return type of function
+        // expressions.
+        FunctionElement function = element;
+        asyncMarker = function.asyncMarker;
+      }
+      switch (asyncMarker) {
+      case AsyncMarker.SYNC:
+        returnType = visitor.resolveReturnType(returnNode);
+        break;
+      case AsyncMarker.SYNC_STAR:
+        returnType = compiler.coreTypes.iterableType();
+        break;
+      case AsyncMarker.ASYNC:
+        returnType = compiler.coreTypes.futureType();
+        break;
+      case AsyncMarker.ASYNC_STAR:
+        returnType = compiler.coreTypes.streamType();
+        break;
+      }
     }
 
     if (element.isSetter && (requiredParameterCount != 1 ||

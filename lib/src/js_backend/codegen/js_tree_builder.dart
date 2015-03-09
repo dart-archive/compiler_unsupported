@@ -36,16 +36,39 @@ class JsTreeBuilder extends Builder {
     return new InvokeStatic(
         identicalFunction,
         identicalSelector,
-        <Expression>[getVariableReference(node.left),
-                     getVariableReference(node.right)]);
+        <Expression>[getVariableUse(node.left),
+                     getVariableUse(node.right)]);
   }
 
   Expression visitInterceptor(cps_ir.Interceptor node) {
     Element getInterceptor = _glue.getInterceptorMethod;
+    String name = _glue.getInterceptorName(node.interceptedClasses);
+    Selector selector = new Selector.call(name, null, 1);
     _glue.registerUseInterceptorInCodegen();
     return new InvokeStatic(
         getInterceptor,
-        new Selector.fromElement(getInterceptor),
-        <Expression>[getVariableReference(node.input)]);
+        selector,
+        <Expression>[getVariableUse(node.input)]);
+  }
+
+  Expression visitGetField(cps_ir.GetField node) {
+    return new GetField(getVariableUse(node.object), node.field);
+  }
+
+  Statement visitSetField(cps_ir.SetField node) {
+    return new SetField(getVariableUse(node.object),
+                        node.field,
+                        getVariableUse(node.value),
+                        visit(node.body));
+  }
+
+  Expression visitCreateBox(cps_ir.CreateBox node) {
+    return new CreateBox();
+  }
+
+  Expression visitCreateInstance(cps_ir.CreateInstance node) {
+    return new CreateInstance(
+        node.classElement,
+        node.arguments.map(getVariableUse).toList());
   }
 }

@@ -65,6 +65,10 @@ final String versionLong = '${versionLong}';
   copyDirectory(joinDir(pkgDir, ['compiler', 'lib', 'src']),
       joinDir(LIB_DIR, ['src']), context);
 
+  // Copy js_ast into lib/src/js_ast
+  copyDirectory(joinDir(pkgDir, ['js_ast', 'lib']),
+      joinDir(LIB_DIR, ['src', 'js_ast']), context);
+
   // Copy sdk sources.
   _copySdk(joinDir(dartDir, ['sdk']), joinDir(LIB_DIR, ['sdk']), context);
 
@@ -77,6 +81,10 @@ final String versionLong = '${versionLong}';
       [
         r'package:_internal/',
         r'package:compiler_unsupported/_internal/'
+      ],
+      [
+        r'package:js_ast/js_ast.dart',
+        r'package:compiler_unsupported/src/js_ast/js_ast.dart'
       ]
   ];
 

@@ -11,6 +11,8 @@ class InterceptorStubGenerator {
 
   InterceptorStubGenerator(this.compiler, this.namer, this.backend);
 
+  Emitter get emitter => backend.emitter.emitter;
+
   jsAst.Expression generateGetInterceptorMethod(Set<ClassElement> classes) {
     jsAst.Expression interceptorFor(ClassElement cls) {
       return backend.emitter.interceptorPrototypeAccess(cls);
@@ -289,8 +291,7 @@ class InterceptorStubGenerator {
     Selector selector = backend.oneShotInterceptors[name];
     Set<ClassElement> classes =
         backend.getInterceptedClassesOn(selector.name);
-    String getInterceptorName =
-        namer.getInterceptorName(backend.getInterceptorMethod, classes);
+    String getInterceptorName = namer.nameForGetInterceptor(classes);
 
     List<String> parameterNames = <String>[];
     parameterNames.add('receiver');
@@ -315,5 +316,57 @@ class InterceptorStubGenerator {
         [parameterNames,
          optimizedPath,
          globalObject, getInterceptorName, invocationName, parameterNames]);
+  }
+
+  jsAst.ArrayInitializer generateTypeToInterceptorMap() {
+    // TODO(sra): Perhaps inject a constant instead?
+    CustomElementsAnalysis analysis = backend.customElementsAnalysis;
+    if (!analysis.needsTable) return null;
+
+    List<jsAst.Expression> elements = <jsAst.Expression>[];
+    JavaScriptConstantCompiler handler = backend.constants;
+    List<ConstantValue> constants =
+        handler.getConstantsForEmission(emitter.compareConstants);
+    for (ConstantValue constant in constants) {
+      if (constant is TypeConstantValue) {
+        TypeConstantValue typeConstant = constant;
+        Element element = typeConstant.representedType.element;
+        if (element is ClassElement) {
+          ClassElement classElement = element;
+          if (!analysis.needsClass(classElement)) continue;
+
+          elements.add(emitter.constantReference(constant));
+          elements.add(backend.emitter.interceptorClassAccess(classElement));
+
+          // Create JavaScript Object map for by-name lookup of generative
+          // constructors.  For example, the class A has three generative
+          // constructors
+          //
+          //     class A {
+          //       A() {}
+          //       A.foo() {}
+          //       A.bar() {}
+          //     }
+          //
+          // Which are described by the map
+          //
+          //     {"": A.A$, "foo": A.A$foo, "bar": A.A$bar}
+          //
+          // We expect most of the time the map will be a singleton.
+          var properties = [];
+          for (Element member in analysis.constructors(classElement)) {
+            properties.add(
+                new jsAst.Property(
+                    js.string(member.name),
+                    backend.emitter.staticFunctionAccess(member)));
+          }
+
+          var map = new jsAst.ObjectInitializer(properties);
+          elements.add(map);
+        }
+      }
+    }
+
+    return new jsAst.ArrayInitializer(elements);
   }
 }

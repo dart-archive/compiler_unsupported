@@ -167,8 +167,8 @@ class SsaInstructionSimplifier extends HBaseVisitor
         if (replacement.sourceElement == null) {
           replacement.sourceElement = instruction.sourceElement;
         }
-        if (replacement.sourcePosition == null) {
-          replacement.sourcePosition = instruction.sourcePosition;
+        if (replacement.sourceInformation == null) {
+          replacement.sourceInformation = instruction.sourceInformation;
         }
         if (!replacement.isInBasicBlock()) {
           // The constant folding can return an instruction that is already
@@ -1843,6 +1843,7 @@ class SsaLoadElimination extends HBaseVisitor implements OptimizationPhase {
     memorySet.registerAllocation(instruction);
     int argumentIndex = 0;
     instruction.element.forEachInstanceField((_, Element member) {
+      if (compiler.elementHasCompileTimeError(member)) return;
       memorySet.registerFieldValue(
           member, instruction, instruction.inputs[argumentIndex++]);
     }, includeSuperAndInjectedMembers: true);

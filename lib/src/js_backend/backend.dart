@@ -73,6 +73,8 @@ class JavaScriptBackend extends Backend {
       new Uri(scheme: 'dart', path: '_js_mirrors');
   static final Uri DART_JS_NAMES =
       new Uri(scheme: 'dart', path: '_js_names');
+  static final Uri DART_EMBEDDED_NAMES =
+      new Uri(scheme: 'dart', path: '_js_embedded_names');
   static final Uri DART_ISOLATE_HELPER =
       new Uri(scheme: 'dart', path: '_isolate_helper');
   static final Uri DART_HTML =
@@ -88,8 +90,11 @@ class JavaScriptBackend extends Backend {
   /// size/complexity heuristics.
   static const Map<String, List<String>> ALWAYS_INLINE =
       const <String, List<String>> {
-    'IterableMixinWorkaround': const <String>['forEach'],
   };
+
+  String get patchVersion => USE_NEW_EMITTER ? 'new' : 'old';
+
+  final Annotations annotations = new Annotations();
 
   /// List of [FunctionElement]s that we want to inline always.  This list is
   /// filled when resolution is complete by looking up in [internalLibrary].
@@ -172,7 +177,6 @@ class JavaScriptBackend extends Backend {
   ClassElement irRepresentationClass;
 
   Element getInterceptorMethod;
-  Element interceptedNames;
 
   ClassElement jsInvocationMirrorClass;
 
@@ -181,14 +185,6 @@ class JavaScriptBackend extends Backend {
   /// the method is called.
   static const bool TRACE_CALLS = false;
   Element traceHelper;
-
-  /**
-   * This element is a top-level variable (in generated output) that the
-   * compiler initializes to a datastructure used to map from a Type to the
-   * interceptor.  See declaration of `mapTypeToInterceptor` in
-   * `interceptors.dart`.
-   */
-  Element mapTypeToInterceptor;
 
   TypeMask get stringType => compiler.typesTask.stringType;
   TypeMask get doubleType => compiler.typesTask.doubleType;
@@ -369,6 +365,9 @@ class JavaScriptBackend extends Backend {
   /// Holds the method "requiresPreamble" in _js_helper.
   FunctionElement requiresPreambleMarker;
 
+  /// Holds the class for the [JsGetName] enum.
+  EnumClassElement jsGetNameEnum;
+
   /// True if a call to preserveMetadataMarker has been seen.  This means that
   /// metadata must be retained for dart:mirrors to work correctly.
   bool mustRetainMetadata = false;
@@ -450,6 +449,8 @@ class JavaScriptBackend extends Backend {
 
   PatchResolverTask patchResolverTask;
 
+  bool get canHandleCompilationFailed => true;
+
   JavaScriptBackend(Compiler compiler, bool generateSourceMap)
       : namer = determineNamer(compiler),
         oneShotInterceptors = new Map<String, Selector>(),
@@ -464,7 +465,8 @@ class JavaScriptBackend extends Backend {
     resolutionCallbacks = new JavaScriptResolutionCallbacks(this);
     patchResolverTask = new PatchResolverTask(compiler);
     functionCompiler = USE_CPS_IR
-         ? new CspFunctionCompiler(compiler, this)
+         ? new CpsFunctionCompiler(
+             compiler, this, generateSourceMap: generateSourceMap)
          : new SsaFunctionCompiler(this, generateSourceMap);
   }
 
@@ -546,7 +548,7 @@ class JavaScriptBackend extends Backend {
 
   String registerOneShotInterceptor(Selector selector) {
     Set<ClassElement> classes = getInterceptedClassesOn(selector.name);
-    String name = namer.getOneShotInterceptorName(selector, classes);
+    String name = namer.nameForGetOneShotInterceptor(selector, classes);
     if (!oneShotInterceptors.containsKey(name)) {
       registerSpecializedGetInterceptor(classes);
       oneShotInterceptors[name] = selector;
@@ -745,7 +747,7 @@ class JavaScriptBackend extends Backend {
   }
 
   void registerSpecializedGetInterceptor(Set<ClassElement> classes) {
-    String name = namer.getInterceptorName(getInterceptorMethod, classes);
+    String name = namer.nameForGetInterceptor(classes);
     if (classes.contains(jsInterceptorClass)) {
       // We can't use a specialized [getInterceptorMethod], so we make
       // sure we emit the one with all checks.
@@ -851,15 +853,16 @@ class JavaScriptBackend extends Backend {
           // The constructor is on the patch class, but dart2js unit tests don't
           // have a patch class.
           ClassElement implementation = cls.patch != null ? cls.patch : cls;
-          return implementation.lookupConstructor(
-            new Selector.callConstructor(
-                name, mapLiteralClass.library, arity),
-            (element) {
-              compiler.internalError(mapLiteralClass,
-                  "Map literal class $mapLiteralClass missing "
-                  "'$name' constructor"
-                  "  ${mapLiteralClass.constructors}");
-            });
+          ConstructorElement ctor = implementation.lookupConstructor(name);
+          if (ctor == null
+              || (isPrivateName(name)
+                  && ctor.library != mapLiteralClass.library)) {
+            compiler.internalError(mapLiteralClass,
+                                   "Map literal class $mapLiteralClass missing "
+                                   "'$name' constructor"
+                                   "  ${mapLiteralClass.constructors}");
+          }
+          return ctor;
         }
         mapLiteralConstructor = getFactory('_literal', 1);
         mapLiteralConstructorEmpty = getFactory('_empty', 0);
@@ -945,6 +948,7 @@ class JavaScriptBackend extends Backend {
       Element e = findHelper('boolConversionCheck');
       if (e != null) enqueue(world, e, registry);
     }
+
     if (TRACE_CALLS) {
       traceHelper = findHelper('traceHelper');
       assert(traceHelper != null);
@@ -1209,6 +1213,11 @@ class JavaScriptBackend extends Backend {
 
   void codegen(CodegenWorkItem work) {
     Element element = work.element;
+    if (compiler.elementHasCompileTimeError(element)) {
+      generatedCode[element] = jsAst.js(
+          "function () { throw new Error('Compile time error in $element') }");
+      return;
+    }
     var kind = element.kind;
     if (kind == ElementKind.TYPEDEF) return;
     if (element.isConstructor && element.enclosingClass == jsNullClass) {
@@ -1474,6 +1483,16 @@ class JavaScriptBackend extends Backend {
         element == jsFixedArrayClass;
   }
 
+  bool mayGenerateInstanceofCheck(DartType type) {
+    // We can use an instanceof check for raw types that have no subclass that
+    // is mixed-in or in an implements clause.
+
+    if (!type.isRaw) return false;
+    ClassElement classElement = type.element;
+    if (isInterceptorClass(classElement)) return false;
+    return compiler.world.hasOnlySubclasses(classElement);
+  }
+
   Element getExceptionUnwrapper() {
     return findHelper('unwrapException');
   }
@@ -1584,6 +1603,77 @@ class JavaScriptBackend extends Backend {
 
   Element getCyclicThrowHelper() {
     return findHelper("throwCyclicInit");
+  }
+
+  Element getAsyncHelper() {
+    return findHelper("asyncHelper");
+  }
+
+  Element getYieldStar() {
+    ClassElement classElement = findHelper("IterationMarker");
+    classElement.ensureResolved(compiler);
+    return classElement.lookupLocalMember("yieldStar");
+  }
+
+  Element getYieldSingle() {
+    ClassElement classElement = findHelper("IterationMarker");
+    classElement.ensureResolved(compiler);
+    return classElement.lookupLocalMember("yieldSingle");
+  }
+
+  Element getSyncStarUncaughtError() {
+    ClassElement classElement = findHelper("IterationMarker");
+    classElement.ensureResolved(compiler);
+    return classElement.lookupLocalMember("uncaughtError");
+  }
+
+  Element getAsyncStarHelper() {
+    return findHelper("asyncStarHelper");
+  }
+
+  Element getStreamOfController() {
+    return findHelper("streamOfController");
+  }
+
+  Element getEndOfIteration() {
+    ClassElement classElement = findHelper("IterationMarker");
+    classElement.ensureResolved(compiler);
+    return classElement.lookupLocalMember("endOfIteration");
+  }
+
+  Element getSyncStarIterable() {
+    ClassElement classElement = findHelper("SyncStarIterable");
+    classElement.ensureResolved(compiler);
+    return classElement;
+  }
+
+  Element getSyncStarIterableConstructor() {
+    ClassElement classElement = getSyncStarIterable();
+    classElement.ensureResolved(compiler);
+    return classElement.lookupConstructor("");
+  }
+
+  Element getCompleterConstructor() {
+    ClassElement classElement = find(compiler.asyncLibrary, "Completer");
+    classElement.ensureResolved(compiler);
+    return classElement.lookupConstructor("");
+  }
+
+  Element getASyncStarController() {
+    ClassElement classElement = findHelper("AsyncStarStreamController");
+    classElement.ensureResolved(compiler);
+    return classElement;
+  }
+
+  Element getASyncStarControllerConstructor() {
+    ClassElement classElement = getASyncStarController();
+    return classElement.lookupConstructor("");
+  }
+
+  Element getStreamIteratorConstructor() {
+    ClassElement classElement = find(compiler.asyncLibrary, "StreamIterator");
+    classElement.ensureResolved(compiler);
+    return classElement.lookupConstructor("");
   }
 
   bool isNullImplementation(ClassElement cls) {
@@ -1741,8 +1831,6 @@ class JavaScriptBackend extends Backend {
 
       if (uri == DART_INTERCEPTORS) {
         getInterceptorMethod = findMethod('getInterceptor');
-        interceptedNames = findVariable('interceptedNames');
-        mapTypeToInterceptor = findVariable('mapTypeToInterceptor');
         getNativeInterceptorMethod = findMethod('getNativeInterceptor');
 
         List<ClassElement> classes = [
@@ -1793,9 +1881,12 @@ class JavaScriptBackend extends Backend {
         preserveLibraryNamesMarker = find(library, 'preserveLibraryNames');
       } else if (uri == DART_JS_NAMES) {
         preserveNamesMarker = find(library, 'preserveNames');
+      } else if (uri == DART_EMBEDDED_NAMES) {
+        jsGetNameEnum = find(library, 'JsGetName');
       } else if (uri == DART_HTML) {
         htmlLibraryIsLoaded = true;
       }
+      annotations.onLibraryScanned(library);
     });
   }
 
@@ -2227,6 +2318,10 @@ class JavaScriptBackend extends Backend {
   }
 
   void onElementResolved(Element element, TreeElements elements) {
+    if (element.isFunction && annotations.noInline(element)) {
+      inlineCache.markAsNonInlinable(element);
+    }
+
     LibraryElement library = element.library;
     if (!library.isPlatformLibrary && !library.canUseNative) return;
     bool hasNoInline = false;
@@ -2307,6 +2402,104 @@ class JavaScriptBackend extends Backend {
     // takes no arguments, but in this case the spawned isolate can't
     // communicate with the spawning isolate.
     enqueuer.enableIsolateSupport();
+  }
+
+  /// Returns the filename for the output-unit named [name].
+  ///
+  /// The filename is of the form "<main output file>_<name>.part.js".
+  /// If [addExtension] is false, the ".part.js" suffix is left out.
+  String deferredPartFileName(String name, {bool addExtension: true}) {
+    assert(name != "");
+    String outPath = compiler.outputUri != null
+        ? compiler.outputUri.path
+        : "out";
+    String outName = outPath.substring(outPath.lastIndexOf('/') + 1);
+    String extension = addExtension ? ".part.js" : "";
+    return "${outName}_$name$extension";
+  }
+
+  void registerAsyncMarker(FunctionElement element,
+                           Enqueuer enqueuer,
+                           Registry registry) {
+    if (element.asyncMarker == AsyncMarker.ASYNC) {
+      enqueue(enqueuer, getAsyncHelper(), registry);
+      enqueue(enqueuer, getCompleterConstructor(), registry);
+      enqueue(enqueuer, getStreamIteratorConstructor(), registry);
+    } else if (element.asyncMarker == AsyncMarker.SYNC_STAR) {
+      enqueuer.registerInstantiatedClass(getSyncStarIterable(), registry);
+      enqueue(enqueuer, getSyncStarIterableConstructor(), registry);
+      enqueue(enqueuer, getEndOfIteration(), registry);
+      enqueue(enqueuer, getYieldStar(), registry);
+      enqueue(enqueuer, getSyncStarUncaughtError(), registry);
+    } else if (element.asyncMarker == AsyncMarker.ASYNC_STAR) {
+      enqueuer.registerInstantiatedClass(getASyncStarController(), registry);
+      enqueue(enqueuer, getAsyncStarHelper(), registry);
+      enqueue(enqueuer, getStreamOfController(), registry);
+      enqueue(enqueuer, getYieldSingle(), registry);
+      enqueue(enqueuer, getYieldStar(), registry);
+      enqueue(enqueuer, getASyncStarControllerConstructor(), registry);
+      enqueue(enqueuer, getStreamIteratorConstructor(), registry);
+    }
+  }
+}
+
+/// Handling of special annotations for tests.
+class Annotations {
+  static final Uri PACKAGE_EXPECT =
+      new Uri(scheme: 'package', path: 'expect/expect.dart');
+
+  ClassElement expectNoInlineClass;
+  ClassElement expectTrustTypeAnnotationsClass;
+  ClassElement expectAssumeDynamicClass;
+
+  void onLibraryScanned(LibraryElement library) {
+    if (library.canonicalUri == PACKAGE_EXPECT) {
+      expectNoInlineClass = library.find('NoInline');
+      expectTrustTypeAnnotationsClass = library.find('TrustTypeAnnotations');
+      expectAssumeDynamicClass = library.find('AssumeDynamic');
+      if (expectNoInlineClass == null ||
+          expectTrustTypeAnnotationsClass == null ||
+          expectAssumeDynamicClass == null) {
+        // This is not the package you're looking for.
+        expectNoInlineClass = null;
+        expectTrustTypeAnnotationsClass = null;
+        expectAssumeDynamicClass = null;
+      }
+    }
+  }
+
+  /// Returns `true` if inlining is disabled for [element].
+  bool noInline(Element element) {
+    // TODO(floitsch): restrict to test directory.
+    return _hasAnnotation(element, expectNoInlineClass);
+  }
+
+  /// Returns `true` if parameter and returns types should be trusted for
+  /// [element].
+  bool trustTypeAnnotations(Element element) {
+    return _hasAnnotation(element, expectTrustTypeAnnotationsClass);
+  }
+
+  /// Returns `true` if inference of parameter types is disabled for [element].
+  bool assumeDynamic(Element element) {
+    return _hasAnnotation(element, expectAssumeDynamicClass);
+  }
+
+  /// Returns `true` if [element] is annotated with [annotationClass].
+  bool _hasAnnotation(Element element, ClassElement annotationClass) {
+    if (annotationClass == null) return false;
+    for (Link<MetadataAnnotation> link = element.metadata;
+         !link.isEmpty;
+         link = link.tail) {
+      ConstantValue value = link.head.constant.value;
+      if (value.isConstructedObject) {
+        ConstructedConstantValue constructedConstant = value;
+        if (constructedConstant.type.element == annotationClass) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 }
 
@@ -2400,7 +2593,7 @@ class JavaScriptResolutionCallbacks extends ResolutionCallbacks {
     if (type.isMalformed) {
       registerBackendStaticInvocation(backend.getThrowTypeError(), registry);
     }
-    if (!type.treatAsRaw || type.containsTypeVariables) {
+    if (!type.treatAsRaw || type.containsTypeVariables || type.isFunctionType) {
       // TODO(johnniwinther): Investigate why this is needed.
       registerBackendStaticInvocation(
           backend.getSetRuntimeTypeInfo(), registry);
@@ -2484,17 +2677,23 @@ class JavaScriptResolutionCallbacks extends ResolutionCallbacks {
     registerBackendInstantiation(backend.compiler.listClass, registry);
   }
 
-  void onConstantMap(Registry registry) {
+  void onMapLiteral(ResolutionRegistry registry,
+                    DartType type,
+                    bool isConstant) {
     assert(registry.isForResolution);
     void enqueue(String name) {
       Element e = backend.find(backend.jsHelperLibrary, name);
       registerBackendInstantiation(e, registry);
     }
 
-    enqueue(JavaScriptMapConstant.DART_CLASS);
-    enqueue(JavaScriptMapConstant.DART_PROTO_CLASS);
-    enqueue(JavaScriptMapConstant.DART_STRING_CLASS);
-    enqueue(JavaScriptMapConstant.DART_GENERAL_CLASS);
+    if (isConstant) {
+      enqueue(JavaScriptMapConstant.DART_CLASS);
+      enqueue(JavaScriptMapConstant.DART_PROTO_CLASS);
+      enqueue(JavaScriptMapConstant.DART_STRING_CLASS);
+      enqueue(JavaScriptMapConstant.DART_GENERAL_CLASS);
+    } else {
+      registry.registerInstantiatedType(type);
+    }
   }
 
   /// Called when resolving the `Symbol` constructor.

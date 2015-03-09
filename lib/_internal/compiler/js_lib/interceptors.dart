@@ -5,7 +5,8 @@
 library _interceptors;
 
 import 'dart:_js_embedded_names' show
-    DISPATCH_PROPERTY_NAME;
+    DISPATCH_PROPERTY_NAME,
+    TYPE_TO_INTERCEPTOR_MAP;
 
 import 'dart:collection';
 import 'dart:_internal' hide Symbol;
@@ -29,6 +30,8 @@ import 'dart:_js_helper' show allMatchesInStringUnchecked,
                               stringReplaceAllFuncUnchecked,
                               stringReplaceAllUnchecked,
                               stringReplaceFirstUnchecked,
+                              stringReplaceFirstMappedUnchecked,
+                              stringReplaceRangeUnchecked,
                               lookupAndCacheInterceptor,
                               lookupDispatchRecord,
                               StringMatch,
@@ -175,14 +178,6 @@ getNativeInterceptor(object) {
 }
 
 /**
- * If [JSInvocationMirror._invokeOn] is being used, this variable
- * contains a JavaScript array with the names of methods that are
- * intercepted.
- */
-var interceptedNames;
-
-
-/**
  * Data structure used to map a [Type] to the [Interceptor] and constructors for
  * that type.  It is JavaScript array of 3N entries of adjacent slots containing
  * a [Type], followed by an [Interceptor] class for the type, followed by a
@@ -192,16 +187,17 @@ var interceptedNames;
  * that are user extensions of native classes where the type occurs as a
  * constant in the program.
  *
- * The compiler, in CustomElementsAnalysis, assumes that [mapTypeToInterceptor]
+ * The compiler, in CustomElementsAnalysis, assumes that [typeToInterceptorMap]
  * is accessed only by code that also calls [findIndexForWebComponentType].  If
  * this assumption is invalidated, the compiler will have to be updated.
  */
-// TODO(sra): Mark this as initialized to a constant with unknown value.
-var mapTypeToInterceptor;
+get typeToInterceptorMap {
+  return JS_EMBEDDED_GLOBAL('', TYPE_TO_INTERCEPTOR_MAP);
+}
 
 int findIndexForNativeSubclassType(Type type) {
-  if (JS('bool', '# == null', mapTypeToInterceptor)) return null;
-  List map = JS('JSFixedArray', '#', mapTypeToInterceptor);
+  if (JS('bool', '# == null', typeToInterceptorMap)) return null;
+  List map = JS('JSFixedArray', '#', typeToInterceptorMap);
   for (int i = 0; i + 1 < map.length; i += 3) {
     if (type == map[i]) {
       return i;
@@ -213,7 +209,7 @@ int findIndexForNativeSubclassType(Type type) {
 findInterceptorConstructorForType(Type type) {
   var index = findIndexForNativeSubclassType(type);
   if (index == null) return null;
-  List map = JS('JSFixedArray', '#', mapTypeToInterceptor);
+  List map = JS('JSFixedArray', '#', typeToInterceptorMap);
   return map[index + 1];
 }
 
@@ -226,7 +222,7 @@ findInterceptorConstructorForType(Type type) {
 findConstructorForNativeSubclassType(Type type, String name) {
   var index = findIndexForNativeSubclassType(type);
   if (index == null) return null;
-  List map = JS('JSFixedArray', '#', mapTypeToInterceptor);
+  List map = JS('JSFixedArray', '#', typeToInterceptorMap);
   var constructorMap = map[index + 2];
   var constructorFn = JS('', '#[#]', constructorMap, name);
   return constructorFn;

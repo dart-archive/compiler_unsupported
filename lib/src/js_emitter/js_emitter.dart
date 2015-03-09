@@ -4,6 +4,8 @@
 
 library dart2js.js_emitter;
 
+import 'dart:convert';
+
 import '../common.dart';
 
 import '../constants/expressions.dart';
@@ -18,8 +20,7 @@ import '../closure.dart' show
 import '../dart_types.dart' show
     TypedefType;
 
-import '../io/code_output.dart' show
-    CodeBuffer;
+import '../io/code_output.dart';
 
 import '../elements/elements.dart' show
     ConstructorBodyElement,
@@ -28,9 +29,9 @@ import '../elements/elements.dart' show
     ParameterElement,
     TypeVariableElement;
 
-import '../hash/sha1.dart' show hashOfString;
+import '../hash/sha1.dart' show Hasher;
 
-// import '../helpers/helpers.dart';  // Included for debug helpers.
+import '../helpers/helpers.dart';  // Included for debug helpers.
 
 import '../js/js.dart' as jsAst;
 import '../js/js.dart' show
@@ -43,7 +44,6 @@ import '../js_backend/js_backend.dart' show
     JavaScriptBackend,
     JavaScriptConstantCompiler,
     Namer,
-    NativeEmitter,
     RuntimeTypes,
     Substitution,
     TypeCheck,
@@ -55,9 +55,9 @@ import 'program_builder.dart';
 
 import 'new_emitter/emitter.dart' as new_js_emitter;
 
-import '../source_file.dart' show
-    SourceFile,
-    StringSourceFile;
+import '../io/line_column_provider.dart' show
+    LineColumnCollector,
+    LineColumnProvider;
 
 import '../io/source_map_builder.dart' show
     SourceMapBuilder;
@@ -87,14 +87,17 @@ import '../deferred_load.dart' show
 import 'package:compiler_unsupported/_internal/compiler/js_lib/shared/embedded_names.dart'
     as embeddedNames;
 
-import '../hash/sha1.dart';
-
+import '../native/native.dart' as native;
 part 'class_stub_generator.dart';
 part 'code_emitter_task.dart';
 part 'helpers.dart';
 part 'interceptor_stub_generator.dart';
+part 'main_call_stub_generator.dart';
+part 'metadata_collector.dart';
+part 'native_emitter.dart';
 part 'native_generator.dart';
-part 'type_test_generator.dart';
+part 'parameter_stub_generator.dart';
+part 'runtime_type_generator.dart';
 part 'type_test_registry.dart';
 
 part 'old_emitter/class_builder.dart';
@@ -104,7 +107,5 @@ part 'old_emitter/container_builder.dart';
 part 'old_emitter/declarations.dart';
 part 'old_emitter/emitter.dart';
 part 'old_emitter/interceptor_emitter.dart';
-part 'old_emitter/metadata_emitter.dart';
 part 'old_emitter/nsm_emitter.dart';
 part 'old_emitter/reflection_data_parser.dart';
-part 'old_emitter/type_test_emitter.dart';

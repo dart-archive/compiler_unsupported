@@ -34,8 +34,8 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
     return namer.nameParameter(node);
   }
 
-  String visitClosureVariable(ClosureVariable node) {
-    return namer.getName(node);
+  String visitMutableVariable(MutableVariable node) {
+    return namer.nameMutableVariable(node);
   }
 
   /// Main entry point for creating a [String] from a [Node].  All recursive
@@ -48,12 +48,10 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   String visitFunctionDefinition(FunctionDefinition node) {
     String name = node.element.name;
     namer.setReturnContinuation(node.body.returnContinuation);
-    String closureVariables =
-        node.closureVariables.map(namer.nameClosureVariable).join(' ');
     String parameters = node.parameters.map(visit).join(' ');
     String body = indentBlock(() => visit(node.body.body));
-    return '$indentation(FunctionDefinition $name ($parameters) return'
-        ' ($closureVariables)\n$body)';
+    return '$indentation(FunctionDefinition $name ($parameters) return\n'
+        '$body)';
   }
 
   String visitFieldDefinition(FieldDefinition node) {
@@ -76,20 +74,50 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   }
 
   String visitLetCont(LetCont node) {
-    String cont = newContinuationName(node.continuation);
-    // TODO(karlklose): this should be changed to `.map(visit).join(' ')`  and
-    // should recurse to [visit].  Currently we can't do that, because the
-    // unstringifier_test produces [LetConts] with dummy arguments on them.
-    String parameters = node.continuation.parameters
+    String conts;
+    bool first = true;
+    for (Continuation continuation in node.continuations) {
+      String name = newContinuationName(continuation);
+      if (continuation.isRecursive) name = 'rec $name';
+      // TODO(karlklose): this should be changed to `.map(visit).join(' ')`  and
+      // should recurse to [visit].  Currently we can't do that, because the
+      // unstringifier_test produces [LetConts] with dummy arguments on them.
+      String parameters = continuation.parameters
+          .map((p) => '${decorator(p, newValueName(p))}')
+          .join(' ');
+      String body =
+          indentBlock(() => indentBlock(() => visit(continuation.body)));
+      if (first) {
+        first = false;
+        conts = '($name ($parameters)\n$body)';
+      } else {
+        // Each subsequent line is indented additional spaces to align it
+        // with the previous continuation.
+        String indent = '$indentation${' ' * '(LetCont ('.length}';
+        conts = '$conts\n$indent($name ($parameters)\n$body)';
+      }
+    }
+    String body = indentBlock(() => visit(node.body));
+    return '$indentation(LetCont ($conts)\n$body)';
+  }
+
+  String visitLetHandler(LetHandler node) {
+    // There are no explicit references to the handler, so we leave it
+    // anonymous in the printed representation.
+    String parameters = node.handler.parameters
         .map((p) => '${decorator(p, newValueName(p))}')
         .join(' ');
-    String contBody =
-        indentBlock(() => indentBlock(() => visit(node.continuation.body)));
+    String handlerBody =
+        indentBlock(() => indentBlock(() => visit(node.handler.body)));
     String body = indentBlock(() => visit(node.body));
-    String op = node.continuation.isRecursive ? 'LetCont*' : 'LetCont';
-    return '$indentation($op ($cont ($parameters)\n'
-           '$contBody)\n'
-           '$body)';
+    return '$indentation(LetHandler (($parameters)\n$handlerBody)\n$body)';
+  }
+
+  String visitLetMutable(LetMutable node) {
+    String name = visit(node.variable);
+    String value = access(node.value);
+    String body = indentBlock(() => visit(node.body));
+    return '$indentation(LetMutable ($name $value)\n$body)';
   }
 
   String formatArguments(Invoke node) {
@@ -99,7 +127,7 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
         node.arguments.getRange(0, positionalArgumentCount).map(access));
     for (int i = 0; i < node.selector.namedArgumentCount; ++i) {
       String name = node.selector.namedArguments[i];
-      Definition arg = node.arguments[positionalArgumentCount + i].definition;
+      String arg = access(node.arguments[positionalArgumentCount + i]);
       args.add("($name: $arg)");
     }
     return '(${args.join(' ')})';
@@ -120,11 +148,12 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
     return '$indentation(InvokeMethod $rcv $name $args $cont)';
   }
 
-  String visitInvokeSuperMethod(InvokeSuperMethod node) {
+  String visitInvokeMethodDirectly(InvokeMethodDirectly node) {
+    String receiver = access(node.receiver);
     String name = node.selector.name;
     String cont = access(node.continuation);
     String args = formatArguments(node);
-    return '$indentation(InvokeSuperMethod $name $args $cont)';
+    return '$indentation(InvokeMethodDirectly $receiver $name $args $cont)';
   }
 
   String visitInvokeConstructor(InvokeConstructor node) {
@@ -146,11 +175,10 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   }
 
   String visitInvokeContinuation(InvokeContinuation node) {
-    String cont = access(node.continuation);
+    String name = access(node.continuation);
+    if (node.isRecursive) name = 'rec $name';
     String args = node.arguments.map(access).join(' ');
-    String op =
-        node.isRecursive ? 'InvokeContinuation*' : 'InvokeContinuation';
-    return '$indentation($op $cont ($args))';
+    return '$indentation($InvokeContinuation $name ($args))';
   }
 
   String visitBranch(Branch node) {
@@ -185,14 +213,14 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
     return '(Unexpected Continuation)';
   }
 
-  String visitGetClosureVariable(GetClosureVariable node) {
-    return '(GetClosureVariable ${visit(node.variable.definition)})';
+  String visitGetMutableVariable(GetMutableVariable node) {
+    return '(GetMutableVariable ${access(node.variable)})';
   }
 
-  String visitSetClosureVariable(SetClosureVariable node) {
+  String visitSetMutableVariable(SetMutableVariable node) {
     String value = access(node.value);
     String body = indentBlock(() => visit(node.body));
-    return '$indentation(SetClosureVariable ${visit(node.variable.definition)} '
+    return '$indentation(SetMutableVariable ${access(node.variable)} '
            '$value\n$body)';
   }
 
@@ -215,9 +243,9 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   }
 
   String visitDeclareFunction(DeclareFunction node) {
+    String name = visit(node.variable);
     String function = indentBlock(() => visit(node.definition));
     String body = indentBlock(() => visit(node.body));
-    String name = namer.getName(node.variable.definition);
     return '$indentation(DeclareFunction $name =\n'
            '$function in\n'
            '$body)';
@@ -228,6 +256,30 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
     return '(IsTrue $value)';
   }
 
+  String visitSetField(SetField node) {
+    String object = access(node.object);
+    String field = node.field.name;
+    String value = access(node.value);
+    String body = indentBlock(() => visit(node.body));
+    return '$indentation(SetField $object $field $value)\n$body';
+  }
+
+  String visitGetField(GetField node) {
+    String object = access(node.object);
+    String field = node.field.name;
+    return '(GetField $object $field)';
+  }
+
+  String visitCreateBox(CreateBox node) {
+    return '(CreateBox)';
+  }
+
+  String visitCreateInstance(CreateInstance node) {
+    String className = node.classElement.name;
+    String arguments = node.arguments.map(access).join(' ');
+    return '(CreateInstance $className ($arguments))';
+  }
+
   String visitIdentical(Identical node) {
     String left = access(node.left);
     String right = access(node.right);
@@ -235,7 +287,7 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   }
 
   String visitInterceptor(Interceptor node) {
-    return '(Interceptor ${node.input})';
+    return '(Interceptor ${access(node.input)})';
   }
 }
 
@@ -275,19 +327,27 @@ class ConstantStringifier extends ConstantValueVisitor<String, Null> {
   }
 
   String visitList(ListConstantValue constant, _) {
-    return _failWith(constant);
+    String entries =
+      constant.entries.map((entry) => entry.accept(this, _)).join(' ');
+    return '(List $entries)';
   }
 
   String visitMap(MapConstantValue constant, _) {
-    return _failWith(constant);
+    List<String> elements = <String>[];
+    for (int i = 0; i < constant.keys.length; ++i) {
+      ConstantValue key = constant.keys[i];
+      ConstantValue value = constant.values[i];
+      elements.add('(${key.accept(this, _)} . ${value.accept(this, _)})');
+    }
+    return '(Map (${elements.join(' ')}))';
   }
 
   String visitConstructed(ConstructedConstantValue constant, _) {
-    return _failWith(constant);
+    return '(Constructed "${constant.unparse()}")';
   }
 
   String visitType(TypeConstantValue constant, _) {
-    return _failWith(constant);
+    return '(Type "${constant.representedType}")';
   }
 
   String visitInterceptor(InterceptorConstantValue constant, _) {
@@ -313,7 +373,7 @@ class _Namer {
     return _names[parameter] = parameter.hint.name;
   }
 
-  String nameClosureVariable(ClosureVariable variable) {
+  String nameMutableVariable(MutableVariable variable) {
     assert(!_names.containsKey(variable));
     return _names[variable] = variable.hint.name;
   }

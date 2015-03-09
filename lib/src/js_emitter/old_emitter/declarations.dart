@@ -8,11 +8,6 @@ part of dart2js.js_emitter;
 const DEBUG_FAST_OBJECTS = false;
 
 /**
- * Call-back for adding stub [function] for [selector].
- */
-typedef void AddStubFunction(Selector selector, jsAst.Fun function);
-
-/**
  * Call-back for adding property with [name] and [value].
  */
 typedef jsAst.Property AddPropertyFunction(String name, jsAst.Expression value);
@@ -62,6 +57,12 @@ const String HOOKS_API_USAGE = """
 //    if this function is defined, the Dart [main] method will not be invoked
 //    directly. Instead, a closure that will invoke [main], and its arguments
 //    [args] is passed to [dartMainRunner].
+//
+// dartDeferredLibraryLoader(uri, successCallback, errorCallback):
+//    if this function is defined, it will be called when a deferered library
+//    is loaded. It should load and eval the javascript of `uri`, and call
+//    successCallback. If it fails to do so, it should call errorCallback with
+//    an error.
 """;
 
 // Compact field specifications.  The format of the field specification is
