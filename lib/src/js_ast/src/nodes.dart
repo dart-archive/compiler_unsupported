@@ -243,7 +243,9 @@ class Block extends Statement {
 
 class ExpressionStatement extends Statement {
   final Expression expression;
-  ExpressionStatement(this.expression);
+  ExpressionStatement(this.expression) {
+    assert(this.expression != null);
+  }
 
   accept(NodeVisitor visitor) => visitor.visitExpressionStatement(this);
   void visitChildren(NodeVisitor visitor) { expression.accept(visitor); }
@@ -609,6 +611,7 @@ class Assignment extends Expression {
 
   Assignment(leftHandSide, value)
       : this.compound(leftHandSide, null, value);
+  // If `this.op == null` this will be a non-compound assignment.
   Assignment.compound(this.leftHandSide, this.op, this.value);
 
   int get precedenceLevel => ASSIGNMENT;

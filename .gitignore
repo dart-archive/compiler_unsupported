@@ -5,3 +5,4 @@ build/
 packages
 pubspec.lock
 trunk/
+lib/sdk_html.dart

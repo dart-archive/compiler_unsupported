@@ -399,11 +399,14 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     // Note that RegExes, js.ArrayInitializer and js.ObjectInitializer are not
     // [js.Literal]s.
     if (result is js.Literal) return result;
+
     js.Expression tempVar = useTempVar(allocateTempVar());
     addStatement(js.js.statement('# = #;', [tempVar, result]));
     return tempVar;
   }
 
+  // TODO(sigurdm): This is obsolete - all calls use store: false. Replace with
+  // visitExpression(node);
   withExpression(js.Expression node, fn(js.Expression result), {bool store}) {
     int oldTempVarIndex = currentTempVarIndex;
     js.Expression visited = visitExpression(node);
@@ -414,6 +417,46 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     currentTempVarIndex = oldTempVarIndex;
     return result;
   }
+
+  /// Calls [fn] with the result of evaluating [node]. Taking special care of
+  /// property accesses.
+  ///
+  /// If [store] is true the result of evaluating [node] is stored in a
+  /// temporary.
+  ///
+  /// We cannot rewrite `<receiver>.m()` to:
+  ///     temp = <receiver>.m;
+  ///     temp();
+  /// Because this leaves `this` unbound in the call. But because of dart
+  /// evaluation order we can write:
+  ///     temp = <receiver>;
+  ///     temp.m();
+  withCallTargetExpression(js.Expression node,
+                           fn(js.Expression result), {bool store}) {
+    int oldTempVarIndex = currentTempVarIndex;
+    js.Expression visited = visitExpression(node);
+    js.Expression selector;
+    js.Expression storedIfNeeded;
+    if (store) {
+      if (visited is js.PropertyAccess) {
+        js.PropertyAccess propertyAccess = visited;
+        selector = propertyAccess.selector;
+        visited = propertyAccess.receiver;
+      }
+      storedIfNeeded = _storeIfNecessary(visited);
+    } else {
+      storedIfNeeded = visited;
+    }
+    js.Expression result;
+    if (selector == null) {
+      result = fn(storedIfNeeded);
+    } else {
+      result = fn(new js.PropertyAccess(storedIfNeeded, selector));
+    }
+    currentTempVarIndex = oldTempVarIndex;
+    return result;
+  }
+
 
   /// Calls [fn] with the value of evaluating [node1] and [node2].
   ///
@@ -706,7 +749,12 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     js.Expression leftHandSide = node.leftHandSide;
     if (leftHandSide is js.VariableUse) {
       return withExpression(node.value, (js.Expression value) {
-        return new js.Assignment(leftHandSide, value);
+        // A non-compound [js.Assignment] has `op==null`. So it works out to
+        // use [js.Assignment.compound] for all cases.
+        // Visit the [js.VariableUse] to ensure renaming is done correctly.
+        return new js.Assignment.compound(visitExpression(leftHandSide),
+                                          node.op,
+                                          value);
       }, store: false);
     } else if (leftHandSide is js.PropertyAccess) {
       return withExpressions([
@@ -761,11 +809,11 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
         js.Statement assignLeft = isResult(left)
             ? new js.Block.empty()
             : js.js.statement('# = #;', [result, left]);
-        if (node.op == "||") {
+        if (node.op == "&&") {
           addStatement(js.js.statement('if (#) {#} else #',
               [left, gotoAndBreak(thenLabel), assignLeft]));
         } else {
-          assert(node.op == "&&");
+          assert(node.op == "||");
           addStatement(js.js.statement('if (#) {#} else #',
               [left, assignLeft, gotoAndBreak(thenLabel)]));
         }
@@ -805,7 +853,7 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
   @override
   js.Expression visitCall(js.Call node) {
     bool storeTarget = node.arguments.any(shouldTransform);
-    return withExpression(node.target, (target) {
+    return withCallTargetExpression(node.target, (target) {
       return withExpressions(node.arguments, (List<js.Expression> arguments) {
         return new js.Call(target, arguments);
       });
@@ -920,7 +968,8 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
       bool oldInsideUntranslatedBreakable = insideUntranslatedBreakable;
       insideUntranslatedBreakable = true;
       withExpression(node.condition, (js.Expression condition) {
-        addStatement(js.js.statement('do {#} while (#)', [node.body, condition]));
+        addStatement(js.js.statement('do {#} while (#)',
+                                     [node.body, condition]));
       }, store: false);
       insideUntranslatedBreakable = oldInsideUntranslatedBreakable;
       return;
@@ -952,18 +1001,10 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     addStatement(node);
   }
 
-  void visitExpressionInStatementContext(js.Expression node) {
-    if (node is js.VariableDeclarationList) {
-      // Treat js.VariableDeclarationList as a statement.
-      visitVariableDeclarationList(node);
-    } else {
-      visitExpressionIgnoreResult(node);
-    }
-  }
 
   @override
   void visitExpressionStatement(js.ExpressionStatement node) {
-    visitExpressionInStatementContext(node.expression);
+    visitExpressionIgnoreResult(node.expression);
   }
 
   @override
@@ -986,7 +1027,7 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     }
 
     if (node.init != null) {
-      visitExpressionInStatementContext(node.init);
+      addExpressionStatement(visitExpression(node.init));
     }
     int startLabel = newLabel("for condition");
     // If there is no update, continuing the loop is the same as going to the
@@ -1110,12 +1151,12 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
           new js.LabeledStatement(node.label, translateInBlock(node.body)));
       return;
     }
+    // `continue label` is really continuing the nested loop.
+    // This is set up in [PreTranslationAnalysis.visitContinue].
+    // Here we only need a breakLabel:
     int breakLabel = newLabel("break ${node.label}");
-    int continueLabel = newLabel("continue ${node.label}");
     breakLabels[node] = breakLabel;
-    continueLabels[node] = continueLabel;
 
-    beginLabel(continueLabel);
     jumpTargets.add(node);
     visitStatement(node.body);
     jumpTargets.removeLast();
@@ -1148,7 +1189,7 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
   @override
   js.Expression visitNew(js.New node) {
     bool storeTarget = node.arguments.any(shouldTransform);
-    return withExpression(node.target, (target) {
+    return withCallTargetExpression(node.target, (target) {
       return withExpressions(node.arguments, (List<js.Expression> arguments) {
         return new js.New(target, arguments);
       });
@@ -1175,7 +1216,7 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     if (node.op == "++" || node.op == "--") {
       js.Expression argument = node.argument;
       if (argument is js.VariableUse) {
-        return new js.Postfix(node.op, argument);
+        return new js.Postfix(node.op, visitExpression(argument));
       } else if (argument is js.PropertyAccess) {
         return withExpression2(argument.receiver, argument.selector,
             (receiver, selector) {
@@ -1197,7 +1238,7 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     if (node.op == "++" || node.op == "--") {
       js.Expression argument = node.argument;
       if (argument is js.VariableUse) {
-        return new js.Prefix(node.op, argument);
+        return new js.Prefix(node.op, visitExpression(argument));
       } else if (argument is js.PropertyAccess) {
         return withExpression2(argument.receiver, argument.selector,
             (receiver, selector) {
@@ -1491,7 +1532,9 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
   }
 
   @override
-  void visitVariableDeclarationList(js.VariableDeclarationList node) {
+  js.Expression visitVariableDeclarationList(js.VariableDeclarationList node) {
+    List<js.Expression> initializations = new List<js.Expression>();
+
     // Declaration of local variables is hoisted outside the helper but the
     // initialization is done here.
     for (js.VariableInitialization initialization in node.declarations) {
@@ -1499,10 +1542,19 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
       localVariables.add(declaration);
       if (initialization.value != null) {
         withExpression(initialization.value, (js.Expression value) {
-          addStatement(new js.ExpressionStatement(
-              new js.Assignment(new js.VariableUse(declaration.name), value)));
+          initializations.add(
+              new js.Assignment(new js.VariableUse(declaration.name), value));
         }, store: false);
       }
+    }
+    if (initializations.isEmpty) {
+      // Dummy expression. Will be dropped by [visitExpressionIgnoreResult].
+      return js.number(0);
+    } else {
+      return initializations.reduce(
+          (js.Expression first, js.Expression second) {
+        return new js.Binary(",", first, second);
+      });
     }
   }
 
@@ -1777,7 +1829,8 @@ class SyncStarRewriter extends AsyncRewriterBase {
                         js.VariableDeclarationList variableDeclarations) {
     // Each iterator invocation on the iterable should work on its own copy of
     // the parameters.
-    // TODO(sigurdm): We only need to do this copying for parameters that are mutated.
+    // TODO(sigurdm): We only need to do this copying for parameters that are
+    // mutated.
     List<js.VariableInitialization> declarations =
         new List<js.VariableInitialization>();
     List<js.Parameter> renamedParameters = new List<js.Parameter>();
@@ -2206,8 +2259,10 @@ class PreTranslationAnalysis extends js.NodeVisitor<bool> {
   @override
   bool visitContinue(js.Continue node) {
     if (node.targetLabel != null) {
-      targets[node] = labelledStatements.lastWhere(
+      js.LabeledStatement targetLabel = labelledStatements.lastWhere(
           (js.LabeledStatement stm) => stm.label == node.targetLabel);
+      js.Loop targetStatement = targetLabel.body;
+      targets[node] = targetStatement;
     } else {
       targets[node] =
           loopsAndSwitches.lastWhere((js.Node node) => node is! js.Switch);
@@ -2412,7 +2467,10 @@ class PreTranslationAnalysis extends js.NodeVisitor<bool> {
   @override
   bool visitSwitch(js.Switch node) {
     loopsAndSwitches.add(node);
-    bool result = visit(node.key);
+    // If the key has an `await` expression, do not transform the
+    // body of the switch.
+    visit(node.key);
+    bool result = false;
     for (js.SwitchClause clause in node.cases) {
       if (visit(clause)) result = true;
     }

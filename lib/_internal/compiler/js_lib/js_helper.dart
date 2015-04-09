@@ -1153,14 +1153,17 @@ class Primitives {
         return functionNoSuchMethod(function, positionalArguments, null);
       }
       ReflectionInfo info = new ReflectionInfo(jsFunction);
-      int maxArgumentCount = info.requiredParameterCount +
+      int requiredArgumentCount = info.requiredParameterCount;
+      int maxArgumentCount = requiredArgumentCount +
           info.optionalParameterCount;
-      if (info.areOptionalParametersNamed || maxArgumentCount < argumentCount) {
+      if (info.areOptionalParametersNamed ||
+          requiredArgumentCount > argumentCount ||
+          maxArgumentCount < argumentCount) {
         return functionNoSuchMethod(function, positionalArguments, null);
       }
       arguments = new List.from(arguments);
       for (int pos = argumentCount; pos < maxArgumentCount; pos++) {
-        arguments.add(info.defaultValue(pos));
+        arguments.add(getMetadata(info.defaultValue(pos)));
       }
     }
     // We bound 'this' to [function] because of how we compile
@@ -3734,7 +3737,7 @@ class AsyncStarStreamController {
   Stream get stream => controller.stream;
   bool stopRunning = false;
   bool isAdding = false;
-  bool get isPaused => controller.isPaused;
+  bool isPaused = false;
   add(event) => controller.add(event);
   addStream(Stream stream) {
     return controller.addStream(stream, cancelOnError: false);
@@ -3751,12 +3754,16 @@ class AsyncStarStreamController {
           wrapped(null);
         });
       },
-      onResume: () {
+      onPause: () {
+        isPaused = true;
+      }, onResume: () {
+        isPaused = false;
         if (!isAdding) {
           asyncStarHelper(null, body, this);
         }
       }, onCancel: () {
         stopRunning = true;
+        if (isPaused) asyncStarHelper(null, body, this);
       });
   }
 }

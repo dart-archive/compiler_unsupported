@@ -1,5 +1,5 @@
 name: compiler_unsupported
-version: 1.9.0-dev.10.4
+version: 1.9.2
 description: >
   This is an unsupported copy of the dart2js source. The API of this package
   can and will change in unpredictable and incompatible ways.
