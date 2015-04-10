@@ -88,13 +88,13 @@ void main() {
 """;
 
 final String sampleCodeAsync = """
-import 'dart:async';
 import 'dart:html';
 
-void main() async {
+main() async {
   print("hello");
   querySelector('#foo').text = 'bar';
-  var foo = await HttpClient.get('http://www.google.com');
+  var foo = await HttpRequest.getString('http://www.google.com');
+  print(foo);
 }
 """;
 

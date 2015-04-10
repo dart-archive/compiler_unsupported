@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.2 (2015-04-09)
+- upgraded to SDK 1.9.2
+
 ## 1.9.0-dev.10.4 (2015-03-09)
 - upgraded to SDK 1.9.0-dev.10.4
 
