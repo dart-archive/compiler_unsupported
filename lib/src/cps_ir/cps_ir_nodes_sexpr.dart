@@ -9,11 +9,12 @@ import '../util/util.dart';
 import 'cps_ir_nodes.dart';
 
 /// A [Decorator] is a function used by [SExpressionStringifier] to augment the
-/// output produced for a node.  It can be provided to the constructor.
-typedef String Decorator(Node node, String s);
+/// output produced for a node or reference.  It can be provided to the
+/// constructor.
+typedef String Decorator(node, String s);
 
 /// Generate a Lisp-like S-expression representation of an IR node as a string.
-class SExpressionStringifier extends Visitor<String> with Indentation {
+class SExpressionStringifier extends Indentation implements Visitor<String> {
   final _Namer namer = new _Namer();
 
   String newValueName(Primitive node) => namer.nameValue(node);
@@ -22,12 +23,12 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
 
   SExpressionStringifier([this.decorator]) {
     if (this.decorator == null) {
-      this.decorator = (Node node, String s) => s;
+      this.decorator = (node, String s) => s;
     }
   }
 
   String access(Reference<Definition> r) {
-    return decorator(r.definition, namer.getName(r.definition));
+    return decorator(r, namer.getName(r.definition));
   }
 
   String visitParameter(Parameter node) {
@@ -41,29 +42,78 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   /// Main entry point for creating a [String] from a [Node].  All recursive
   /// calls must go through this method.
   String visit(Node node) {
-    String s = super.visit(node);
+    String s = node.accept(this);
     return decorator(node, s);
+  }
+
+  String formatThisParameter(Parameter thisParameter) {
+    return thisParameter == null ? '()' : '(${visit(thisParameter)})';
   }
 
   String visitFunctionDefinition(FunctionDefinition node) {
     String name = node.element.name;
-    namer.setReturnContinuation(node.body.returnContinuation);
+    String thisParameter = formatThisParameter(node.thisParameter);
     String parameters = node.parameters.map(visit).join(' ');
-    String body = indentBlock(() => visit(node.body.body));
-    return '$indentation(FunctionDefinition $name ($parameters) return\n'
+    String body = visit(node.body);
+    return '$indentation'
+        '(FunctionDefinition $name $thisParameter ($parameters) return\n'
         '$body)';
   }
 
   String visitFieldDefinition(FieldDefinition node) {
     String name = node.element.name;
-    if (node.hasInitializer) {
-      namer.setReturnContinuation(node.body.returnContinuation);
-      String body = indentBlock(() => visit(node.body.body));
+    if (node.body != null) {
+      String body = visit(node.body);
       return '$indentation(FieldDefinition $name () return\n'
              '$body)';
     } else {
       return '$indentation(FieldDefinition $name)';
     }
+  }
+
+  String visitConstructorDefinition(ConstructorDefinition node) {
+    String name = node.element.name;
+    if (name != '') name = '$name ';
+    String thisParameter = formatThisParameter(node.thisParameter);
+    String parameters = node.parameters.map(visit).join(' ');
+    if (node.body != null) {
+      String initializers = indentBlock(() {
+        return indentBlock(() {
+          if (node.initializers.isEmpty) {
+            return '$indentation';
+          } else {
+            return node.initializers.map(visit).join('\n');
+          }
+        });
+      });
+      String body = visit(node.body);
+      return '$indentation'
+          '(ConstructorDefinition $name$thisParameter ($parameters) return'
+          ' (\n$initializers)\n$body)';
+    } else {
+      return '$indentation'
+          '(ConstructorDefinition $name$thisParameter ($parameters) return)';
+    }
+  }
+
+  String visitFieldInitializer(FieldInitializer node) {
+    String name = node.element.name;
+    String body = visit(node.body);
+    return '$indentation(FieldInitializer $name\n$body)';
+  }
+
+  String visitSuperInitializer(SuperInitializer node) {
+    String target = node.target.name;
+    String selector = node.selector.name;
+    String arguments =
+        indentBlock(() =>
+          indentBlock(() => node.arguments.map(visit).join('\n')));
+    return '$indentation(SuperInitializer $target $selector (\n$arguments)';
+  }
+
+  String visitBody(Body node) {
+    namer.setReturnContinuation(node.returnContinuation);
+    return indentBlock(() => visit(node.body));
   }
 
   String visitLetPrim(LetPrim node) {
@@ -157,11 +207,21 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   }
 
   String visitInvokeConstructor(InvokeConstructor node) {
+    String className;
+    // TODO(karlklose): for illegal nodes constructed for tests or unresolved
+    // constructor calls in the DartBackend, we get an element with no enclosing
+    // class.  Clean this up by introducing a name field to the node and
+    // removing [ErroneousElement]s from the IR.
+    if (node.type != null) {
+      className = node.type.toString();
+    } else {
+      className = node.target.enclosingClass.name;
+    }
     String callName;
     if (node.target.name.isEmpty) {
-      callName = '${node.type}';
+      callName = '${className}';
     } else {
-      callName = '${node.type}.${node.target.name}';
+      callName = '${className}.${node.target.name}';
     }
     String cont = access(node.continuation);
     String args = formatArguments(node);
@@ -192,10 +252,6 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
     String value =
         node.expression.value.accept(new ConstantStringifier(), null);
     return '(Constant $value)';
-  }
-
-  String visitThis(This node) {
-    return '(This)';
   }
 
   String visitReifyTypeVar(ReifyTypeVar node) {
@@ -277,7 +333,8 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
   String visitCreateInstance(CreateInstance node) {
     String className = node.classElement.name;
     String arguments = node.arguments.map(access).join(' ');
-    return '(CreateInstance $className ($arguments))';
+    String typeInformation = node.typeInformation.map(access).join(' ');
+    return '(CreateInstance $className ($arguments)$typeInformation)';
   }
 
   String visitIdentical(Identical node) {
@@ -288,6 +345,20 @@ class SExpressionStringifier extends Visitor<String> with Indentation {
 
   String visitInterceptor(Interceptor node) {
     return '(Interceptor ${access(node.input)})';
+  }
+
+  String visitReifyRuntimeType(ReifyRuntimeType node) {
+    return '(ReifyRuntimeType ${access(node.value)})';
+  }
+
+  String visitReadTypeVariable(ReadTypeVariable node) {
+    return '(ReadTypeVariable ${access(node.target)}.${node.variable})';
+  }
+
+  @override
+  String visitTypeExpression(TypeExpression node) {
+    String args = node.arguments.map(access).join(', ');
+    return '(TypeExpression ${node.dartType.toString()} $args)';
   }
 }
 
@@ -368,9 +439,14 @@ class _Namer {
   int _valueCounter = 0;
   int _continuationCounter = 0;
 
+  // TODO(sra): Make the methods not assert and print something indicating an
+  // error, so printer can be used to inspect broken terms.
+
   String nameParameter(Parameter parameter) {
     assert(!_names.containsKey(parameter));
-    return _names[parameter] = parameter.hint.name;
+    String name =
+        parameter.hint != null ? parameter.hint.name : nameValue(parameter);
+    return _names[parameter] = name;
   }
 
   String nameMutableVariable(MutableVariable variable) {

@@ -15,7 +15,7 @@ import 'closure.dart' as closureMapping;
 import 'constants/expressions.dart';
 import 'constants/values.dart';
 import 'core_types.dart';
-import 'cps_ir/cps_ir_builder.dart' show IrBuilderTask;
+import 'cps_ir/cps_ir_builder_task.dart' show IrBuilderTask;
 import 'dart_backend/dart_backend.dart' as dart_backend;
 import 'dart_types.dart';
 import 'deferred_load.dart' show DeferredLoadTask, OutputUnit;
@@ -46,6 +46,9 @@ import 'ordered_typeset.dart';
 import 'patch_parser.dart';
 import 'resolution/class_members.dart' show MembersCreator;
 import 'resolution/resolution.dart';
+import 'resolution/semantic_visitor.dart';
+import 'resolution/send_structure.dart';
+import 'resolution/operators.dart' as op;
 import 'scanner/scannerlib.dart';
 import 'ssa/ssa.dart';
 import 'io/source_file.dart' show SourceFile;
@@ -65,7 +68,7 @@ export 'scanner/scannerlib.dart' show isUserDefinableOperator,
                                       isBinaryOperator,
                                       isTernaryOperator,
                                       isMinusOperator;
-export 'universe/universe.dart' show Selector, TypedSelector;
+export 'universe/universe.dart' show CallStructure, Selector, TypedSelector;
 export 'util/util.dart'
     show Spannable,
          CURRENT_ELEMENT_SPANNABLE,

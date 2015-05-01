@@ -67,6 +67,7 @@ class TypeMaskSystem implements TypeSystem<TypeMask> {
   }
 
   @override
+  // TODO(karlklose): Do not base this on containsMask.
   bool areAssignable(TypeMask a, TypeMask b) {
     return a.containsMask(b, classWorld) || b.containsMask(a, classWorld);
   }
@@ -92,7 +93,9 @@ class TypeMaskSystem implements TypeSystem<TypeMask> {
  * Implemented according to 'Constant Propagation with Conditional Branches'
  * by Wegman, Zadeck.
  */
-class TypePropagator<T> extends PassMixin {
+class TypePropagator<T> extends Pass {
+  String get passName => 'Sparse constant propagation';
+
   final types.DartTypes _dartTypes;
 
   // The constant system is used for evaluation of expressions with constant
@@ -109,7 +112,9 @@ class TypePropagator<T> extends PassMixin {
       : _types = <Node, _AbstractValue>{};
 
   @override
-  void rewriteExecutableDefinition(ExecutableDefinition root) {
+  void rewrite(RootNode root) {
+    if (root.isEmpty) return;
+
     // Set all parent pointers.
     new ParentVisitor().visit(root);
 
@@ -147,7 +152,7 @@ class _TransformingVisitor extends RecursiveVisitor {
 
   _TransformingVisitor(this.reachable, this.values, this.internalError);
 
-  void transform(ExecutableDefinition root) {
+  void transform(RootNode root) {
     visit(root);
   }
 
@@ -287,7 +292,7 @@ class _TransformingVisitor extends RecursiveVisitor {
  * const-ness as well as reachability, both of which are used in the subsequent
  * transformation pass.
  */
-class _TypePropagationVisitor<T> extends Visitor {
+class _TypePropagationVisitor<T> implements Visitor {
   // The node worklist stores nodes that are both reachable and need to be
   // processed, but have not been processed yet. Using a worklist avoids deep
   // recursion.
@@ -344,7 +349,7 @@ class _TypePropagationVisitor<T> extends Visitor {
           new _AbstractValue<T>.unknown(typeSystem.dynamicType),
       this.typeSystem = typeSystem;
 
-  void analyze(ExecutableDefinition root) {
+  void analyze(RootNode root) {
     reachableNodes.clear();
     defWorkset.clear();
     nodeWorklist.clear();
@@ -411,26 +416,36 @@ class _TypePropagationVisitor<T> extends Visitor {
   }
 
   // -------------------------- Visitor overrides ------------------------------
+  void visit(Node node) { node.accept(this); }
 
-  void visitNode(Node node) {
-    internalError(NO_LOCATION_SPANNABLE,
-        "_TypePropagationVisitor is stale,"
-        " add missing visit overrides ($node)");
-  }
-
-  void visitRunnableBody(RunnableBody node) {
+  void visitFieldDefinition(FieldDefinition node) {
     setReachable(node.body);
   }
 
   void visitFunctionDefinition(FunctionDefinition node) {
+    if (node.thisParameter != null) {
+      setValue(node.thisParameter, nonConst());
+    }
     node.parameters.forEach(visit);
     setReachable(node.body);
   }
 
-  void visitFieldDefinition(FieldDefinition node) {
-    if (node.hasInitializer) {
-      setReachable(node.body);
-    }
+  void visitConstructorDefinition(ConstructorDefinition node) {
+    node.parameters.forEach(visit);
+    node.initializers.forEach(visit);
+    setReachable(node.body);
+  }
+
+  void visitBody(Body node) {
+    setReachable(node.body);
+  }
+
+  void visitFieldInitializer(FieldInitializer node) {
+    setReachable(node.body);
+  }
+
+  void visitSuperInitializer(SuperInitializer node) {
+    node.arguments.forEach(setReachable);
   }
 
   // Expressions.
@@ -714,11 +729,6 @@ class _TypePropagationVisitor<T> extends Visitor {
     setValue(node, constantValue(value, typeSystem.typeOf(value)));
   }
 
-  void visitThis(This node) {
-    // TODO(karlklose): Add the type.
-    setValue(node, nonConst());
-  }
-
   void visitReifyTypeVar(ReifyTypeVar node) {
     setValue(node, nonConst(typeSystem.typeType));
   }
@@ -737,7 +747,7 @@ class _TypePropagationVisitor<T> extends Visitor {
   void visitMutableVariable(MutableVariable node) {
     // [MutableVariable]s are bound either as parameters to
     // [FunctionDefinition]s, by [LetMutable], or by [DeclareFunction].
-    if (node.parent is FunctionDefinition) {
+    if (node.parent is RootNode) {
       // Just like immutable parameters, the values of mutable parameters are
       // never constant.
       // TODO(karlklose): remove reference to the element model.
@@ -759,14 +769,14 @@ class _TypePropagationVisitor<T> extends Visitor {
     // TODO(karlklose): remove reference to the element model.
     T type = (source is ParameterElement) ? typeSystem.getParameterType(source)
         : typeSystem.dynamicType;
-    if (node.parent is FunctionDefinition) {
+    if (node.parent is RootNode) {
       // Functions may escape and thus their parameters must be non-constant.
       setValue(node, nonConst(type));
     } else if (node.parent is Continuation) {
       // Continuations on the other hand are local, and parameters can have
       // some other abstract value than non-constant.
     } else {
-      internalError(node.hint, "Unexpected parent of Parameter");
+      internalError(node.hint, "Unexpected parent of Parameter: ${node.parent}");
     }
   }
 
@@ -831,6 +841,23 @@ class _TypePropagationVisitor<T> extends Visitor {
   }
 
   void visitCreateInstance(CreateInstance node) {
+    setValue(node, nonConst());
+  }
+
+  void visitReifyRuntimeType(ReifyRuntimeType node) {
+    setValue(node, nonConst(typeSystem.typeType));
+  }
+
+  void visitReadTypeVariable(ReadTypeVariable node) {
+    // TODO(karlklose): come up with a type marker for JS entities or switch to
+    // real constants of type [Type].
+    setValue(node, nonConst());
+  }
+
+  @override
+  visitTypeExpression(TypeExpression node) {
+    // TODO(karlklose): come up with a type marker for JS entities or switch to
+    // real constants of type [Type].
     setValue(node, nonConst());
   }
 }

@@ -19,29 +19,28 @@ final Directory dartDir = joinDir(new Directory('trunk'), ['dart']);
 // encoded resources
 
 void main(List<String> args) {
-  task('init', defaultInit);
-  task('build', build, ['init']);
+  task('build', build);
   task('validate', validate);
   task('clean', clean);
 
-  startGrinder(args);
+  grind(args);
 }
 
-void build(GrinderContext context) {
+void build() {
   if (!dartDir.existsSync()) {
-    context.log('trunk/ dir not found.');
-    context.log('Please run ./tool/co.sh and ./tool/up.sh.');
-    context.fail('trunk/ dir not found');
+    log('trunk/ dir not found.');
+    log('Please run ./tool/co.sh and ./tool/up.sh.');
+    fail('trunk/ dir not found');
   }
 
   // Get the version from the repo.
   ProcessResult result = Process.runSync('tools/print_version.py', [],
       workingDirectory: 'trunk/dart');
   if (result.exitCode != 0) {
-    context.fail('Error executing tools/print_version.py: ${result.stderr}');
+    fail('Error executing tools/print_version.py: ${result.stderr}');
   }
   String versionLong = result.stdout.trim();
-  context.log('Using repo at ${dartDir.path}; version ${versionLong}.');
+  log('Using repo at ${dartDir.path}; version ${versionLong}.');
 
   // Generate version file.
   String version = versionLong;
@@ -59,18 +58,17 @@ final String versionLong = '${versionLong}';
 
   copyFile(joinFile(pkgDir, ['compiler', 'lib', 'compiler.dart']), LIB_DIR,
       context);
-  copyFile(joinFile(sourceDir, ['libraries.dart']), LIB_DIR, context);
+  copyFile(joinFile(sourceDir, ['libraries.dart']), LIB_DIR);
   copyDirectory(joinDir(sourceDir, ['compiler']),
-      joinDir(LIB_DIR, ['_internal', 'compiler']), context);
+      joinDir(LIB_DIR, ['_internal', 'compiler']));
   copyDirectory(joinDir(pkgDir, ['compiler', 'lib', 'src']),
-      joinDir(LIB_DIR, ['src']), context);
+      joinDir(LIB_DIR, ['src']));
 
   // Copy js_ast into lib/src/js_ast
-  copyDirectory(joinDir(pkgDir, ['js_ast', 'lib']),
-      joinDir(LIB_DIR, ['src', 'js_ast']), context);
+  copyDirectory(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(LIB_DIR, ['src', 'js_ast']));
 
   // Copy sdk sources.
-  _copySdk(joinDir(dartDir, ['sdk']), joinDir(LIB_DIR, ['sdk']), context);
+  _copySdk(joinDir(dartDir, ['sdk']), joinDir(LIB_DIR, ['sdk']));
 
   // Adjust sources.
   List replacements = [
@@ -106,31 +104,31 @@ final String versionLong = '${versionLong}';
     }
   });
 
-  context.log('Updated ${modifiedCount} package references.');
+  log('Updated ${modifiedCount} package references.');
 
   // Update pubspec version and add an entry to the changelog.
-  _updateVersion(context, versionLong);
-  _updateChangelog(context, versionLong);
+  _updateVersion(versionLong);
+  _updateChangelog(versionLong);
 
 }
 
 /**
  * Validate that the library looks good.
  */
-void validate(GrinderContext context) {
-  Tests.runCliTests(context);
+void validate() {
+  Tests.runCliTests();
 }
 
 /**
  * Delete files copied from the dart2js sources.
  */
-void clean(GrinderContext context) {
-  deleteEntity(joinDir(LIB_DIR, ['sdk']), context);
-  deleteEntity(joinDir(LIB_DIR, ['src']), context);
-  deleteEntity(joinDir(LIB_DIR, ['_internal']), context);
+void clean() {
+  deleteEntity(joinDir(LIB_DIR, ['sdk']));
+  deleteEntity(joinDir(LIB_DIR, ['src']));
+  deleteEntity(joinDir(LIB_DIR, ['_internal']));
 }
 
-void _copySdk(Directory srcDir, Directory destDir, GrinderContext context) {
+void _copySdk(Directory srcDir, Directory destDir) {
   String srcPath = srcDir.path;
   String destPath = destDir.path;
 
@@ -151,7 +149,7 @@ void _copySdk(Directory srcDir, Directory destDir, GrinderContext context) {
     }
   });
 
-  context.log('Copied ${count} sdk files.');
+  log('Copied ${count} sdk files.');
 
   deleteEntity(joinDir(destDir, ['_internal', 'pub']));
   deleteEntity(joinDir(destDir, ['_internal', 'pub_generated']));
@@ -169,7 +167,7 @@ ${text}
   file.writeAsStringSync(contents.trim() + '\n');
 }
 
-void _updateVersion(GrinderContext context, String version) {
+void _updateVersion(String version) {
   File pubFile = new File('pubspec.yaml');
   List lines = pubFile.readAsStringSync().split('\n');
   String output = lines.map((line) {
@@ -181,10 +179,10 @@ void _updateVersion(GrinderContext context, String version) {
   }).join('\n');
   pubFile.writeAsStringSync(output);
 
-  context.log('Updated pubspec.yaml to version ${version}');
+  log('Updated pubspec.yaml to version ${version}');
 }
 
-void _updateChangelog(GrinderContext context, String version) {
+void _updateChangelog(String version) {
   File changelogFile = new File('changelog.md');
   String text = changelogFile.readAsStringSync();
 
@@ -198,6 +196,6 @@ void _updateChangelog(GrinderContext context, String version) {
 
     changelogFile.writeAsStringSync(text);
 
-    context.log('Added a new entry to the changelog.');
+    log('Added a new entry to the changelog.');
   }
 }

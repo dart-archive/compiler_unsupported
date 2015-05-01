@@ -168,6 +168,8 @@ abstract class ElementX extends Element {
 
   LibraryElement get library => enclosingElement.library;
 
+  Name get memberName => new Name(name, library);
+
   LibraryElement get implementationLibrary {
     Element element = this;
     while (!identical(element.kind, ElementKind.LIBRARY)) {
@@ -244,9 +246,6 @@ abstract class ElementX extends Element {
     _isNative = true;
     _fixedBackendName = name;
   }
-  void setFixedBackendName(String name) {
-    _fixedBackendName = name;
-  }
 
   FunctionElement asFunctionElement() => null;
 
@@ -308,6 +307,7 @@ class ErroneousElementX extends ElementX implements ErroneousElement {
   get executableContext => unsupported();
   get isExternal => unsupported();
 
+  bool get isRedirectingGenerative => unsupported();
   bool get isRedirectingFactory => unsupported();
 
   computeSignature(compiler) => unsupported();
@@ -343,6 +343,12 @@ class ErroneousConstructorElementX extends ErroneousElementX
       String name,
       Element enclosing)
       : super(messageKind, messageArguments, name, enclosing);
+
+  bool get isRedirectingGenerative => false;
+
+  void set isRedirectingGenerative(_) {
+    throw new UnsupportedError("isRedirectingGenerative");
+  }
 
   bool get isRedirectingFactory => false;
 
@@ -1915,6 +1921,7 @@ class LocalFunctionElementX extends BaseFunctionElementX
 
 abstract class ConstructorElementX extends FunctionElementX
     implements ConstructorElement {
+  bool isRedirectingGenerative = false;
 
   ConstructorElementX(String name,
                       ElementKind kind,
@@ -2015,6 +2022,8 @@ class ConstructorBodyElementX extends BaseFunctionElementX
   bool get hasNode => constructor.hasNode;
 
   FunctionExpression get node => constructor.node;
+
+  Link<MetadataAnnotation> get metadata => constructor.metadata;
 
   bool get isInstanceMember => true;
 

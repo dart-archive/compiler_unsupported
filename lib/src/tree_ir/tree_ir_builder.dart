@@ -43,14 +43,12 @@ import 'tree_ir_nodes.dart';
  * particular, intermediate values and blocks used for local control flow are
  * still all named.
  */
-class Builder extends cps_ir.Visitor<Node> {
+class Builder implements cps_ir.Visitor<Node> {
   final dart2js.InternalErrorFunction internalError;
 
-  /// Maps variable/parameter elements to the Tree variables that represent it.
-  final Map<Local, List<Variable>> local2variables = <Local, List<Variable>>{};
-
-  /// Like [local2variables], except for mutable variables.
-  final Map<cps_ir.MutableVariable, Variable> local2mutable =
+  final Map<cps_ir.Primitive, Variable> primitive2variable =
+      <cps_ir.Primitive, Variable>{};
+  final Map<cps_ir.MutableVariable, Variable> mutable2variable =
       <cps_ir.MutableVariable, Variable>{};
 
   // Continuations with more than one use are replaced with Tree labels.  This
@@ -67,6 +65,8 @@ class Builder extends cps_ir.Visitor<Node> {
   List<cps_ir.Continuation> safeForInlining = <cps_ir.Continuation>[];
 
   ExecutableElement currentElement;
+  /// The 'this' Parameter for currentElement or the enclosing method.
+  cps_ir.Parameter thisParameter;
   cps_ir.Continuation returnContinuation;
 
   Builder parent;
@@ -82,20 +82,18 @@ class Builder extends cps_ir.Visitor<Node> {
   Variable phiTempVar;
 
   Variable addMutableVariable(cps_ir.MutableVariable irVariable) {
-    if (irVariable.host != currentElement) {
-      return parent.addMutableVariable(irVariable);
-    }
-    assert(!local2mutable.containsKey(irVariable));
+    assert(irVariable.host == currentElement);
+    assert(!mutable2variable.containsKey(irVariable));
     Variable variable = new Variable(currentElement, irVariable.hint);
-    local2mutable[irVariable] = variable;
+    mutable2variable[irVariable] = variable;
     return variable;
   }
 
   Variable getMutableVariable(cps_ir.MutableVariable mutableVariable) {
     if (mutableVariable.host != currentElement) {
-      return parent.getMutableVariable(mutableVariable);
+      return parent.getMutableVariable(mutableVariable)..isCaptured = true;
     }
-    return local2mutable[mutableVariable];
+    return mutable2variable[mutableVariable];
   }
 
   VariableUse getMutableVariableUse(
@@ -107,32 +105,23 @@ class Builder extends cps_ir.Visitor<Node> {
   /// Obtains the variable representing the given primitive. Returns null for
   /// primitives that have no reference and do not need a variable.
   Variable getVariable(cps_ir.Primitive primitive) {
-    if (primitive.registerIndex == null) {
-      return null; // variable is unused
-    }
-    List<Variable> variables = local2variables.putIfAbsent(primitive.hint,
-        () => <Variable>[]);
-    while (variables.length <= primitive.registerIndex) {
-      variables.add(new Variable(currentElement, primitive.hint));
-    }
-    return variables[primitive.registerIndex];
+    return primitive2variable.putIfAbsent(primitive,
+        () => new Variable(currentElement, primitive.hint));
   }
 
   /// Obtains a reference to the tree Variable corresponding to the IR primitive
   /// referred to by [reference].
   /// This increments the reference count for the given variable, so the
   /// returned expression must be used in the tree.
-  VariableUse getVariableUse(cps_ir.Reference<cps_ir.Primitive> reference) {
-    Variable variable = getVariable(reference.definition);
-    if (variable == null) {
-      internalError(
-          CURRENT_ELEMENT_SPANNABLE,
-          "Reference to ${reference.definition} has no register");
+  Expression getVariableUse(cps_ir.Reference<cps_ir.Primitive> reference) {
+    if (thisParameter != null && reference.definition == thisParameter) {
+      return new This();
     }
-    return new VariableUse(variable);
+    return new VariableUse(getVariable(reference.definition));
   }
 
-  ExecutableDefinition build(cps_ir.ExecutableDefinition node) {
+  RootNode build(cps_ir.RootNode node) {
+    // TODO(asgerf): Don't have build AND buildXXX as public API.
     if (node is cps_ir.FieldDefinition) {
       return buildField(node);
     } else if (node is cps_ir.ConstructorDefinition) {
@@ -149,7 +138,7 @@ class Builder extends cps_ir.Visitor<Node> {
 
   FieldDefinition buildField(cps_ir.FieldDefinition node) {
     Statement body;
-    if (node.hasInitializer) {
+    if (!node.isEmpty) {
       currentElement = node.element;
       returnContinuation = node.body.returnContinuation;
 
@@ -170,10 +159,16 @@ class Builder extends cps_ir.Visitor<Node> {
 
   FunctionDefinition buildFunction(cps_ir.FunctionDefinition node) {
     currentElement = node.element;
+    if (parent != null) {
+      // Local function's 'this' refers to enclosing method's 'this'
+      thisParameter = parent.thisParameter;
+    } else {
+      thisParameter = node.thisParameter;
+    }
     List<Variable> parameters =
         node.parameters.map(addFunctionParameter).toList();
     Statement body;
-    if (!node.isAbstract) {
+    if (!node.isEmpty) {
       returnContinuation = node.body.returnContinuation;
       phiTempVar = new Variable(node.element, null);
       body = visit(node.body);
@@ -185,11 +180,12 @@ class Builder extends cps_ir.Visitor<Node> {
 
   ConstructorDefinition buildConstructor(cps_ir.ConstructorDefinition node) {
     currentElement = node.element;
+    thisParameter = node.thisParameter;
     List<Variable> parameters =
         node.parameters.map(addFunctionParameter).toList();
     List<Initializer> initializers;
     Statement body;
-    if (!node.isAbstract) {
+    if (!node.isEmpty) {
       initializers = node.initializers.map(visit).toList();
       returnContinuation = node.body.returnContinuation;
 
@@ -214,27 +210,16 @@ class Builder extends cps_ir.Visitor<Node> {
          growable: false);
   }
 
-  /// Returns the list of variables corresponding to the arguments to a join
-  /// continuation.
-  ///
-  /// The `readCount` of these variables will not be incremented. Instead,
-  /// [buildPhiAssignments] will handle the increment, if necessary.
-  List<Variable> translatePhiArguments(List<cps_ir.Reference> args) {
-    return new List<Variable>.generate(args.length,
-         (int index) => getVariable(args[index].definition),
-         growable: false);
-  }
-
   Statement buildContinuationAssignment(
       cps_ir.Parameter parameter,
       Expression argument,
       Statement buildRest()) {
-    Variable variable = getVariable(parameter);
     Statement assignment;
-    if (variable == null) {
-      assignment = new ExpressionStatement(argument, null);
-    } else {
+    if (parameter.hasAtLeastOneUse) {
+      Variable variable = getVariable(parameter);
       assignment = new Assign(variable, argument, null);
+    } else {
+      assignment = new ExpressionStatement(argument, null);
     }
     assignment.next = buildRest();
     return assignment;
@@ -244,7 +229,7 @@ class Builder extends cps_ir.Visitor<Node> {
   /// then continues at the statement created by [buildRest].
   Statement buildPhiAssignments(
       List<cps_ir.Parameter> parameters,
-      List<Variable> arguments,
+      List<Expression> arguments,
       Statement buildRest()) {
     assert(parameters.length == arguments.length);
     // We want a parallel assignment to all parameters simultaneously.
@@ -258,43 +243,51 @@ class Builder extends cps_ir.Visitor<Node> {
     Map<Variable, List<int>> rightHand = <Variable, List<int>>{};
     for (int i = 0; i < parameters.length; i++) {
       Variable param = getVariable(parameters[i]);
-      Variable arg = arguments[i];
-      if (param == null || param == arg) {
-        continue; // No assignment necessary.
+      Expression arg = arguments[i];
+      if (arg is VariableUse) {
+        if (param == null || param == arg.variable) {
+          // No assignment necessary.
+          --arg.variable.readCount;
+          continue;
+        }
+        // v1 = v0
+        List<int> list = rightHand[arg.variable];
+        if (list == null) {
+          rightHand[arg.variable] = list = <int>[];
+        }
+        list.add(i);
+      } else {
+        // v1 = this;
       }
-      List<int> list = rightHand[arg];
-      if (list == null) {
-        rightHand[arg] = list = <int>[];
-      }
-      list.add(i);
     }
 
     Statement first, current;
-    void addAssignment(Variable dst, Variable src) {
+    void addAssignment(Variable dst, Expression src) {
       if (first == null) {
-        first = current = new Assign(dst, new VariableUse(src), null);
+        first = current = new Assign(dst, src, null);
       } else {
-        current = current.next = new Assign(dst, new VariableUse(src), null);
+        current = current.next = new Assign(dst, src, null);
       }
     }
 
-    List<Variable> assignmentSrc = new List<Variable>(parameters.length);
-    List<bool> done = new List<bool>(parameters.length);
+    List<Expression> assignmentSrc = new List<Expression>(parameters.length);
+    List<bool> done = new List<bool>.filled(parameters.length, false);
     void visitAssignment(int i) {
-      if (done[i] == true) {
+      if (done[i]) {
         return;
       }
       Variable param = getVariable(parameters[i]);
-      Variable arg = arguments[i];
-      if (param == null || param == arg) {
+      Expression arg = arguments[i];
+      if (param == null || (arg is VariableUse && param == arg.variable)) {
         return; // No assignment necessary.
       }
       if (assignmentSrc[i] != null) {
         // Cycle found; store argument in a temporary variable.
         // The temporary will then be used as right-hand side when the
         // assignment gets added.
-        if (assignmentSrc[i] != phiTempVar) { // Only move to temporary once.
-          assignmentSrc[i] = phiTempVar;
+        VariableUse source = assignmentSrc[i];
+        if (source.variable != phiTempVar) { // Only move to temporary once.
+          assignmentSrc[i] = new VariableUse(phiTempVar);
           addAssignment(phiTempVar, arg);
         }
         return;
@@ -311,7 +304,7 @@ class Builder extends cps_ir.Visitor<Node> {
     }
 
     for (int i = 0; i < parameters.length; i++) {
-      if (done[i] == null) {
+      if (!done[i]) {
         visitAssignment(i);
       }
     }
@@ -324,12 +317,30 @@ class Builder extends cps_ir.Visitor<Node> {
     return first;
   }
 
-  visitNode(cps_ir.Node node) {
-    if (node is cps_ir.JsSpecificNode) {
-      throw "Cannot handle JS specific IR nodes in this visitor";
-    } else {
-      throw "Unhandled node: $node";
-    }
+  visit(cps_ir.Node node) => node.accept(this);
+
+  unexpectedNode(cps_ir.Node node) {
+    internalError(CURRENT_ELEMENT_SPANNABLE, 'Unexpected IR node: $node');
+  }
+
+  // JS-specific nodes are handled by a subclass.
+  visitSetField(cps_ir.SetField node) => unexpectedNode(node);
+  visitIdentical(cps_ir.Identical node) => unexpectedNode(node);
+  visitInterceptor(cps_ir.Interceptor node) => unexpectedNode(node);
+  visitCreateInstance(cps_ir.CreateInstance node) => unexpectedNode(node);
+  visitGetField(cps_ir.GetField node) => unexpectedNode(node);
+  visitCreateBox(cps_ir.CreateBox node) => unexpectedNode(node);
+
+  // Executable definitions are not visited directly.  They have 'build'
+  // functions as entry points.
+  visitFieldDefinition(cps_ir.FieldDefinition node) {
+    return unexpectedNode(node);
+  }
+  visitFunctionDefinition(cps_ir.FunctionDefinition node) {
+    return unexpectedNode(node);
+  }
+  visitConstructorDefinition(cps_ir.ConstructorDefinition node) {
+    return unexpectedNode(node);
   }
 
   Initializer visitFieldInitializer(cps_ir.FieldInitializer node) {
@@ -339,7 +350,7 @@ class Builder extends cps_ir.Visitor<Node> {
 
   Initializer visitSuperInitializer(cps_ir.SuperInitializer node) {
     List<Statement> arguments =
-        node.arguments.map((cps_ir.RunnableBody argument) {
+        node.arguments.map((cps_ir.Body argument) {
       returnContinuation = argument.returnContinuation;
       return visit(argument.body);
     }).toList();
@@ -364,7 +375,7 @@ class Builder extends cps_ir.Visitor<Node> {
     }
   }
 
-  Statement visitRunnableBody(cps_ir.RunnableBody node) {
+  Statement visitBody(cps_ir.Body node) {
     return visit(node.body);
   }
 
@@ -460,7 +471,11 @@ class Builder extends cps_ir.Visitor<Node> {
   Statement visitLetMutable(cps_ir.LetMutable node) {
     Variable variable = addMutableVariable(node.variable);
     Expression value = getVariableUse(node.value);
-    return new Assign(variable, value, visit(node.body), isDeclaration: true);
+    Statement body = visit(node.body);
+    // If the variable was captured by an inner function in the body, this
+    // must be declared here so we assign to a fresh copy of the variable.
+    bool needsDeclaration = variable.isCaptured;
+    return new Assign(variable, value, body, isDeclaration: needsDeclaration);
   }
 
   Expression visitGetMutableVariable(cps_ir.GetMutableVariable node) {
@@ -488,8 +503,11 @@ class Builder extends cps_ir.Visitor<Node> {
 
   Statement visitInvokeConstructor(cps_ir.InvokeConstructor node) {
     List<Expression> arguments = translateArguments(node.arguments);
-    Expression invoke =
-        new InvokeConstructor(node.type, node.target, node.selector, arguments);
+    Expression invoke = new InvokeConstructor(
+        node.type,
+        node.target,
+        node.selector,
+        arguments);
     return continueWithExpression(node.continuation, invoke);
   }
 
@@ -504,7 +522,7 @@ class Builder extends cps_ir.Visitor<Node> {
       assert(node.arguments.length == 1);
       return new Return(getVariableUse(node.arguments.single));
     } else {
-      List<Variable> arguments = translatePhiArguments(node.arguments);
+      List<Expression> arguments = translateArguments(node.arguments);
       return buildPhiAssignments(cont.parameters, arguments,
           () {
             // Translate invocations of recursive and non-recursive
@@ -553,10 +571,6 @@ class Builder extends cps_ir.Visitor<Node> {
     return new Constant(node.expression);
   }
 
-  Expression visitThis(cps_ir.This node) {
-    return new This();
-  }
-
   Expression visitReifyTypeVar(cps_ir.ReifyTypeVar node) {
     return new ReifyTypeVar(node.typeVariable);
   }
@@ -595,22 +609,41 @@ class Builder extends cps_ir.Visitor<Node> {
     }
   }
 
-  Expression visitParameter(cps_ir.Parameter node) {
+  visitParameter(cps_ir.Parameter node) {
     // Continuation parameters are not visited (continuations themselves are
     // not visited yet).
-    internalError(CURRENT_ELEMENT_SPANNABLE, 'Unexpected IR node: $node');
-    return null;
+    unexpectedNode(node);
   }
 
-  Expression visitContinuation(cps_ir.Continuation node) {
+  visitContinuation(cps_ir.Continuation node) {
     // Until continuations with multiple uses are supported, they are not
     // visited.
-    internalError(CURRENT_ELEMENT_SPANNABLE, 'Unexpected IR node: $node.');
-    return null;
+    unexpectedNode(node);
+  }
+
+  visitMutableVariable(cps_ir.MutableVariable node) {
+    // These occur as parameters or bound by LetMutable.  They are not visited
+    // directly.
+    unexpectedNode(node);
   }
 
   Expression visitIsTrue(cps_ir.IsTrue node) {
     return getVariableUse(node.value);
+  }
+
+  Expression visitReifyRuntimeType(cps_ir.ReifyRuntimeType node) {
+    return new ReifyRuntimeType(getVariableUse(node.value));
+  }
+
+  Expression visitReadTypeVariable(cps_ir.ReadTypeVariable node) {
+    return new ReadTypeVariable(node.variable, getVariableUse(node.target));
+  }
+
+  @override
+  Node visitTypeExpression(cps_ir.TypeExpression node) {
+    return new TypeExpression(
+        node.dartType,
+        node.arguments.map(getVariableUse).toList());
   }
 }
 

@@ -27,29 +27,7 @@ part 'shrinking_reductions.dart';
 /// An optimization pass over the CPS IR.
 abstract class Pass {
   /// Applies optimizations to root, rewriting it in the process.
-  void rewrite(ExecutableDefinition root) => root.applyPass(this);
+  void rewrite(RootNode root);
 
-  void rewriteConstructorDefinition(ConstructorDefinition root);
-  void rewriteFunctionDefinition(FunctionDefinition root);
-  void rewriteFieldDefinition(FieldDefinition root);
-}
-
-abstract class PassMixin implements Pass {
-  void rewrite(ExecutableDefinition root) => root.applyPass(this);
-
-  void rewriteExecutableDefinition(ExecutableDefinition root);
-
-  void rewriteFunctionDefinition(FunctionDefinition root) {
-    if (root.isAbstract) return;
-    rewriteExecutableDefinition(root);
-  }
-
-  void rewriteConstructorDefinition(ConstructorDefinition root) {
-    if (root.isAbstract) return;
-    rewriteExecutableDefinition(root);
-  }
-  void rewriteFieldDefinition(FieldDefinition root) {
-    if (!root.hasInitializer) return;
-    rewriteExecutableDefinition(root);
-  }
+  String get passName;
 }
