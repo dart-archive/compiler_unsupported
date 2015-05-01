@@ -117,6 +117,7 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
   /// or error case.
   String errorCodeName;
 
+  final String suggestedBodyName;
   /// The inner function that is scheduled to do each await/yield,
   /// and called to do a new iteration for sync*.
   js.VariableUse get body => new js.VariableUse(bodyName);
@@ -179,7 +180,8 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
 
   AsyncRewriterBase(this.diagnosticListener,
                     spannable,
-                    this.safeVariableName)
+                    this.safeVariableName,
+                    this.suggestedBodyName)
       : _spannable = spannable;
 
   /// Initialize names used by the subClass.
@@ -199,7 +201,7 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     // generated after the analysis.
     resultName = freshName("result");
     errorCodeName = freshName("errorCode");
-    bodyName = freshName("body");
+    bodyName = freshName(suggestedBodyName);
     gotoName = freshName("goto");
     handlerName = freshName("handler");
     nextName = freshName("next");
@@ -878,9 +880,9 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
   @override
   js.Expression visitConditional(js.Conditional node) {
     if (!shouldTransform(node.then) && !shouldTransform(node.otherwise)) {
-      return withExpression(node.condition, (js.Expression condition) {
-        return js.js('# ? # : #', [condition, node.then, node.otherwise]);
-      }, store: false);
+      return js.js('# ? # : #', [visitExpression(node.condition),
+                                 visitExpression(node.then),
+                                 visitExpression(node.otherwise)]);
     }
     int thenLabel = newLabel("then");
     int joinLabel = newLabel("join");
@@ -967,10 +969,9 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
     if (!shouldTransform(node)) {
       bool oldInsideUntranslatedBreakable = insideUntranslatedBreakable;
       insideUntranslatedBreakable = true;
-      withExpression(node.condition, (js.Expression condition) {
-        addStatement(js.js.statement('do {#} while (#)',
-                                     [node.body, condition]));
-      }, store: false);
+      addStatement(js.js.statement('do {#} while (#)',
+                                   [translateInBlock(node.body),
+                                    visitExpression(node.condition)]));
       insideUntranslatedBreakable = oldInsideUntranslatedBreakable;
       return;
     }
@@ -1346,7 +1347,8 @@ abstract class AsyncRewriterBase extends js.NodeVisitor {
       for (js.SwitchClause clause in node.cases) {
         if (clause is js.Case) {
           labels[i] = newLabel("case");
-          clauses.add(new js.Case(clause.expression, gotoAndBreak(labels[i])));
+          clauses.add(new js.Case(visitExpression(clause.expression),
+                                  gotoAndBreak(labels[i])));
         } else if (clause is js.Default) {
           labels[i] = newLabel("default");
           clauses.add(new js.Default(gotoAndBreak(labels[i])));
@@ -1674,10 +1676,12 @@ class AsyncRewriter extends AsyncRewriterBase {
                 spannable,
                 {this.asyncHelper,
                  this.newCompleter,
-                 safeVariableName})
+                 String safeVariableName(String proposedName),
+                 String bodyName})
         : super(diagnosticListener,
                 spannable,
-                safeVariableName);
+                safeVariableName,
+                bodyName);
 
   @override
   void addYield(js.DartYield node, js.Expression expression) {
@@ -1804,10 +1808,12 @@ class SyncStarRewriter extends AsyncRewriterBase {
                  this.newIterable,
                  this.yieldStarExpression,
                  this.uncaughtErrorExpression,
-                 safeVariableName})
+                 String safeVariableName(String proposedName),
+                 String bodyName})
         : super(diagnosticListener,
                 spannable,
-                safeVariableName);
+                safeVariableName,
+                bodyName);
 
   /// Translates a yield/yield* in an sync*.
   ///
@@ -1972,10 +1978,12 @@ class AsyncStarRewriter extends AsyncRewriterBase {
                  this.newController,
                  this.yieldExpression,
                  this.yieldStarExpression,
-                 String safeVariableName(String original)})
+                 String safeVariableName(String proposedName),
+                 String bodyName})
         : super(diagnosticListener,
                 spannable,
-                safeVariableName);
+                safeVariableName,
+                bodyName);
 
 
   /// Translates a yield/yield* in an async* function.

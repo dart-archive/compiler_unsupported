@@ -8,14 +8,18 @@ part of dart2js.cps_ir.optimizers;
  * [ShrinkingReducer] applies shrinking reductions to CPS terms as described
  * in 'Compiling with Continuations, Continued' by Andrew Kennedy.
  */
-class ShrinkingReducer extends PassMixin {
+class ShrinkingReducer extends Pass {
+  String get passName => 'Shrinking reductions';
+
   Set<_ReductionTask> _worklist;
 
   static final _DeletedNode _DELETED = new _DeletedNode();
 
   /// Applies shrinking reductions to root, mutating root in the process.
   @override
-  void rewriteExecutableDefinition(ExecutableDefinition root) {
+  void rewrite(RootNode root) {
+    if (root.isEmpty) return;
+
     _worklist = new Set<_ReductionTask>();
     _RedexVisitor redexVisitor = new _RedexVisitor(_worklist);
 
@@ -462,7 +466,7 @@ class _RemovalVisitor extends RecursiveVisitor {
       Continuation cont = reference.definition;
       Node parent = cont.parent;
       // The parent might be the deleted sentinel, or it might be a
-      // RunnableBody if the continuation is the return continuation.
+      // Body if the continuation is the return continuation.
       if (parent is LetCont) {
         if (cont.isRecursive && cont.hasAtMostOneUse) {
           // Convert recursive to nonrecursive continuations.  If the
@@ -484,6 +488,7 @@ class _RemovalVisitor extends RecursiveVisitor {
 class ParentVisitor extends RecursiveVisitor {
   processFunctionDefinition(FunctionDefinition node) {
     node.body.parent = node;
+    if (node.thisParameter != null) node.thisParameter.parent = node;
     int index = 0;
     node.parameters.forEach((Definition parameter) {
       parameter.parent = node;
@@ -491,7 +496,7 @@ class ParentVisitor extends RecursiveVisitor {
     });
   }
 
-  processRunnableBody(RunnableBody node) {
+  processBody(Body node) {
     node.returnContinuation.parent = node;
     node.body.parent = node;
   }
@@ -509,12 +514,11 @@ class ParentVisitor extends RecursiveVisitor {
   // Expressions.
 
   processFieldInitializer(FieldInitializer node) {
-    node.body.body.parent = node;
+    node.body.parent = node;
   }
 
   processSuperInitializer(SuperInitializer node) {
-    node.arguments.forEach(
-        (RunnableBody argument) => argument.body.parent = node);
+    node.arguments.forEach((Body argument) => argument.parent = node);
   }
 
   processLetPrim(LetPrim node) {
@@ -656,9 +660,22 @@ class ParentVisitor extends RecursiveVisitor {
 
   processCreateInstance(CreateInstance node) {
     node.arguments.forEach((Reference ref) => ref.parent = node);
+    node.typeInformation.forEach((Reference ref) => ref.parent = node);
   }
 
   processCreateBox(CreateBox node) {
+  }
+
+  processReifyRuntimeType(ReifyRuntimeType node) {
+    node.value.parent = node;
+  }
+
+  processReadTypeVariable(ReadTypeVariable node) {
+    node.target.parent = node;
+  }
+
+  processTypeExpression(TypeExpression node) {
+    node.arguments.forEach((Reference ref) => ref.parent = node);
   }
 }
 

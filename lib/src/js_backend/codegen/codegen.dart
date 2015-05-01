@@ -23,7 +23,8 @@ class CodegenBailout {
   }
 }
 
-class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
+class CodeGenerator extends tree_ir.StatementVisitor
+                    with tree_ir.ExpressionVisitor<js.Expression> {
   final CodegenRegistry registry;
 
   final Glue glue;
@@ -206,9 +207,10 @@ class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
   @override
   js.Expression visitInvokeConstructor(tree_ir.InvokeConstructor node) {
     checkStaticTargetIsValid(node, node.target);
-
     if (node.constant != null) return giveup(node);
-    registry.registerInstantiatedClass(node.target.enclosingClass);
+
+    ClassElement instantiatedClass = node.target.enclosingClass;
+    registry.registerInstantiatedClass(instantiatedClass);
     Selector selector = node.selector;
     FunctionElement target = node.target;
     List<js.Expression> arguments = visitArguments(node.arguments);
@@ -257,15 +259,27 @@ class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
   @override
   js.Expression visitInvokeStatic(tree_ir.InvokeStatic node) {
     checkStaticTargetIsValid(node, node.target);
-
-    if (node.target is! FunctionElement) {
-      giveup(node, 'static getters and setters are not supported.');
-    }
     Selector selector = node.selector;
-    FunctionElement target = node.target;
-    List<js.Expression> arguments = visitArguments(node.arguments);
-    return buildStaticInvoke(selector, target, arguments,
-        sourceInformation: node.sourceInformation);
+    if (node.target is FunctionElement) {
+      assert(selector.isGetter || selector.isSetter || selector.isCall);
+      FunctionElement target = node.target;
+      List<js.Expression> arguments = visitArguments(node.arguments);
+      return buildStaticInvoke(selector, target, arguments,
+          sourceInformation: node.sourceInformation);
+    } else {
+      assert(selector.isGetter || selector.isSetter);
+      FieldElement target = node.target;
+      registry.registerStaticUse(target);
+      js.Expression field = glue.staticFieldAccess(target);
+      if (selector.isGetter) {
+        assert(node.arguments.isEmpty);
+        return field;
+      } else {
+        assert(node.arguments.length == 1);
+        js.Expression value = visitExpression(node.arguments.first);
+        return new js.Assignment(field, value);
+      }
+    }
   }
 
   @override
@@ -328,12 +342,6 @@ class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
   @override
   js.Expression visitNot(tree_ir.Not node) {
     return new js.Prefix("!", visitExpression(node.operand));
-  }
-
-  @override
-  js.Expression visitReifyTypeVar(tree_ir.ReifyTypeVar node) {
-    return giveup(node);
-    // TODO: implement visitReifyTypeVar
   }
 
   @override
@@ -407,7 +415,7 @@ class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
 
   @override
   void visitAssign(tree_ir.Assign node) {
-    tree_ir.Expression value = node.definition;
+    tree_ir.Expression value = node.value;
     js.Expression definition = visitExpression(value);
 
     accumulator.add(new js.ExpressionStatement(new js.Assignment(
@@ -494,9 +502,24 @@ class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
 
   @override
   js.Expression visitCreateInstance(tree_ir.CreateInstance node) {
-    registry.registerInstantiatedClass(node.classElement);
-    return new js.New(glue.constructorAccess(node.classElement),
-                      node.arguments.map(visitExpression).toList());
+    ClassElement cls = node.classElement;
+    registry.registerInstantiatedClass(cls);
+    js.Expression instance = new js.New(
+        glue.constructorAccess(cls),
+        node.arguments.map(visitExpression).toList());
+
+    List<tree_ir.Expression> typeInformation = node.typeInformation;
+    assert(typeInformation.isEmpty ||
+        typeInformation.length == cls.typeVariables.length);
+    if (typeInformation.isNotEmpty) {
+      FunctionElement helper = glue.getAddRuntimeTypeInformation();
+      js.Expression typeArguments = new js.ArrayInitializer(
+          typeInformation.map(visitExpression).toList());
+      return buildStaticHelperInvocation(helper,
+          <js.Expression>[instance, typeArguments]);
+    } else {
+      return instance;
+    }
   }
 
   @override
@@ -517,7 +540,51 @@ class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
     visitStatement(node.next);
   }
 
+  js.Expression buildStaticHelperInvocation(FunctionElement helper,
+                                            List<js.Expression> arguments) {
+    registry.registerStaticUse(helper);
+    return buildStaticInvoke(new Selector.fromElement(helper), helper,
+        arguments);
+  }
+
+  @override
+  js.Expression visitReifyRuntimeType(tree_ir.ReifyRuntimeType node) {
+    FunctionElement createType = glue.getCreateRuntimeType();
+    FunctionElement typeToString = glue.getRuntimeTypeToString();
+    return buildStaticHelperInvocation(createType,
+        [buildStaticHelperInvocation(typeToString,
+            [visitExpression(node.value)])]);
+  }
+
+  @override
+  js.Expression visitReadTypeVariable(tree_ir.ReadTypeVariable node) {
+    ClassElement context = node.variable.element.enclosingClass;
+    js.Expression index = js.number(glue.getTypeVariableIndex(node.variable));
+    if (glue.needsSubstitutionForTypeVariableAccess(context)) {
+      js.Expression substitution = glue.getSubstitutionName(context);
+      return buildStaticHelperInvocation(
+          glue.getTypeArgumentWithSubstitution(),
+          [visitExpression(node.target), substitution, index]);
+    } else {
+      return buildStaticHelperInvocation(
+          glue.getTypeArgumentByIndex(),
+          [visitExpression(node.target), index]);
+    }
+  }
+
+  @override
+  js.Expression visitTypeExpression(tree_ir.TypeExpression node) {
+    List<js.Expression> arguments =
+        node.arguments.map(visitExpression).toList(growable: false);
+    return glue.generateTypeRepresentation(node.dartType, arguments);
+  }
+
   // Dart-specific IR nodes
+
+  @override
+  visitReifyTypeVar(tree_ir.ReifyTypeVar node) {
+    return errorUnsupportedNode(node);
+  }
 
   @override
   visitFunctionExpression(tree_ir.FunctionExpression node) {
@@ -529,17 +596,7 @@ class CodeGenerator extends tree_ir.Visitor<dynamic, js.Expression> {
     return errorUnsupportedNode(node);
   }
 
-  @override
-  visitFieldInitializer(tree_ir.FieldInitializer node) {
-    return errorUnsupportedNode(node);
-  }
-
-  @override
-  visitSuperInitializer(tree_ir.SuperInitializer node) {
-    return errorUnsupportedNode(node);
-  }
-
-  dynamic errorUnsupportedNode(tree_ir.DartSpecificNode node) {
+  errorUnsupportedNode(tree_ir.DartSpecificNode node) {
     throw "Unsupported node in JS backend: $node";
   }
 }

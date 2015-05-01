@@ -269,6 +269,8 @@ class ArgumentsTypes<T> extends IterableMixin<T> {
     assert(this.named.values.every((T type) => type != null));
   }
 
+  ArgumentsTypes.empty() : positional = const [], named = const {};
+
   int get length => positional.length + named.length;
 
   Iterator<T> get iterator => new ArgumentsTypesIterator(this);
@@ -655,7 +657,7 @@ class LocalsHandler<T> {
 }
 
 abstract class InferrerVisitor
-    <T, E extends MinimalInferrerEngine<T>> extends ResolvedVisitor<T> {
+    <T, E extends MinimalInferrerEngine<T>> extends NewResolvedVisitor<T> {
   final Compiler compiler;
   final AstElement analyzedElement;
   final TypeSystem<T> types;
@@ -713,13 +715,15 @@ abstract class InferrerVisitor
 
   T visitDynamicSend(Send node);
 
-  T visitForIn(ForIn node);
+  T visitAsyncForIn(AsyncForIn node);
+
+  T visitSyncForIn(SyncForIn node);
 
   T visitReturn(Return node);
 
   T visitFunctionExpression(FunctionExpression node);
 
-  T visitAssert(Send node) {
+  T visitAssertSend(Send node) {
     if (!compiler.enableUserAssertions) {
       return types.nullType;
     }
@@ -1229,7 +1233,7 @@ abstract class InferrerVisitor
     return null;
   }
 
-  void internalError(String reason, {Node node}) {
+  void internalError(Spannable node, String reason) {
     compiler.internalError(node, reason);
   }
 

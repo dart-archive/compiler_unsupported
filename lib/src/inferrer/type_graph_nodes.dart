@@ -674,7 +674,7 @@ class StaticCallSiteTypeInformation extends CallSiteTypeInformation {
   }
 
   bool get isSynthesized {
-    // Some calls do not have a corresponding node, for example
+    // Some calls do not have a corresponding selector, for example
     // fowarding factory constructors, or synthesized super
     // constructor calls. We synthesize these calls but do
     // not create a selector for them.
@@ -760,11 +760,12 @@ class DynamicCallSiteTypeInformation extends CallSiteTypeInformation {
     }
   }
 
-  bool get targetsIncludeNoSuchMethod {
+  bool targetsIncludeComplexNoSuchMethod(TypeGraphInferrerEngine inferrer) {
     return targets.any((Element e) {
       return e is FunctionElement &&
              e.isInstanceMember &&
-             e.name == Compiler.NO_SUCH_METHOD;
+             e.name == Compiler.NO_SUCH_METHOD &&
+             inferrer.backend.isComplexNoSuchMethod(e);
     });
   }
 

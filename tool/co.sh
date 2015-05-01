@@ -2,4 +2,4 @@
 # Dart svn repo.
 
 #svn checkout --non-recursive http://dart.googlecode.com/svn/trunk/ trunk
-svn checkout --non-recursive http://dart.googlecode.com/svn/branches/1.9 trunk
+svn checkout --non-recursive http://dart.googlecode.com/svn/branches/1.10 trunk

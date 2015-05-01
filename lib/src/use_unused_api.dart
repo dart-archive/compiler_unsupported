@@ -13,7 +13,9 @@ import '../compiler.dart' as api;
 import 'colors.dart' as colors;
 import 'constants/values.dart' as constants;
 import 'cps_ir/cps_ir_builder.dart' as ir_builder;
+import 'cps_ir/cps_ir_builder_task.dart' as ir_builder;
 import 'cps_ir/cps_ir_nodes_sexpr.dart' as cps_ir_nodes_sexpr;
+import 'tree_ir/tree_ir_nodes.dart' as tree_ir;
 import 'dart_types.dart' as dart_types;
 import 'dart2js.dart' as dart2js;
 import 'dart2jslib.dart' as dart2jslib;
@@ -28,6 +30,7 @@ import 'js/js.dart' as js;
 import 'js_backend/js_backend.dart' as js_backend;
 import 'js_emitter/js_emitter.dart' as js_emitter;
 import 'js_emitter/program_builder.dart' as program_builder;
+import 'resolution/semantic_visitor.dart' as semantic_visitor;
 import 'source_file_provider.dart' as source_file_provider;
 import 'ssa/ssa.dart' as ssa;
 import 'tree/tree.dart' as tree;
@@ -45,6 +48,7 @@ class ElementVisitor extends elements_visitor.ElementVisitor {
 void main(List<String> arguments) {
   useApi();
   dart2js.main(arguments);
+  dart2jslib.isPublicName(null);
   useConstant(null, null);
   useNode(null);
   useUtil(null);
@@ -69,6 +73,8 @@ void main(List<String> arguments) {
   useCodeEmitterTask(null);
   useScript(null);
   useProgramBuilder(null);
+  useSemanticVisitor();
+  useTreeVisitors();
 }
 
 useApi() {
@@ -84,6 +90,7 @@ void useConstant(constants.ConstantValue constant,
 void useNode(tree.Node node) {
   node
     ..asAsyncModifier()
+    ..asAsyncForIn()
     ..asAwait()
     ..asBreakStatement()
     ..asCascade()
@@ -120,6 +127,7 @@ void useNode(tree.Node node) {
     ..asStringNode()
     ..asSwitchCase()
     ..asSwitchStatement()
+    ..asSyncForIn()
     ..asTryStatement()
     ..asTypeAnnotation()
     ..asTypeVariable()
@@ -266,6 +274,8 @@ useTypes() {
 
 useCodeEmitterTask(js_emitter.CodeEmitterTask codeEmitterTask) {
   codeEmitterTask.oldEmitter.clearCspPrecompiledNodes();
+  codeEmitterTask.oldEmitter.
+      buildLazilyInitializedStaticField(null, isolateProperties: null);
 }
 
 useScript(dart2jslib.Script script) {
@@ -275,4 +285,24 @@ useScript(dart2jslib.Script script) {
 useProgramBuilder(program_builder.ProgramBuilder builder) {
   builder.buildMethodHackForIncrementalCompilation(null);
   builder.buildFieldsHackForIncrementalCompilation(null);
+}
+
+useSemanticVisitor() {
+  new semantic_visitor.BulkVisitor().apply(null, null);
+  new semantic_visitor.TraversalVisitor(null).apply(null, null);
+}
+
+class DummyTreeVisitor extends tree_ir.RootVisitor
+                          with tree_ir.InitializerVisitor {
+  visitFunctionDefinition(tree_ir.FunctionDefinition node) {}
+  visitConstructorDefinition(tree_ir.ConstructorDefinition node) {}
+  visitFieldDefinition(tree_ir.FieldDefinition node) {}
+
+  visitFieldInitializer(tree_ir.FieldInitializer node) {}
+  visitSuperInitializer(tree_ir.SuperInitializer node) {}
+}
+
+useTreeVisitors() {
+  new DummyTreeVisitor().visitRootNode(null);
+  new DummyTreeVisitor().visitInitializer(null);
 }

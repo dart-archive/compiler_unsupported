@@ -16,8 +16,8 @@ import 'backend_ast_emitter.dart' show TypeGenerator;
 
 /// Translates the backend AST to Dart frontend AST.
 tree.Node emit(dart2js.TreeElementMapping treeElements,
-               ExecutableDefinition definition) {
-  return new TreePrinter(treeElements).makeDefinition(definition);
+               RootNode root) {
+  return new TreePrinter(treeElements).makeDefinition(root);
 }
 
 /// If true, the unparser will insert a coment in front of every function
@@ -32,7 +32,7 @@ class TreePrinter {
 
   TreePrinter([this.treeElements]);
 
-  tree.Node makeDefinition(ExecutableDefinition node) {
+  tree.Node makeDefinition(RootNode node) {
     if (node is FieldDefinition) {
       tree.Node definition;
       if (node.initializer == null) {
@@ -398,9 +398,9 @@ class TreePrinter {
       }
     } else if (exp is CallMethod) {
       precedence = CALLEE;
-      tree.Node receiver = exp.object is This
-          ? null
-          : makeExp(exp.object, PRIMARY, beginStmt: beginStmt);
+      // TODO(sra): Elide receiver when This, but only if not in a scope that
+      // shadows the method (e.g. constructor body).
+      tree.Node receiver = makeExp(exp.object, PRIMARY, beginStmt: beginStmt);
       result = new tree.Send(
           receiver,
           makeIdentifier(exp.methodName),
@@ -445,9 +445,9 @@ class TreePrinter {
           colon);
     } else if (exp is FieldExpression) {
       precedence = PRIMARY;
-      tree.Node receiver = exp.object is This
-          ? null
-          : makeExp(exp.object, PRIMARY, beginStmt: beginStmt);
+      // TODO(sra): Elide receiver when This, but only if not in a scope that
+      // shadows the method (e.g. constructor body).
+      tree.Node receiver = makeExp(exp.object, PRIMARY, beginStmt: beginStmt);
       result = new tree.Send(receiver, makeIdentifier(exp.fieldName));
     } else if (exp is ConstructorDefinition) {
       precedence = EXPRESSION;
@@ -775,11 +775,10 @@ class TreePrinter {
       } else {
         left = makeVariableDeclarations(stmt.leftHandValue);
       }
-      return new tree.ForIn(
+      return new tree.SyncForIn(
           left,
           makeExpression(stmt.expression),
           makeStatement(stmt.body, shortIf: shortIf),
-          awaitToken,
           forToken,
           inToken);
     } else if (stmt is FunctionDeclaration) {
@@ -976,17 +975,16 @@ class TreePrinter {
         setElement(definition, param.element, param);
       }
       if (param.defaultValue != null) {
-        return new tree.SendSet(
+        definition = new tree.SendSet(
             null,
             definition,
             new tree.Operator(assignOperator),
             singleton(makeExpression(param.defaultValue)));
-      } else {
-        return new tree.VariableDefinitions(
-            null,
-            makeEmptyModifiers(),
-            singleton(definition));
       }
+      return new tree.VariableDefinitions(
+          null,
+          makeEmptyModifiers(),
+          singleton(definition));
     } else {
       tree.Node definition;
       if (param.defaultValue != null) {

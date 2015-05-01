@@ -21,7 +21,7 @@ abstract class HVisitor<R> {
   R visitExitTry(HExitTry node);
   R visitFieldGet(HFieldGet node);
   R visitFieldSet(HFieldSet node);
-  R visitForeign(HForeign node);
+  R visitForeignCode(HForeignCode node);
   R visitForeignNew(HForeignNew node);
   R visitGoto(HGoto node);
   R visitGreater(HGreater node);
@@ -292,8 +292,8 @@ class HBaseVisitor extends HGraphVisitor implements HVisitor {
   visitExitTry(HExitTry node) => visitControlFlow(node);
   visitFieldGet(HFieldGet node) => visitFieldAccess(node);
   visitFieldSet(HFieldSet node) => visitFieldAccess(node);
-  visitForeign(HForeign node) => visitInstruction(node);
-  visitForeignNew(HForeignNew node) => visitForeign(node);
+  visitForeignCode(HForeignCode node) => visitInstruction(node);
+  visitForeignNew(HForeignNew node) => visitInstruction(node);
   visitGoto(HGoto node) => visitControlFlow(node);
   visitGreater(HGreater node) => visitRelational(node);
   visitGreaterEqual(HGreaterEqual node) => visitRelational(node);
@@ -1698,13 +1698,25 @@ class HLocalSet extends HLocalAccess {
   bool isJsStatement() => true;
 }
 
-class HForeign extends HInstruction {
+abstract class HForeign extends HInstruction {
+  HForeign(TypeMask type, List<HInstruction> inputs) : super(inputs, type);
+
+  bool get isStatement => false;
+  native.NativeBehavior get nativeBehavior => null;
+
+  bool canThrow() {
+    return sideEffects.hasSideEffects()
+        || sideEffects.dependsOnSomething();
+  }
+}
+
+class HForeignCode extends HForeign {
   final js.Template codeTemplate;
   final bool isStatement;
   final bool _canThrow;
   final native.NativeBehavior nativeBehavior;
 
-  HForeign(this.codeTemplate,
+  HForeignCode(this.codeTemplate,
            TypeMask type,
            List<HInstruction> inputs,
            {this.isStatement: false,
@@ -1713,28 +1725,25 @@ class HForeign extends HInstruction {
             canThrow: false})
       : this.nativeBehavior = nativeBehavior,
         this._canThrow = canThrow,
-        super(inputs, type) {
+        super(type, inputs) {
+    if(codeTemplate == null) throw this;
     if (effects == null && nativeBehavior != null) {
       effects = nativeBehavior.sideEffects;
     }
     if (effects != null) sideEffects.add(effects);
   }
 
-  HForeign.statement(codeTemplate, List<HInstruction> inputs,
+  HForeignCode.statement(codeTemplate, List<HInstruction> inputs,
                      SideEffects effects,
                      native.NativeBehavior nativeBehavior,
                      TypeMask type)
       : this(codeTemplate, type, inputs, isStatement: true,
              effects: effects, nativeBehavior: nativeBehavior);
 
-  accept(HVisitor visitor) => visitor.visitForeign(this);
+  accept(HVisitor visitor) => visitor.visitForeignCode(this);
 
   bool isJsStatement() => isStatement;
-  bool canThrow() {
-    return _canThrow
-        || sideEffects.hasSideEffects()
-        || sideEffects.dependsOnSomething();
-  }
+  bool canThrow() => _canThrow || super.canThrow();
 }
 
 class HForeignNew extends HForeign {
@@ -1748,7 +1757,7 @@ class HForeignNew extends HForeign {
 
   HForeignNew(this.element, TypeMask type, List<HInstruction> inputs,
               [this.instantiatedTypes])
-      : super(null, type, inputs);
+      : super(type, inputs);
 
   accept(HVisitor visitor) => visitor.visitForeignNew(this);
 }
@@ -2048,7 +2057,7 @@ class HConstant extends HInstruction {
   HConstant.internal(this.constant, TypeMask constantType)
       : super(<HInstruction>[], constantType);
 
-  toString() => 'literal: $constant';
+  toString() => 'literal: ${constant.toStructuredString()}';
   accept(HVisitor visitor) => visitor.visitConstant(this);
 
   bool isConstant() => true;
@@ -2291,15 +2300,34 @@ class HInterceptor extends HInstruction {
   // This field should originally be null to allow GVN'ing all
   // [HInterceptor] on the same input.
   Set<ClassElement> interceptedClasses;
+
+  // inputs[0] is initially the only input, the receiver.
+
+  // inputs[1] is a constant interceptor when the interceptor is a constant
+  // except for a `null` receiver.  This is used when the receiver can't be
+  // falsy, except for `null`, allowing the generation of code like
+  //
+  //     (a && C.JSArray_methods).get$first(a)
+  //
+
   HInterceptor(HInstruction receiver, TypeMask type)
       : super(<HInstruction>[receiver], type) {
     sideEffects.clearAllSideEffects();
     sideEffects.clearAllDependencies();
     setUseGvn();
   }
+
   String toString() => 'interceptor on $interceptedClasses';
   accept(HVisitor visitor) => visitor.visitInterceptor(this);
   HInstruction get receiver => inputs[0];
+
+  bool get isConditionalConstantInterceptor => inputs.length == 2;
+  HInstruction get conditionalConstantInterceptor => inputs[1];
+  void set conditionalConstantInterceptor(HConstant constant) {
+    assert(!isConditionalConstantInterceptor);
+    inputs.add(constant);
+  }
+
   bool isInterceptor(Compiler compiler) => true;
 
   int typeCode() => HInstruction.INTERCEPTOR_TYPECODE;
@@ -2886,7 +2914,8 @@ class LoopTypeVisitor extends ast.Visitor {
   int visitWhile(ast.While node) => HLoopBlockInformation.WHILE_LOOP;
   int visitFor(ast.For node) => HLoopBlockInformation.FOR_LOOP;
   int visitDoWhile(ast.DoWhile node) => HLoopBlockInformation.DO_WHILE_LOOP;
-  int visitForIn(ast.ForIn node) => HLoopBlockInformation.FOR_IN_LOOP;
+  int visitAsyncForIn(ast.AsyncForIn node) => HLoopBlockInformation.FOR_IN_LOOP;
+  int visitSyncForIn(ast.SyncForIn node) => HLoopBlockInformation.FOR_IN_LOOP;
   int visitSwitchStatement(ast.SwitchStatement node) =>
       HLoopBlockInformation.SWITCH_CONTINUE_LOOP;
 }

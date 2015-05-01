@@ -27,7 +27,8 @@ import '../elements/elements.dart' show
     ElementKind,
     FieldElement,
     ParameterElement,
-    TypeVariableElement;
+    TypeVariableElement,
+    MethodElement;
 
 import '../hash/sha1.dart' show Hasher;
 
@@ -108,4 +109,4 @@ part 'old_emitter/declarations.dart';
 part 'old_emitter/emitter.dart';
 part 'old_emitter/interceptor_emitter.dart';
 part 'old_emitter/nsm_emitter.dart';
-part 'old_emitter/reflection_data_parser.dart';
+part 'old_emitter/setup_program_builder.dart';

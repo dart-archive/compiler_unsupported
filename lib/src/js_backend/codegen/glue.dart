@@ -11,6 +11,7 @@ import '../../js/js.dart' as js;
 import '../../constants/values.dart';
 import '../../elements/elements.dart';
 import '../../constants/expressions.dart';
+import '../../dart_types.dart' show DartType, TypeVariableType;
 
 /// Encapsulates the dependencies of the function-compiler to the compiler,
 /// backend and emitter.
@@ -42,8 +43,12 @@ class Glue {
     return _backend.constants.getConstantForVariable(variable);
   }
 
-  js.Expression staticFunctionAccess(Element element) {
+  js.Expression staticFunctionAccess(FunctionElement element) {
     return _backend.emitter.staticFunctionAccess(element);
+  }
+
+  js.Expression staticFieldAccess(FieldElement element) {
+    return _backend.emitter.staticFieldAccess(element);
   }
 
   String safeVariableName(String name) {
@@ -114,5 +119,53 @@ class Glue {
   js.Expression getInterceptorLibrary() {
     return new js.VariableUse(
         _backend.namer.globalObjectFor(_backend.interceptorsLibrary));
+  }
+
+  FunctionElement getCreateRuntimeType() {
+    return _backend.getCreateRuntimeType();
+  }
+
+  FunctionElement getRuntimeTypeToString() {
+    return _backend.getRuntimeTypeToString();
+  }
+
+  FunctionElement getTypeArgumentWithSubstitution() {
+    return _backend.getGetRuntimeTypeArgument();
+  }
+
+  FunctionElement getTypeArgumentByIndex() {
+    return _backend.getGetTypeArgumentByIndex();
+  }
+
+  js.Expression getSubstitutionName(ClassElement cls) {
+    return js.string(_namer.substitutionName(cls));
+  }
+
+  int getTypeVariableIndex(TypeVariableType variable) {
+    return RuntimeTypes.getTypeVariableIndex(variable.element);
+  }
+
+  bool needsSubstitutionForTypeVariableAccess(ClassElement cls) {
+    ClassWorld classWorld = _compiler.world;
+    if (classWorld.isUsedAsMixin(cls)) return true;
+
+    Iterable<ClassElement> subclasses = _compiler.world.strictSubclassesOf(cls);
+    return subclasses.any((ClassElement subclass) {
+      return !_backend.rti.isTrivialSubstitution(subclass, cls);
+    });
+  }
+
+  FunctionElement getAddRuntimeTypeInformation() {
+    return _backend.getSetRuntimeTypeInfo();
+  }
+
+  js.Expression generateTypeRepresentation(DartType dartType,
+                                           List<js.Expression> arguments) {
+    int variableIndex = 0;
+    js.Expression representation = _backend.rti.getTypeRepresentation(
+        dartType,
+        (_) => arguments[variableIndex++]);
+    assert(variableIndex == arguments.length);
+    return representation;
   }
 }

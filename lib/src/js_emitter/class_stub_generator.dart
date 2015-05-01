@@ -20,9 +20,10 @@ class ClassStubGenerator {
     //        [ constructorName, fields,
     //            fields.map(
     //                (name) => js('this.# = #', [name, name]))]));
-    return js('function(#) { #; }',
+    return js('function(#) { #; this.#();}',
         [fields,
-         fields.map((name) => js('this.# = #', [name, name]))]);
+         fields.map((name) => js('this.# = #', [name, name])),
+         namer.deferredAction]);
   }
 
   jsAst.Expression generateGetter(Element member, String fieldName) {
@@ -150,7 +151,7 @@ class ClassStubGenerator {
         new List.generate(selector.argumentCount, (i) => '\$$i');
 
     List<jsAst.Expression> argNames =
-        selector.getOrderedNamedArguments().map((String name) =>
+        selector.callStructure.getOrderedNamedArguments().map((String name) =>
             js.string(name)).toList();
 
     String methodName = selector.invocationMirrorMemberName;

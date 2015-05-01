@@ -101,7 +101,7 @@ part of js_backend;
  * For local variables, the [Namer] only provides *proposed names*. These names
  * must be disambiguated elsewhere.
  */
-class Namer implements ClosureNamer {
+class Namer {
 
   static const List<String> javaScriptKeywords = const <String>[
     // These are current keywords.
@@ -332,6 +332,7 @@ class Namer implements ClosureNamer {
   final String defaultValuesField = r'$defaultValues';
   final String methodsWithOptionalArgumentsField =
       r'$methodsWithOptionalArguments';
+  final String deferredAction = r'$deferredAction';
 
   final String classDescriptorProperty = r'^';
   final String requiredParameterField = r'$requiredArgCount';
@@ -417,6 +418,10 @@ class Namer implements ClosureNamer {
       case JsGetName.GETTER_PREFIX: return getterPrefix;
       case JsGetName.SETTER_PREFIX: return setterPrefix;
       case JsGetName.CALL_PREFIX: return callPrefix;
+      case JsGetName.CALL_PREFIX0: return '${callPrefix}\$0';
+      case JsGetName.CALL_PREFIX1: return '${callPrefix}\$1';
+      case JsGetName.CALL_PREFIX2: return '${callPrefix}\$2';
+      case JsGetName.CALL_PREFIX3: return '${callPrefix}\$3';
       case JsGetName.CALL_CATCH_ALL: return callCatchAllName;
       case JsGetName.REFLECTABLE: return reflectableField;
       case JsGetName.CLASS_DESCRIPTOR_PROPERTY:
@@ -425,6 +430,7 @@ class Namer implements ClosureNamer {
         return requiredParameterField;
       case JsGetName.DEFAULT_VALUES_PROPERTY: return defaultValuesField;
       case JsGetName.CALL_NAME_PROPERTY: return callNameField;
+      case JsGetName.DEFERRED_ACTION_PROPERTY: return deferredAction;
       default:
         compiler.reportError(
           node, MessageKind.GENERIC,
@@ -490,23 +496,27 @@ class Namer implements ClosureNamer {
    *
    * The resulting name is a *proposed name* and is never minified.
    */
-  String privateName(LibraryElement library, String originalName) {
+  String privateName(Name originalName) {
+    String text = originalName.text;
+
     // Public names are easy.
-    if (!isPrivateName(originalName)) return originalName;
+    if (!originalName.isPrivate) return text;
+
+    LibraryElement library = originalName.library;
 
     // The first library asking for a short private name wins.
     LibraryElement owner =
-        shortPrivateNameOwners.putIfAbsent(originalName, () => library);
+        shortPrivateNameOwners.putIfAbsent(text, () => library);
 
     if (owner == library) {
-      return originalName;
+      return text;
     } else {
       // Make sure to return a private name that starts with _ so it
       // cannot clash with any public names.
       // The name is still not guaranteed to be unique, since both the library
       // name and originalName could contain $ symbols.
       String libraryName = _disambiguateGlobal(library);
-      return '_$libraryName\$${originalName}';
+      return '_$libraryName\$${text}';
     }
   }
 
@@ -552,9 +562,9 @@ class Namer implements ClosureNamer {
   ///
   /// This is used for the annotated names of `call`, and for the proposed name
   /// for other instance methods.
-  List<String> callSuffixForSelector(Selector selector) {
-    List<String> suffixes = ['${selector.argumentCount}'];
-    suffixes.addAll(selector.getOrderedNamedArguments());
+  List<String> callSuffixForStructure(CallStructure callStructure) {
+    List<String> suffixes = ['${callStructure.argumentCount}'];
+    suffixes.addAll(callStructure.getOrderedNamedArguments());
     return suffixes;
   }
 
@@ -576,14 +586,13 @@ class Namer implements ClosureNamer {
 
   /// Annotated name for the member being invoked by [selector].
   String invocationName(Selector selector) {
-    LibraryElement library = selector.library;
     switch (selector.kind) {
       case SelectorKind.GETTER:
-        String disambiguatedName = _disambiguateMember(library, selector.name);
+        String disambiguatedName = _disambiguateMember(selector.memberName);
         return deriveGetterName(disambiguatedName);
 
       case SelectorKind.SETTER:
-        String disambiguatedName = _disambiguateMember(library, selector.name);
+        String disambiguatedName = _disambiguateMember(selector.memberName);
         return deriveSetterName(disambiguatedName);
 
       case SelectorKind.OPERATOR:
@@ -593,13 +602,13 @@ class Namer implements ClosureNamer {
         return disambiguatedName; // Operators are not annotated.
 
       case SelectorKind.CALL:
-        List<String> suffix = callSuffixForSelector(selector);
+        List<String> suffix = callSuffixForStructure(selector.callStructure);
         if (selector.name == Compiler.CALL_OPERATOR_NAME) {
           // Derive the annotated name for this variant of 'call'.
           return deriveCallMethodName(suffix);
         }
         String disambiguatedName =
-            _disambiguateMember(library, selector.name, suffix);
+            _disambiguateMember(selector.memberName, suffix);
         return disambiguatedName; // Methods other than call are not annotated.
 
       default:
@@ -619,9 +628,9 @@ class Namer implements ClosureNamer {
    * Returns the disambiguated name for the given field, used for constructing
    * the getter and setter names.
    */
-  String fieldAccessorName(Element element) {
+  String fieldAccessorName(FieldElement element) {
     return element.isInstanceMember
-        ? _disambiguateMember(element.library, element.name)
+        ? _disambiguateMember(element.memberName)
         : _disambiguateGlobal(element);
   }
 
@@ -629,7 +638,7 @@ class Namer implements ClosureNamer {
    * Returns name of the JavaScript property used to store a static or instance
    * field.
    */
-  String fieldPropertyName(Element element) {
+  String fieldPropertyName(FieldElement element) {
     return element.isInstanceMember
         ? instanceFieldPropertyName(element)
         : _disambiguateGlobal(element);
@@ -657,16 +666,26 @@ class Namer implements ClosureNamer {
   /**
    * Returns the JavaScript property name used to store an instance field.
    */
-  String instanceFieldPropertyName(Element element) {
+  String instanceFieldPropertyName(FieldElement element) {
     ClassElement enclosingClass = element.enclosingClass;
 
     if (element.hasFixedBackendName) {
-      // Box fields and certain native fields must be given a specific name.
-      // Native names must not contain '$'. We rely on this to avoid clashes.
-      assert(element is BoxFieldElement ||
-          enclosingClass.isNative && !element.fixedBackendName.contains(r'$'));
+      // Certain native fields must be given a specific name. Native names must
+      // not contain '$'. We rely on this to avoid clashes.
+      assert(enclosingClass.isNative &&
+             !element.fixedBackendName.contains(r'$'));
 
       return element.fixedBackendName;
+    }
+
+    // Instances of BoxFieldElement are special. They are already created with
+    // a unique and safe name. However, as boxes are not really instances of
+    // classes, the usual naming scheme that tries to avoid name clashes with
+    // super classes does not apply. We still do not mark the name as a
+    // fixedBackendName, as we want to allow other namers to do something more
+    // clever with them.
+    if (element is BoxFieldElement) {
+      return element.name;
     }
 
     // If the name of the field might clash with another field,
@@ -687,7 +706,7 @@ class Namer implements ClosureNamer {
     // No superclass uses the disambiguated name as a property name, so we can
     // use it for this field. This generates nicer field names since otherwise
     // the field name would have to be mangled.
-    return _disambiguateMember(element.library, element.name);
+    return _disambiguateMember(element.memberName);
   }
 
   bool _isShadowingSuperField(Element element) {
@@ -701,10 +720,10 @@ class Namer implements ClosureNamer {
   }
 
   /// Annotated name for the setter of [element].
-  String setterForElement(Element element) {
+  String setterForElement(MemberElement element) {
     // We dynamically create setters from the field-name. The setter name must
     // therefore be derived from the instance field-name.
-    String name = _disambiguateMember(element.library, element.name);
+    String name = _disambiguateMember(element.memberName);
     return deriveSetterName(name);
   }
 
@@ -723,26 +742,17 @@ class Namer implements ClosureNamer {
   }
 
   /// Annotated name for the getter of [element].
-  String getterForElement(Element element) {
+  String getterForElement(MemberElement element) {
     // We dynamically create getters from the field-name. The getter name must
     // therefore be derived from the instance field-name.
-    String name = _disambiguateMember(element.library, element.name);
+    String name = _disambiguateMember(element.memberName);
     return deriveGetterName(name);
   }
 
-  /// Property name for the getter of an instance member with [originalName]
-  /// in [library].
-  ///
-  /// [library] may be `null` if [originalName] is known to be public.
-  String getterForMember(LibraryElement library, String originalName) {
-    String disambiguatedName = _disambiguateMember(library, originalName);
+  /// Property name for the getter of an instance member with [originalName].
+  String getterForMember(Name originalName) {
+    String disambiguatedName = _disambiguateMember(originalName);
     return deriveGetterName(disambiguatedName);
-  }
-
-  /// Property name for the getter or a public instance member with
-  /// [originalName].
-  String getterForPublicMember(String originalName) {
-    return getterForMember(null, originalName);
   }
 
   /// Disambiguated name for a compiler-owned global variable.
@@ -806,23 +816,19 @@ class Namer implements ClosureNamer {
   /// The resulting name, and its associated annotated names, are unique
   /// to the ([originalName], [suffixes]) pair within the instance-member
   /// namespace.
-  String _disambiguateMember(LibraryElement library,
-                             String originalName,
+  String _disambiguateMember(Name originalName,
                              [List<String> suffixes = const []]) {
-    // For private names, a library must be given.
-    assert(isPublicName(originalName) || library != null);
-
     // Build a string encoding the library name, if the name is private.
-    String libraryKey = isPrivateName(originalName)
-            ? _disambiguateGlobal(library)
+    String libraryKey = originalName.isPrivate
+            ? _disambiguateGlobal(originalName.library)
             : '';
 
     // In the unique key, separate the name parts by '@'.
     // This avoids clashes since the original names cannot contain that symbol.
-    String key = '$libraryKey@$originalName@${suffixes.join('@')}';
+    String key = '$libraryKey@${originalName.text}@${suffixes.join('@')}';
     String newName = userInstanceMembers[key];
     if (newName == null) {
-      String proposedName = privateName(library, originalName);
+      String proposedName = privateName(originalName);
       if (!suffixes.isEmpty) {
         // In the proposed name, separate the name parts by '$', because the
         // proposed name must be a valid identifier, but not necessarily unique.
@@ -968,20 +974,6 @@ class Namer implements ClosureNamer {
       name = '\$\$$name';
     }
     return name;
-  }
-
-  /// Generate a unique name for the [id]th closure variable, with proposed name
-  /// [name].
-  ///
-  /// The result is used as the name of [BoxFieldElement]s and
-  /// [ClosureFieldElement]s, and must therefore be unique to avoid breaking an
-  /// invariant in the element model (classes cannot declare multiple fields
-  /// with the same name).
-  ///
-  /// Since the result is used as an element name, it will later show up as a
-  /// *proposed name* when the element is passed to [instanceFieldPropertyName].
-  String getClosureVariableName(String name, int id) {
-    return "${name}_$id";
   }
 
   /**
@@ -1347,7 +1339,6 @@ class Namer implements ClosureNamer {
   String get incrementalHelperName => r'$dart_unsafe_incremental_support';
 
   jsAst.Expression get accessIncrementalHelper {
-    assert(compiler.hasIncrementalSupport);
     return js('self.${incrementalHelperName}');
   }
 

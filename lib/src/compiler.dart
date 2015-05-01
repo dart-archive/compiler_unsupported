@@ -291,6 +291,7 @@ abstract class Backend {
   bool get canHandleCompilationFailed;
 
   void onResolutionComplete() {}
+  void onTypeInferenceComplete() {}
 
   ItemCompilationContext createItemCompilationContext() {
     return new ItemCompilationContext();
@@ -361,13 +362,14 @@ abstract class Backend {
    */
   void registerRuntimeType(Enqueuer enqueuer, Registry registry) {}
 
-  /**
-   * Call this method to enable [noSuchMethod] handling in the
-   * backend.
-   */
-  void enableNoSuchMethod(Element context, Enqueuer enqueuer) {
-    enqueuer.registerInvocation(compiler.noSuchMethodSelector);
-  }
+  /// Call this to register a `noSuchMethod` implementation.
+  void registerNoSuchMethod(FunctionElement noSuchMethodElement) {}
+
+  /// Call this method to enable support for `noSuchMethod`.
+  void enableNoSuchMethod(Enqueuer enqueuer) {}
+
+  /// Returns whether or not `noSuchMethod` support has been enabled.
+  bool get enabledNoSuchMethod => false;
 
   /// Call this method to enable support for isolates.
   void enableIsolateSupport(Enqueuer enqueuer) {}
@@ -401,12 +403,6 @@ abstract class Backend {
   ClassElement get positiveIntImplementation => compiler.intClass;
 
   ClassElement defaultSuperclass(ClassElement element) => compiler.objectClass;
-
-  bool isDefaultNoSuchMethodImplementation(Element element) {
-    assert(element.name == Compiler.NO_SUCH_METHOD);
-    ClassElement classElement = element.enclosingClass;
-    return classElement == compiler.objectClass;
-  }
 
   bool isInterceptorClass(ClassElement element) => false;
 
@@ -533,6 +529,9 @@ abstract class Backend {
 class ResolutionCallbacks {
   /// Register that [node] is a call to `assert`.
   void onAssert(Send node, Registry registry) {}
+
+  /// Register that an 'await for' has been seen.
+  void onAsyncForIn(AsyncForIn node, Registry registry) {}
 
   /// Called during resolution to notify to the backend that the
   /// program uses string interpolation.
@@ -949,7 +948,6 @@ abstract class Compiler implements DiagnosticListener {
   final Selector symbolValidatedConstructorSelector = new Selector.call(
       'validated', null, 1);
 
-  bool enabledNoSuchMethod = false;
   bool enabledRuntimeType = false;
   bool enabledFunctionApply = false;
   bool enabledInvokeOn = false;
@@ -1049,16 +1047,16 @@ abstract class Compiler implements DiagnosticListener {
     globalDependencies =
         new CodegenRegistry(this, new TreeElementMapping(null));
 
-    closureMapping.ClosureNamer closureNamer;
     if (emitJavaScript) {
       js_backend.JavaScriptBackend jsBackend =
           new js_backend.JavaScriptBackend(this, generateSourceMap);
-      closureNamer = jsBackend.namer;
       backend = jsBackend;
     } else {
-      closureNamer = new closureMapping.ClosureNamer();
       backend = new dart_backend.DartBackend(this, strips,
                                              multiFile: dart2dartMultiFile);
+      if (dumpInfo) {
+        throw new ArgumentError('--dump-info is not supported for dart2dart.');
+      }
     }
 
     tasks = [
@@ -1068,7 +1066,7 @@ abstract class Compiler implements DiagnosticListener {
       parser = new ParserTask(this),
       patchParser = new PatchParserTask(this),
       resolver = new ResolverTask(this, backend.constantCompilerTask),
-      closureToClassMapper = new closureMapping.ClosureTask(this, closureNamer),
+      closureToClassMapper = new closureMapping.ClosureTask(this),
       checker = new TypeCheckerTask(this),
       irBuilder = new IrBuilderTask(this),
       typesTask = new ti.TypesTask(this),
@@ -1617,14 +1615,13 @@ abstract class Compiler implements DiagnosticListener {
 
     if (stopAfterTypeInference) return;
 
+    backend.onTypeInferenceComplete();
+
     log('Compiling...');
     phase = PHASE_COMPILING;
     // TODO(johnniwinther): Move these to [CodegenEnqueuer].
     if (hasIsolateSupport) {
       backend.enableIsolateSupport(enqueuer.codegen);
-    }
-    if (enabledNoSuchMethod) {
-      backend.enableNoSuchMethod(null, enqueuer.codegen);
     }
     if (compileAll) {
       libraryLoader.libraries.forEach((LibraryElement library) {
