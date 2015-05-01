@@ -10,6 +10,6 @@ environment:
   sdk: ">=1.0.0 <2.0.0"
 
 dev_dependencies:
-  grinder: any
+  grinder: ^0.7.0
   path: any
   unittest: any
