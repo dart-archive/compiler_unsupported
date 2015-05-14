@@ -18,14 +18,9 @@ final Directory dartDir = joinDir(new Directory('trunk'), ['dart']);
 // TODO: we don't want web clients to get the code bloat associated with source
 // encoded resources
 
-void main(List<String> args) {
-  task('build', build);
-  task('validate', validate);
-  task('clean', clean);
+main(List<String> args) => grind(args);
 
-  grind(args);
-}
-
+@Task()
 void build() {
   if (!dartDir.existsSync()) {
     log('trunk/ dir not found.');
@@ -56,8 +51,7 @@ final String versionLong = '${versionLong}';
   Directory sourceDir = joinDir(dartDir, ['sdk', 'lib', '_internal']);
   Directory pkgDir = joinDir(dartDir, ['pkg']);
 
-  copyFile(joinFile(pkgDir, ['compiler', 'lib', 'compiler.dart']), LIB_DIR,
-      context);
+  copyFile(joinFile(pkgDir, ['compiler', 'lib', 'compiler.dart']), LIB_DIR);
   copyFile(joinFile(sourceDir, ['libraries.dart']), LIB_DIR);
   copyDirectory(joinDir(sourceDir, ['compiler']),
       joinDir(LIB_DIR, ['_internal', 'compiler']));
@@ -112,16 +106,10 @@ final String versionLong = '${versionLong}';
 
 }
 
-/**
- * Validate that the library looks good.
- */
-void validate() {
-  Tests.runCliTests();
-}
+@Task('Validate that the library looks good')
+void validate() => Tests.runCliTests();
 
-/**
- * Delete files copied from the dart2js sources.
- */
+@Task('Delete files copied from the dart2js sources')
 void clean() {
   deleteEntity(joinDir(LIB_DIR, ['sdk']));
   deleteEntity(joinDir(LIB_DIR, ['src']));
