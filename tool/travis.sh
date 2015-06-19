@@ -16,4 +16,4 @@ dartanalyzer --fatal-warnings \
   tool/grind.dart
 
 # Run the tests.
-dart test/all.dart
+dart test/all_test.dart
