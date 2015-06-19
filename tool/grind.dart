@@ -109,7 +109,12 @@ final String versionLong = '${versionLong}';
 
 @Task()
 analyze() {
-  Analyzer.analyze(['tool/grind.dart', 'lib/sdk.dart', 'lib/version.dart']);
+  Analyzer.analyze([
+      'tool/grind.dart',
+      'lib/sdk.dart',
+      'lib/version.dart',
+      'example/compiler.dart'
+  ]);
 }
 
 @Task('Validate that the library looks good')
