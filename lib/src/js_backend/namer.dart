@@ -245,6 +245,9 @@ class Namer {
     // next-generation plugin, this results in starting a new Java process.
     "java", "Packages", "netscape", "sun", "JavaObject", "JavaClass",
     "JavaArray", "JavaMember",
+
+    // ES6 collections.
+    "Map",
   ];
 
   static const List<String> reservedGlobalObjectNames = const <String>[
@@ -399,6 +402,7 @@ class Namer {
 
   JavaScriptBackend get backend => compiler.backend;
 
+  String get deferredTypesName => 'deferredTypes';
   String get isolateName => 'Isolate';
   String get isolatePropertiesName => r'$isolateProperties';
   String get noSuchMethodName => publicInstanceMethodNameByArity(
@@ -431,6 +435,19 @@ class Namer {
       case JsGetName.DEFAULT_VALUES_PROPERTY: return defaultValuesField;
       case JsGetName.CALL_NAME_PROPERTY: return callNameField;
       case JsGetName.DEFERRED_ACTION_PROPERTY: return deferredAction;
+      case JsGetName.OPERATOR_AS_PREFIX: return operatorAsPrefix;
+      case JsGetName.SIGNATURE_NAME: return operatorSignature;
+      case JsGetName.TYPEDEF_TAG: return typedefTag;
+      case JsGetName.FUNCTION_TYPE_VOID_RETURN_TAG:
+        return functionTypeVoidReturnTag;
+      case JsGetName.FUNCTION_TYPE_RETURN_TYPE_TAG:
+        return functionTypeReturnTypeTag;
+      case JsGetName.FUNCTION_TYPE_REQUIRED_PARAMETERS_TAG:
+        return functionTypeRequiredParametersTag;
+      case JsGetName.FUNCTION_TYPE_OPTIONAL_PARAMETERS_TAG:
+        return functionTypeOptionalParametersTag;
+      case JsGetName.FUNCTION_TYPE_NAMED_PARAMETERS_TAG:
+        return functionTypeNamedParametersTag;
       default:
         compiler.reportError(
           node, MessageKind.GENERIC,
@@ -1504,8 +1521,8 @@ class ConstantNamingVisitor implements ConstantValueVisitor {
   @override
   void visitConstructed(ConstructedConstantValue constant, [_]) {
     addRoot(constant.type.element.name);
-    for (int i = 0; i < constant.fields.length; i++) {
-      _visit(constant.fields[i]);
+    for (ConstantValue value in constant.fields.values) {
+      _visit(value);
       if (failed) return;
     }
   }
@@ -1608,8 +1625,8 @@ class ConstantCanonicalHasher implements ConstantValueVisitor<int, Null> {
   @override
   int visitConstructed(ConstructedConstantValue constant, [_]) {
     int hash = _hashString(3, constant.type.element.name);
-    for (int i = 0; i < constant.fields.length; i++) {
-      hash = _combine(hash, _visit(constant.fields[i]));
+    for (ConstantValue value in constant.fields.values) {
+      hash = _combine(hash, _visit(value));
     }
     return hash;
   }
@@ -1710,7 +1727,7 @@ class ConstantCanonicalHasher implements ConstantValueVisitor<int, Null> {
   }
 }
 
-class FunctionTypeNamer extends DartTypeVisitor {
+class FunctionTypeNamer extends BaseDartTypeVisitor {
   final Compiler compiler;
   StringBuffer sb;
 
@@ -1724,7 +1741,7 @@ class FunctionTypeNamer extends DartTypeVisitor {
     return sb.toString();
   }
 
-  visit(DartType type) {
+  visit(DartType type, [_]) {
     type.accept(this, null);
   }
 

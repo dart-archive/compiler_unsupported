@@ -2,7 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of dart2js;
+library dart2js.constant_system.dart;
+
+import 'constants/constant_system.dart';
+import 'constants/values.dart';
+import 'dart2jslib.dart' show Compiler;
+import 'dart_types.dart';
+import 'tree/tree.dart' show DartString;
 
 const DART_CONSTANT_SYSTEM = const DartConstantSystem();
 
@@ -388,18 +394,45 @@ class DartConstantSystem extends ConstantSystem {
 
   const DartConstantSystem();
 
+
+  @override
   IntConstantValue createInt(int i) => new IntConstantValue(i);
+
+  @override
   DoubleConstantValue createDouble(double d) => new DoubleConstantValue(d);
+
+  @override
   StringConstantValue createString(DartString string) {
     return new StringConstantValue(string);
   }
+
+  @override
   BoolConstantValue createBool(bool value) => new BoolConstantValue(value);
+
+  @override
   NullConstantValue createNull() => new NullConstantValue();
+
+  @override
+  ListConstantValue createList(InterfaceType type,
+                               List<ConstantValue> values) {
+    return new ListConstantValue(type, values);
+  }
+
+  @override
   MapConstantValue createMap(Compiler compiler,
                              InterfaceType type,
                              List<ConstantValue> keys,
                              List<ConstantValue> values) {
     return new MapConstantValue(type, keys, values);
+  }
+
+  @override
+  ConstantValue createType(Compiler compiler, DartType type) {
+    // TODO(johnniwinther): Change the `Type` type to
+    // `compiler.coreTypes.typeType` and check the backend specific value in
+    // [checkConstMapKeysDontOverrideEquals] in 'members.dart'.
+    return new TypeConstantValue(type,
+        compiler.backend.typeImplementation.computeType(compiler));
   }
 
   bool isInt(ConstantValue constant) => constant.isInt;

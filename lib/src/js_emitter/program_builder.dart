@@ -199,21 +199,18 @@ class ProgramBuilder {
   }
 
   List<StaticField> _buildStaticNonFinalFields(LibrariesMap librariesMap) {
-    // TODO(floitsch): handle static non-final fields correctly with deferred
-    // libraries.
-    if (librariesMap != _registry.mainLibrariesMap) {
-      return const <StaticField>[];
-    }
-    Iterable<VariableElement> staticNonFinalFields =
-        backend.constants.getStaticNonFinalFieldsForEmission();
-    return Elements.sortedByPosition(staticNonFinalFields)
+    List<VariableElement> staticNonFinalFields =
+         _task.outputStaticNonFinalFieldLists[librariesMap.outputUnit];
+    if (staticNonFinalFields == null) return const <StaticField>[];
+
+    return staticNonFinalFields
         .map(_buildStaticField)
         .toList(growable: false);
   }
 
   StaticField _buildStaticField(Element element) {
     JavaScriptConstantCompiler handler = backend.constants;
-    ConstantValue initialValue = handler.getInitialValueFor(element).value;
+    ConstantValue initialValue = handler.getInitialValueFor(element);
     // TODO(zarah): The holder should not be registered during building of
     // a static field.
     _registry.registerHolder(namer.globalObjectForConstant(initialValue));
@@ -335,7 +332,6 @@ class ProgramBuilder {
       assert(invariant(element, element == enclosing));
 
       if (Elements.isNonAbstractInstanceMember(member)) {
-        js.Expression code = backend.generatedCode[member];
         // TODO(herhut): Remove once _buildMethod can no longer return null.
         Method method = _buildMethod(member);
         if (method != null) methods.add(method);
@@ -470,16 +466,16 @@ class ProgramBuilder {
     if (signature.optionalParametersAreNamed) {
       optionalParameterDefaultValues = new Map<String, ConstantValue>();
       signature.forEachOptionalParameter((ParameterElement parameter) {
-        ConstantExpression def =
-            backend.constants.getConstantForVariable(parameter);
-        optionalParameterDefaultValues[parameter.name] = def.value;
+        ConstantValue def =
+            backend.constants.getConstantValueForVariable(parameter);
+        optionalParameterDefaultValues[parameter.name] = def;
       });
     } else {
       optionalParameterDefaultValues = <ConstantValue>[];
       signature.forEachOptionalParameter((ParameterElement parameter) {
-        ConstantExpression def =
-            backend.constants.getConstantForVariable(parameter);
-        optionalParameterDefaultValues.add(def.value);
+        ConstantValue def =
+            backend.constants.getConstantValueForVariable(parameter);
+        optionalParameterDefaultValues.add(def);
       });
     }
     return optionalParameterDefaultValues;
@@ -547,7 +543,9 @@ class ProgramBuilder {
 
     js.Expression functionType;
     if (canTearOff || canBeReflected) {
-      functionType = _generateFunctionType(memberType);
+      OutputUnit outputUnit =
+          _compiler.deferredLoadTask.outputUnitForElement(element);
+      functionType = _generateFunctionType(memberType, outputUnit);
     }
 
     int requiredParameterCount;
@@ -569,12 +567,13 @@ class ProgramBuilder {
         functionType: functionType);
   }
 
-  js.Expression _generateFunctionType(DartType type) {
+  js.Expression _generateFunctionType(DartType type, OutputUnit outputUnit) {
     if (type.containsTypeVariables) {
       js.Expression thisAccess = js.js(r'this.$receiver');
       return backend.rti.getSignatureEncoding(type, thisAccess);
     } else {
-      return js.number(backend.emitter.metadataCollector.reifyType(type));
+      return js.number(backend.emitter.metadataCollector.
+          reifyTypeForOutputUnit(type, outputUnit));
     }
   }
 
@@ -718,7 +717,9 @@ class ProgramBuilder {
     js.Expression functionType;
     DartType type = element.type;
     if (needsTearOff || canBeReflected) {
-      functionType = _generateFunctionType(type);
+      OutputUnit outputUnit =
+          _compiler.deferredLoadTask.outputUnitForElement(element);
+      functionType = _generateFunctionType(type, outputUnit);
     }
 
     int requiredParameterCount;

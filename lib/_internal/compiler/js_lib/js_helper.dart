@@ -16,11 +16,10 @@ import 'dart:_js_embedded_names' show
     INTERCEPTORS_BY_TAG,
     IS_HUNK_LOADED,
     IS_HUNK_INITIALIZED,
+    JsBuiltin,
     JsGetName,
     LEAF_TAGS,
-    METADATA,
-    NATIVE_SUPERCLASS_TAG_NAME,
-    TYPES;
+    NATIVE_SUPERCLASS_TAG_NAME;
 
 import 'dart:collection';
 
@@ -42,28 +41,23 @@ import 'dart:async' show
 import 'dart:_foreign_helper' show
     DART_CLOSURE_TO_JS,
     JS,
+    JS_BUILTIN,
     JS_CALL_IN_ISOLATE,
     JS_CONST,
     JS_CURRENT_ISOLATE,
     JS_CURRENT_ISOLATE_CONTEXT,
-    JS_DART_OBJECT_CONSTRUCTOR,
     JS_EFFECT,
     JS_EMBEDDED_GLOBAL,
-    JS_FUNCTION_CLASS_NAME,
     JS_FUNCTION_TYPE_NAMED_PARAMETERS_TAG,
     JS_FUNCTION_TYPE_OPTIONAL_PARAMETERS_TAG,
     JS_FUNCTION_TYPE_REQUIRED_PARAMETERS_TAG,
     JS_FUNCTION_TYPE_RETURN_TYPE_TAG,
-    JS_FUNCTION_TYPE_TAG,
     JS_FUNCTION_TYPE_VOID_RETURN_TAG,
-    JS_GET_NAME,
     JS_GET_FLAG,
+    JS_GET_NAME,
     JS_HAS_EQUALS,
     JS_IS_INDEXABLE_FIELD_NAME,
-    JS_NULL_CLASS_NAME,
-    JS_OBJECT_CLASS_NAME,
     JS_OPERATOR_AS_PREFIX,
-    JS_OPERATOR_IS_PREFIX,
     JS_SIGNATURE_NAME,
     JS_STRING_CONCAT,
     RAW_DART_FUNCTION_REF;
@@ -91,6 +85,109 @@ part 'linked_hash_map.dart';
 /// Marks the internal map in dart2js, so that internal libraries can is-check
 /// them.
 abstract class InternalMap {
+}
+
+/// Extracts the JavaScript-constructor name from the given isCheckProperty.
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+String isCheckPropertyToJsConstructorName(String isCheckProperty) {
+  return JS_BUILTIN('returns:String;depends:none;effects:none',
+                    JsBuiltin.isCheckPropertyToJsConstructorName,
+                    isCheckProperty);
+}
+
+/// Returns true if the given [type] is a function type object.
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+bool isDartFunctionType(Object type) {
+  return JS_BUILTIN('returns:bool;effects:none;depends:none',
+                    JsBuiltin.isFunctionType, type);
+}
+
+
+/// Creates a function type object.
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+createDartFunctionTypeRti() {
+  return JS_BUILTIN('returns:=Object;effects:none;depends:none',
+                    JsBuiltin.createFunctionTypeRti);
+}
+
+/// Retrieves the class name from type information stored on the constructor of
+/// [type].
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+String rawRtiToJsConstructorName(Object rti) {
+  return JS_BUILTIN('String', JsBuiltin.rawRtiToJsConstructorName, rti);
+}
+
+/// Returns the rti from the given [constructorName].
+// TODO(floitsch): make this a builtin.
+jsConstructorNameToRti(String constructorName) {
+  var getTypeFromName = JS_EMBEDDED_GLOBAL('', GET_TYPE_FROM_NAME);
+  return JS('', '#(#)', getTypeFromName, constructorName);
+}
+
+/// Returns the raw runtime type of the given object [o].
+///
+/// The argument [o] must be the interceptor for primitive types. If
+/// necessary run it through [getInterceptor] first.
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+// TODO(floitsch): we should call getInterceptor ourselves, but currently
+//    getInterceptor is not GVNed.
+@ForceInline()
+Object getRawRuntimeType(Object o) {
+  return JS_BUILTIN('', JsBuiltin.rawRuntimeType, o);
+}
+
+/// Returns whether the given [type] is a subtype of [other].
+///
+/// The argument [other] is the name of the other type, as computed by
+/// [runtimeTypeToString].
+@ForceInline()
+bool builtinIsSubtype(type, String other) {
+  return JS_BUILTIN('returns:bool;effects:none;depends:none',
+                    JsBuiltin.isSubtype, other, type);
+}
+
+/// Returns true if the given [type] is _the_ `Function` type.
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+bool isDartFunctionTypeRti(Object type) {
+  return JS_BUILTIN('returns:bool;effects:none;depends:none',
+                    JsBuiltin.isFunctionTypeRti, type);
+}
+
+/// Returns whether the given type is _the_ Dart Object type.
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+bool isDartObjectTypeRti(type) {
+  return JS_BUILTIN('returns:bool;effects:none;depends:none',
+                    JsBuiltin.isDartObjectTypeRti, type);
+}
+
+/// Returns whether the given type is _the_ null type.
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+bool isNullTypeRti(type) {
+  return JS_BUILTIN('returns:bool;effects:none;depends:none',
+                    JsBuiltin.isNullTypeRti, type);
+}
+
+/// Returns the metadata of the given [index].
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+getMetadata(int index) {
+  return JS_BUILTIN('returns:var;effects:none;depends:none',
+                    JsBuiltin.getMetadata, index);
+}
+
+/// Returns the type of the given [index].
+// TODO(floitsch): move this to foreign_helper.dart or similar.
+@ForceInline()
+getType(int index) {
+  return JS_BUILTIN('returns:var;effects:none;depends:none',
+                    JsBuiltin.getType, index);
 }
 
 /// No-op method that is called to inform the compiler that preambles might
@@ -121,7 +218,7 @@ String S(value) {
     return 'null';
   }
   var res = value.toString();
-  if (res is !String) throw new ArgumentError(value);
+  if (res is !String) throw _argumentError(value);
   return res;
 }
 
@@ -468,8 +565,8 @@ class ReflectionInfo {
       metadataIndex = JS('int', '#[# + # + #]', data,
           parameter, optionalParameterCount, FIRST_DEFAULT_ARGUMENT);
     }
-    var metadata = JS_EMBEDDED_GLOBAL('', METADATA);
-    return JS('String', '#[#]', metadata, metadataIndex);
+    var name = getMetadata(metadataIndex);
+    return JS('String', '#', name);
   }
 
   List<int> parameterMetadataAnnotations(int parameter) {
@@ -552,16 +649,6 @@ class ReflectionInfo {
   String get reflectionName => JS('String', r'#.$reflectionName', jsFunction);
 }
 
-getMetadata(int index) {
-  var metadata = JS_EMBEDDED_GLOBAL('', METADATA);
-  return JS('', '#[#]', metadata, index);
-}
-
-getType(int index) {
-  var types = JS_EMBEDDED_GLOBAL('', TYPES);
-  return JS('', '#[#]', types, index);
-}
-
 class Primitives {
   /// Isolate-unique ID for caching [JsClosureMirror.function].
   /// Note the initial value is used by the first isolate (or if there are no
@@ -627,9 +714,11 @@ class Primitives {
       return _parseIntError(source, handleError);
     }
 
-    if (radix is! int) throw new ArgumentError("Radix is not an integer");
+    if (radix is! int) {
+      throw new ArgumentError.value(radix, 'radix', 'is not an integer');
+    }
     if (radix < 2 || radix > 36) {
-      throw new RangeError.range(radix, 2, 36, "radix");
+      throw new RangeError.range(radix, 2, 36, 'radix');
     }
     if (radix == 10 && decimalMatch != null) {
       // Cannot fail because we know that the digits are all decimal.
@@ -674,7 +763,7 @@ class Primitives {
   static double _parseDoubleError(String source,
                                   double handleError(String source)) {
     if (handleError == null) {
-      throw new FormatException("Invalid double", source);
+      throw new FormatException('Invalid double', source);
     }
     return handleError(source);
   }
@@ -711,6 +800,9 @@ class Primitives {
   /// with the given type arguments.
   ///
   /// In minified mode, uses the unminified names if available.
+  ///
+  /// The given [className] string generally contains the name of the JavaScript
+  /// constructor of the given class.
   static String formatType(String className, List typeArguments) {
     return unmangleAllIdentifiersIfPreservedAnyways
         ('$className${joinArguments(typeArguments, 0)}');
@@ -726,7 +818,7 @@ class Primitives {
       // the name out of that. If the decompiled name is a string containing an
       // identifier, we use that instead of the very generic 'Object'.
       var decompiled =
-          JS('var', r'#.match(/^\s*function\s*(\S*)\s*\(/)[1]',
+          JS('var', r'#.match(/^\s*function\s*([\w$]*)\s*\(/)[1]',
               JS('var', r'String(#.constructor)', object));
       if (decompiled is String)
         if (JS('bool', r'/^\w+$/.test(#)', decompiled))
@@ -741,7 +833,7 @@ class Primitives {
   }
 
   /// In minified mode, uses the unminified names if available.
-  static String objectToString(Object object) {
+  static String objectToHumanReadableString(Object object) {
     String name = objectTypeName(object);
     return "Instance of '$name'";
   }
@@ -765,18 +857,6 @@ class Primitives {
 
   static int timerFrequency;
   static Function timerTicks;
-
-  static bool get isD8 {
-    return JS('bool',
-              'typeof version == "function"'
-              ' && typeof os == "object" && "setenv" in os');
-  }
-
-  static bool get isJsshell {
-    return JS('bool',
-              'typeof version == "function" '
-              ' && typeof os == "object" && "getenv" in os');
-  }
 
   static String currentUri() {
     requiresPreamble();
@@ -809,14 +889,14 @@ class Primitives {
   static String stringFromCodePoints(codePoints) {
     List<int> a = <int>[];
     for (var i in codePoints) {
-      if (i is !int) throw new ArgumentError(i);
+      if (i is !int) throw _argumentError(i);
       if (i <= 0xffff) {
         a.add(i);
       } else if (i <= 0x10ffff) {
         a.add(0xd800 + ((((i - 0x10000) >> 10) & 0x3ff)));
         a.add(0xdc00 + (i & 0x3ff));
       } else {
-        throw new ArgumentError(i);
+        throw _argumentError(i);
       }
     }
     return _fromCharCodeApply(a);
@@ -824,8 +904,8 @@ class Primitives {
 
   static String stringFromCharCodes(charCodes) {
     for (var i in charCodes) {
-      if (i is !int) throw new ArgumentError(i);
-      if (i < 0) throw new ArgumentError(i);
+      if (i is !int) throw _argumentError(i);
+      if (i < 0) throw _argumentError(i);
       if (i > 0xffff) return stringFromCodePoints(charCodes);
     }
     return _fromCharCodeApply(charCodes);
@@ -971,38 +1051,38 @@ class Primitives {
 
   static getMonth(receiver) {
     return (receiver.isUtc)
-      ? JS('int', r'#.getUTCMonth() + 1', lazyAsJsDate(receiver))
-      : JS('int', r'#.getMonth() + 1', lazyAsJsDate(receiver));
+      ? JS('JSUInt31', r'#.getUTCMonth() + 1', lazyAsJsDate(receiver))
+      : JS('JSUInt31', r'#.getMonth() + 1', lazyAsJsDate(receiver));
   }
 
   static getDay(receiver) {
     return (receiver.isUtc)
-      ? JS('int', r'(#.getUTCDate() + 0)', lazyAsJsDate(receiver))
-      : JS('int', r'(#.getDate() + 0)', lazyAsJsDate(receiver));
+      ? JS('JSUInt31', r'(#.getUTCDate() + 0)', lazyAsJsDate(receiver))
+      : JS('JSUInt31', r'(#.getDate() + 0)', lazyAsJsDate(receiver));
   }
 
   static getHours(receiver) {
     return (receiver.isUtc)
-      ? JS('int', r'(#.getUTCHours() + 0)', lazyAsJsDate(receiver))
-      : JS('int', r'(#.getHours() + 0)', lazyAsJsDate(receiver));
+      ? JS('JSUInt31', r'(#.getUTCHours() + 0)', lazyAsJsDate(receiver))
+      : JS('JSUInt31', r'(#.getHours() + 0)', lazyAsJsDate(receiver));
   }
 
   static getMinutes(receiver) {
     return (receiver.isUtc)
-      ? JS('int', r'(#.getUTCMinutes() + 0)', lazyAsJsDate(receiver))
-      : JS('int', r'(#.getMinutes() + 0)', lazyAsJsDate(receiver));
+      ? JS('JSUInt31', r'(#.getUTCMinutes() + 0)', lazyAsJsDate(receiver))
+      : JS('JSUInt31', r'(#.getMinutes() + 0)', lazyAsJsDate(receiver));
   }
 
   static getSeconds(receiver) {
     return (receiver.isUtc)
-      ? JS('int', r'(#.getUTCSeconds() + 0)', lazyAsJsDate(receiver))
-      : JS('int', r'(#.getSeconds() + 0)', lazyAsJsDate(receiver));
+      ? JS('JSUInt31', r'(#.getUTCSeconds() + 0)', lazyAsJsDate(receiver))
+      : JS('JSUInt31', r'(#.getSeconds() + 0)', lazyAsJsDate(receiver));
   }
 
   static getMilliseconds(receiver) {
     return (receiver.isUtc)
-      ? JS('int', r'(#.getUTCMilliseconds() + 0)', lazyAsJsDate(receiver))
-      : JS('int', r'(#.getMilliseconds() + 0)', lazyAsJsDate(receiver));
+      ? JS('JSUInt31', r'(#.getUTCMilliseconds() + 0)', lazyAsJsDate(receiver))
+      : JS('JSUInt31', r'(#.getMilliseconds() + 0)', lazyAsJsDate(receiver));
   }
 
   static getWeekday(receiver) {
@@ -1014,22 +1094,22 @@ class Primitives {
   }
 
   static valueFromDateString(str) {
-    if (str is !String) throw new ArgumentError(str);
+    if (str is !String) throw _argumentError(str);
     var value = JS('num', r'Date.parse(#)', str);
-    if (value.isNaN) throw new ArgumentError(str);
+    if (value.isNaN) throw _argumentError(str);
     return value;
   }
 
   static getProperty(object, key) {
     if (object == null || object is bool || object is num || object is String) {
-      throw new ArgumentError(object);
+      throw _argumentError(object);
     }
     return JS('var', '#[#]', object, key);
   }
 
   static void setProperty(object, key, value) {
     if (object == null || object is bool || object is num || object is String) {
-      throw new ArgumentError(object);
+      throw _argumentError(object);
     }
     JS('void', '#[#] = #', object, key, value);
   }
@@ -1277,10 +1357,6 @@ class Primitives {
     return JS('', '#.apply(#, #)', jsFunction, function, positionalArguments);
   }
 
-  static _mangledNameMatchesType(String mangledName, TypeImpl type) {
-    return JS('bool', '# == #', mangledName, type._typeName);
-  }
-
   static bool identicalImplementation(a, b) {
     return JS('bool', '# == null', a)
       ? JS('bool', '# == null', b)
@@ -1321,7 +1397,7 @@ class JsCache {
  * indexed access.
  */
 iae(argument) {
-  throw new ArgumentError(argument);
+  throw _argumentError(argument);
 }
 
 /**
@@ -1341,36 +1417,34 @@ stringLastIndexOfUnchecked(receiver, element, start)
   => JS('int', r'#.lastIndexOf(#, #)', receiver, element, start);
 
 
+/// 'factory' for constructing ArgumentError.value to keep the call sites small.
+@NoInline()
+ArgumentError _argumentError(object) {
+  return new ArgumentError.value(object);
+}
+
 checkNull(object) {
-  if (object == null) throw new ArgumentError(null);
+  if (object == null) throw _argumentError(object);
   return object;
 }
 
 checkNum(value) {
-  if (value is !num) {
-    throw new ArgumentError(value);
-  }
+  if (value is !num) throw _argumentError(value);
   return value;
 }
 
 checkInt(value) {
-  if (value is !int) {
-    throw new ArgumentError(value);
-  }
+  if (value is !int) throw _argumentError(value);
   return value;
 }
 
 checkBool(value) {
-  if (value is !bool) {
-    throw new ArgumentError(value);
-  }
+  if (value is !bool) throw _argumentError(value);
   return value;
 }
 
 checkString(value) {
-  if (value is !String) {
-    throw new ArgumentError(value);
-  }
+  if (value is !String) throw _argumentError(value);
   return value;
 }
 
@@ -1435,6 +1509,30 @@ throwAbstractClassInstantiationError(className) {
   throw new AbstractClassInstantiationError(className);
 }
 
+// This is used in open coded for-in loops on arrays.
+//
+//     checkConcurrentModificationError(a.length == startLength, a)
+//
+// is replaced in codegen by:
+//
+//     a.length == startLength || throwConcurrentModificationError(a)
+//
+// TODO(sra): We would like to annotate this as @NoSideEffects() so that loops
+// with no other effects can recognize that the array length does not
+// change. However, in the usual case where the loop does have other effects,
+// that causes the length in the loop condition to be phi(startLength,a.length),
+// which causes confusion in range analysis and the insertion of a bounds check.
+@NoInline()
+checkConcurrentModificationError(sameLength, collection) {
+  if (true != sameLength) {
+    throwConcurrentModificationError(collection);
+  }
+}
+
+@NoInline()
+throwConcurrentModificationError(collection) {
+  throw new ConcurrentModificationError(collection);
+}
 
 /**
  * Helper class for building patterns recognizing native type errors.
@@ -1779,7 +1877,7 @@ class NullError extends Error implements NoSuchMethodError {
 
   String toString() {
     if (_method == null) return 'NullError: $_message';
-    return 'NullError: Cannot call "$_method" on null';
+    return "NullError: method not found: '$_method' on null";
   }
 }
 
@@ -1796,10 +1894,10 @@ class JsNoSuchMethodError extends Error implements NoSuchMethodError {
   String toString() {
     if (_method == null) return 'NoSuchMethodError: $_message';
     if (_receiver == null) {
-      return 'NoSuchMethodError: Cannot call "$_method" ($_message)';
+      return "NoSuchMethodError: method not found: '$_method' ($_message)";
     }
-    return 'NoSuchMethodError: Cannot call "$_method" on "$_receiver" '
-        '($_message)';
+    return "NoSuchMethodError: "
+        "method not found: '$_method' on '$_receiver' ($_message)";
   }
 }
 
@@ -1882,29 +1980,17 @@ unwrapException(ex) {
     var match;
     // Using JS to give type hints to the compiler to help tree-shaking.
     // TODO(ahe): That should be unnecessary due to type inference.
-    var nsme =
-        JS('TypeErrorDecoder', '#', TypeErrorDecoder.noSuchMethodPattern);
-    var notClosure =
-        JS('TypeErrorDecoder', '#', TypeErrorDecoder.notClosurePattern);
-    var nullCall =
-        JS('TypeErrorDecoder', '#', TypeErrorDecoder.nullCallPattern);
-    var nullLiteralCall =
-        JS('TypeErrorDecoder', '#', TypeErrorDecoder.nullLiteralCallPattern);
-    var undefCall =
-        JS('TypeErrorDecoder', '#', TypeErrorDecoder.undefinedCallPattern);
-    var undefLiteralCall =
-        JS('TypeErrorDecoder', '#',
-           TypeErrorDecoder.undefinedLiteralCallPattern);
-    var nullProperty =
-        JS('TypeErrorDecoder', '#', TypeErrorDecoder.nullPropertyPattern);
-    var nullLiteralProperty =
-        JS('TypeErrorDecoder', '#',
-           TypeErrorDecoder.nullLiteralPropertyPattern);
-    var undefProperty =
-        JS('TypeErrorDecoder', '#', TypeErrorDecoder.undefinedPropertyPattern);
+    var nsme = TypeErrorDecoder.noSuchMethodPattern;
+    var notClosure = TypeErrorDecoder.notClosurePattern;
+    var nullCall = TypeErrorDecoder.nullCallPattern;
+    var nullLiteralCall = TypeErrorDecoder.nullLiteralCallPattern;
+    var undefCall = TypeErrorDecoder.undefinedCallPattern;
+    var undefLiteralCall = TypeErrorDecoder.undefinedLiteralCallPattern;
+    var nullProperty = TypeErrorDecoder.nullPropertyPattern;
+    var nullLiteralProperty = TypeErrorDecoder.nullLiteralPropertyPattern;
+    var undefProperty = TypeErrorDecoder.undefinedPropertyPattern;
     var undefLiteralProperty =
-        JS('TypeErrorDecoder', '#',
-           TypeErrorDecoder.undefinedLiteralPropertyPattern);
+        TypeErrorDecoder.undefinedLiteralPropertyPattern;
     if ((match = nsme.matchTypeError(message)) != null) {
       return saveStackTrace(new JsNoSuchMethodError(message, match));
     } else if ((match = notClosure.matchTypeError(message)) != null) {
@@ -2126,6 +2212,9 @@ abstract class Closure implements Function {
     String callName = JS('String|Null', '#[#]', function,
         JS_GET_NAME(JsGetName.CALL_NAME_PROPERTY));
 
+    // This variable holds either an index into the types-table, or a function
+    // that can compute a function-rti. (The latter is necessary if the type
+    // is dependent on generic arguments).
     var functionType;
     if (reflectionInfo is List) {
       JS('', '#.\$reflectionInfo = #', function, reflectionInfo);
@@ -2149,19 +2238,22 @@ abstract class Closure implements Function {
     // dynClosureConstructor.prototype = proto;
     // return dynClosureConstructor;
 
-    // We need to create a new subclass of either TearOffClosure or
-    // BoundClosure.  For this, we need to create an object whose prototype is
-    // the prototype is either TearOffClosure.prototype or
+    // We need to create a new subclass of TearOffClosure, one of StaticClosure
+    // or BoundClosure.  For this, we need to create an object whose prototype
+    // is the prototype is either StaticClosure.prototype or
     // BoundClosure.prototype, respectively in pseudo JavaScript code. The
     // simplest way to access the JavaScript construction function of a Dart
-    // class is to create an instance and access its constructor property.  The
-    // newly created instance could in theory be used directly as the
-    // prototype, but it might include additional fields that we don't need.
-    // So we only use the new instance to access the constructor property and
-    // use Object.create to create the desired prototype.
+    // class is to create an instance and access its constructor property.
+    // Creating an instance ensures that any lazy class initialization has taken
+    // place. The newly created instance could in theory be used directly as the
+    // prototype, but it might include additional fields that we don't need.  So
+    // we only use the new instance to access the constructor property and use
+    // Object.create to create the desired prototype.
+    //
+    // TODO(sra): Perhaps cache the prototype to avoid the allocation.
     var prototype = isStatic
-        ? JS('TearOffClosure', 'Object.create(#.constructor.prototype)',
-             new TearOffClosure())
+        ? JS('StaticClosure', 'Object.create(#.constructor.prototype)',
+             new StaticClosure())
         : JS('BoundClosure', 'Object.create(#.constructor.prototype)',
              new BoundClosure(null, null, null, null));
 
@@ -2171,8 +2263,7 @@ abstract class Closure implements Function {
         : isCsp
             ? JS('', 'function(a,b,c,d) {this.\$initialize(a,b,c,d)}')
             : JS('',
-                 'new Function("a","b","c","d",'
-                     '"this.\$initialize(a,b,c,d);"+#)',
+                 'new Function("a,b,c,d", "this.\$initialize(a,b,c,d);" + #)',
                  functionCounter++);
 
     // It is necessary to set the constructor property, otherwise it will be
@@ -2197,14 +2288,20 @@ abstract class Closure implements Function {
 
     var signatureFunction;
     if (JS('bool', 'typeof # == "number"', functionType)) {
-      var types = JS_EMBEDDED_GLOBAL('', TYPES);
-      // It is ok, if the access is inlined into the JS. The access is safe in
-      // and outside the function. In fact we prefer if there is a textual
-      // inlining.
+      // We cannot call [getType] here, since the types-metadata might not be
+      // set yet. This is, because fromTearOff might be called for constants
+      // when the program isn't completely set up yet.
+      //
+      // Note that we cannot just textually inline the call
+      // `getType(functionType)` since we cannot guarantee that the (then)
+      // captured variable `functionType` isn't reused.
       signatureFunction =
-          JS('', '(function(s){return function(){return #[s]}})(#)',
-              types,
-              functionType);
+          JS('',
+             '''(function(t) {
+                    return function(){ return #(t); };
+                })(#)''',
+             RAW_DART_FUNCTION_REF(getType),
+             functionType);
     } else if (!isStatic
                && JS('bool', 'typeof # == "function"', functionType)) {
       var getReceiver = isIntercepted
@@ -2221,7 +2318,8 @@ abstract class Closure implements Function {
       throw 'Error in reflectionInfo.';
     }
 
-    JS('', '#[#] = #', prototype, JS_SIGNATURE_NAME(), signatureFunction);
+    JS('', '#[#] = #', prototype, JS_GET_NAME(JsGetName.SIGNATURE_NAME),
+        signatureFunction);
 
     JS('', '#[#] = #', prototype, callName, trampoline);
     for (int i = 1; i < functions.length; i++) {
@@ -2469,7 +2567,10 @@ abstract class Closure implements Function {
   // backend rather than simply adding it here, as we do not want this getter
   // to be visible to resolution and the generation of extra stubs.
 
-  String toString() => "Closure";
+  String toString() {
+    String name = Primitives.objectTypeName(this);
+    return "Closure '$name'";
+  }
 }
 
 /// Called from implicit method getter (aka tear-off).
@@ -2490,11 +2591,19 @@ closureFromTearOff(receiver,
 }
 
 /// Represents an implicit closure of a function.
-class TearOffClosure extends Closure {
+abstract class TearOffClosure extends Closure {
 }
 
-/// Represents a 'tear-off' closure, that is an instance method bound
-/// to a specific receiver (instance).
+class StaticClosure extends TearOffClosure {
+  String toString() {
+    String name = JS('String|Null', '#.\$name', this);
+    if (name == null) return "Closure of unknown static method";
+    return "Closure '$name'";
+  }
+}
+
+/// Represents a 'tear-off' or property extraction closure of an instance
+/// method, that is an instance method bound to a specific receiver (instance).
 class BoundClosure extends TearOffClosure {
   /// The receiver or interceptor.
   // TODO(ahe): This could just be the interceptor, we always know if
@@ -2537,6 +2646,11 @@ class BoundClosure extends TearOffClosure {
       receiverHashCode = Primitives.objectHashCode(_receiver);
     }
     return receiverHashCode ^ Primitives.objectHashCode(_target);
+  }
+
+  toString() {
+    var receiver = _receiver == null ? _self : _receiver;
+    return "Closure '$_name' of ${Primitives.objectToHumanReadableString(receiver)}";
   }
 
   @NoInline()
@@ -2754,8 +2868,7 @@ intTypeCast(value) {
 }
 
 void propertyTypeError(value, property) {
-  // Cuts the property name to the class name.
-  String name = property.substring(3, property.length);
+  String name = isCheckPropertyToJsConstructorName(property);
   throw new TypeErrorImplementation(value, name);
 }
 
@@ -3109,28 +3222,33 @@ class RuntimeFunctionType extends RuntimeType {
 
   _extractFunctionTypeObjectFrom(o) {
     var interceptor = getInterceptor(o);
-    return JS('bool', '# in #', JS_SIGNATURE_NAME(), interceptor)
-        ? JS('', '#[#]()', interceptor, JS_SIGNATURE_NAME())
+    var signatureName = JS_GET_NAME(JsGetName.SIGNATURE_NAME);
+    return JS('bool', '# in #', signatureName, interceptor)
+        ? JS('', '#[#]()', interceptor, JS_GET_NAME(JsGetName.SIGNATURE_NAME))
         : null;
   }
 
   toRti() {
-    var result = JS('=Object', '{ #: "dynafunc" }', JS_FUNCTION_TYPE_TAG());
+    var result = createDartFunctionTypeRti();
     if (isVoid) {
-      JS('', '#[#] = true', result, JS_FUNCTION_TYPE_VOID_RETURN_TAG());
+      JS('', '#[#] = true', result,
+          JS_GET_NAME(JsGetName.FUNCTION_TYPE_VOID_RETURN_TAG));
     } else {
       if (returnType is! DynamicRuntimeType) {
-        JS('', '#[#] = #', result, JS_FUNCTION_TYPE_RETURN_TYPE_TAG(),
+        JS('', '#[#] = #', result,
+           JS_GET_NAME(JsGetName.FUNCTION_TYPE_RETURN_TYPE_TAG),
            returnType.toRti());
       }
     }
     if (parameterTypes != null && !parameterTypes.isEmpty) {
-      JS('', '#[#] = #', result, JS_FUNCTION_TYPE_REQUIRED_PARAMETERS_TAG(),
+      JS('', '#[#] = #', result,
+         JS_GET_NAME(JsGetName.FUNCTION_TYPE_REQUIRED_PARAMETERS_TAG),
          listToRti(parameterTypes));
     }
 
     if (optionalParameterTypes != null && !optionalParameterTypes.isEmpty) {
-      JS('', '#[#] = #', result, JS_FUNCTION_TYPE_OPTIONAL_PARAMETERS_TAG(),
+      JS('', '#[#] = #', result,
+         JS_GET_NAME(JsGetName.FUNCTION_TYPE_OPTIONAL_PARAMETERS_TAG),
          listToRti(optionalParameterTypes));
     }
 
@@ -3142,7 +3260,8 @@ class RuntimeFunctionType extends RuntimeType {
         var rti = JS('', '#[#]', namedParameters, name).toRti();
         JS('', '#[#] = #', namedRti, name, rti);
       }
-      JS('', '#[#] = #', result, JS_FUNCTION_TYPE_NAMED_PARAMETERS_TAG(),
+      JS('', '#[#] = #', result,
+         JS_GET_NAME(JsGetName.FUNCTION_TYPE_NAMED_PARAMETERS_TAG),
          namedRti);
     }
 
@@ -3221,11 +3340,11 @@ RuntimeFunctionType buildNamedFunctionType(returnType,
 }
 
 RuntimeType buildInterfaceType(rti, typeArguments) {
-  String name = JS('String|Null', r'#.name', rti);
+  String jsConstructorName = rawRtiToJsConstructorName(rti);
   if (typeArguments == null || typeArguments.isEmpty) {
-    return new RuntimeTypePlain(name);
+    return new RuntimeTypePlain(jsConstructorName);
   }
-  return new RuntimeTypeGeneric(name, typeArguments, null);
+  return new RuntimeTypeGeneric(jsConstructorName, typeArguments, null);
 }
 
 class DynamicRuntimeType extends RuntimeType {
@@ -3278,7 +3397,7 @@ RuntimeType convertRtiToRuntimeType(rti) {
   if (rti == null) {
     return getDynamicRuntimeType();
   } else if (JS('bool', 'typeof # == "function"', rti)) {
-    return new RuntimeTypePlain(JS('String', r'rti.name'));
+    return new RuntimeTypePlain(JS('String', r'#.name', rti));
   } else if (JS('bool', '#.constructor == Array', rti)) {
     List list = JS('JSFixedArray', '#', rti);
     String name = JS('String', r'#.name', list[0]);
@@ -3297,41 +3416,41 @@ RuntimeType convertRtiToRuntimeType(rti) {
 }
 
 class RuntimeTypePlain extends RuntimeType {
-  final String name;
+  /// The constructor name of this raw type.
+  final String _jsConstructorName;
 
-  RuntimeTypePlain(this.name);
+  RuntimeTypePlain(this._jsConstructorName);
 
   toRti() {
-    var getTypeFromName = JS_EMBEDDED_GLOBAL('', GET_TYPE_FROM_NAME);
-    var rti = JS('', '#(#)', getTypeFromName, name);
-    if (rti == null) throw "no type for '$name'";
+    var rti = jsConstructorNameToRti(_jsConstructorName);
+    if (rti == null) throw "no type for '$_jsConstructorName'";
     return rti;
   }
 
-  String toString() => name;
+  String toString() => _jsConstructorName;
 }
 
 class RuntimeTypeGeneric extends RuntimeType {
-  final String name;
+  /// The constructor name of the raw type for this generic type.
+  final String _jsConstructorName;
   final List<RuntimeType> arguments;
   var rti;
 
-  RuntimeTypeGeneric(this.name, this.arguments, this.rti);
+  RuntimeTypeGeneric(this._jsConstructorName, this.arguments, this.rti);
 
   toRti() {
     if (rti != null) return rti;
-    var getTypeFromName = JS_EMBEDDED_GLOBAL('', GET_TYPE_FROM_NAME);
-    var result = JS('JSExtendableArray', '[#(#)]', getTypeFromName, name);
+    var result = [jsConstructorNameToRti(_jsConstructorName)];
     if (result[0] == null) {
-      throw "no type for '$name<...>'";
+      throw "no type for '$_jsConstructorName<...>'";
     }
     for (RuntimeType argument in arguments) {
-      JS('', '#.push(#)', result, argument.toRti());
+      result.add(argument.toRti());
     }
     return rti = result;
   }
 
-  String toString() => '$name<${arguments.join(", ")}>';
+  String toString() => '$_jsConstructorName<${arguments.join(", ")}>';
 }
 
 class FunctionTypeInfoDecoderRing {
@@ -3362,6 +3481,7 @@ class FunctionTypeInfoDecoderRing {
   String _convert(type) {
     String result = runtimeTypeToString(type);
     if (result != null) return result;
+    // Currently the [runtimeTypeToString] method doesn't handle function rtis.
     if (JS('bool', '"func" in #', type)) {
       return new FunctionTypeInfoDecoderRing(type).toString();
     } else {
@@ -3972,7 +4092,7 @@ class SyncStarIterator implements Iterator {
 /// An Iterable corresponding to a sync* method.
 ///
 /// Each invocation of a sync* method will return a new instance of this class.
-class SyncStarIterable extends IterableBase {
+class SyncStarIterable extends Iterable {
   // This is a function that will return a helper function that does the
   // iteration of the sync*.
   //

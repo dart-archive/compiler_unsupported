@@ -31,7 +31,7 @@ class IdMapper<T>{
   Map<int, T> _idToElement = {};
   Map<T, int> _elementToId = {};
   int _idCounter = 0;
-  String name;
+  final String name;
 
   IdMapper(this.name);
 
@@ -80,7 +80,8 @@ class GroupedIdMapper {
   }
 }
 
-class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
+class ElementToJsonVisitor
+    extends BaseElementVisitor<Map<String, dynamic>, dynamic> {
   final GroupedIdMapper mapper = new GroupedIdMapper();
   final Compiler compiler;
 
@@ -91,14 +92,14 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
   ElementToJsonVisitor(this.compiler);
 
   void run() {
-    Backend backend = compiler.backend;
-
     dart2jsVersion = compiler.hasBuildId ? compiler.buildId : null;
 
-    for (var library in compiler.libraryLoader.libraries.toList()) {
-      library.accept(this);
+    for (LibraryElement library in compiler.libraryLoader.libraries.toList()) {
+      visit(library);
     }
   }
+
+  Map<String, dynamic> visit(Element e, [_]) => e.accept(this, null);
 
   // If keeping the element is in question (like if a function has a size
   // of zero), only keep it if it holds dependencies to elsewhere.
@@ -113,7 +114,7 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
 
   // Memoization of the JSON creating process.
   Map<String, dynamic> process(Element element) {
-    return jsonCache.putIfAbsent(element, () => element.accept(this));
+    return jsonCache.putIfAbsent(element, () => visit(element));
   }
 
   // Returns the id of an [element] if it has already been processed.
@@ -127,15 +128,16 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
     }
   }
 
-  Map<String, dynamic> visitElement(Element element) {
+  Map<String, dynamic> visitElement(Element element, _) {
     return null;
   }
 
-  Map<String, dynamic> visitConstructorBodyElement(ConstructorBodyElement e) {
-    return visitFunctionElement(e.constructor);
+  Map<String, dynamic> visitConstructorBodyElement(
+      ConstructorBodyElement e, _) {
+    return visitFunctionElement(e.constructor, _);
   }
 
-  Map<String, dynamic> visitLibraryElement(LibraryElement element) {
+  Map<String, dynamic> visitLibraryElement(LibraryElement element, _) {
     var id = mapper._library.add(element);
     List<String> children = <String>[];
 
@@ -161,11 +163,12 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
       'name': libname,
       'size': size,
       'id': id,
-      'children': children
+      'children': children,
+      'canonicalUri': element.canonicalUri.toString()
     };
   }
 
-  Map<String, dynamic> visitTypedefElement(TypedefElement element) {
+  Map<String, dynamic> visitTypedefElement(TypedefElement element, _) {
     String id = mapper._typedef.add(element);
     return element.alias == null
       ? null
@@ -177,7 +180,7 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
       };
   }
 
-  Map<String, dynamic> visitFieldElement(FieldElement element) {
+  Map<String, dynamic> visitFieldElement(FieldElement element, _) {
     String id = mapper._field.add(element);
     List<String> children = [];
     StringBuffer emittedCode = compiler.dumpInfoTask.codeOf(element);
@@ -223,7 +226,7 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
     };
   }
 
-  Map<String, dynamic> visitClassElement(ClassElement element) {
+  Map<String, dynamic> visitClassElement(ClassElement element, _) {
     String id = mapper._class.add(element);
     List<String> children = [];
 
@@ -282,7 +285,7 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
     };
   }
 
-  Map<String, dynamic> visitFunctionElement(FunctionElement element) {
+  Map<String, dynamic> visitFunctionElement(FunctionElement element, _) {
     String id = mapper._function.add(element);
     String name = element.name;
     String kind = "function";
@@ -291,7 +294,6 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
     String inferredReturnType = null;
     String returnType = null;
     String sideEffects = null;
-    String code = "";
 
     StringBuffer emittedCode = compiler.dumpInfoTask.codeOf(element);
     int size = compiler.dumpInfoTask.sizeOf(element);
@@ -305,9 +307,9 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
 
     var enclosingElement = element.enclosingElement;
     if (enclosingElement.isField ||
-               enclosingElement.isFunction ||
-               element.isClosure ||
-               enclosingElement.isConstructor) {
+        enclosingElement.isFunction ||
+        element.isClosure ||
+        enclosingElement.isConstructor) {
       kind = "closure";
       name = "<unnamed>";
     } else if (modifiers['static']) {
@@ -323,22 +325,24 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
       kind = "constructor";
     }
 
-    if (emittedCode != null) {
+    if (element.hasFunctionSignature) {
       FunctionSignature signature = element.functionSignature;
-      returnType = signature.type.returnType.toString();
       signature.forEachParameter((parameter) {
         parameters.add({
           'name': parameter.name,
-          'type': compiler.typesTask
-            .getGuaranteedTypeOfElement(parameter).toString(),
-          'declaredType': parameter.node.type.toString()
+          'type': '${compiler.typesTask.getGuaranteedTypeOfElement(parameter)}',
+          'declaredType': '${parameter.node.type}'
         });
       });
-      inferredReturnType = compiler.typesTask
-        .getGuaranteedReturnTypeOfElement(element).toString();
-      sideEffects = compiler.world.getSideEffectsOfElement(element).toString();
-      code = emittedCode.toString();
     }
+
+    if (element.isInstanceMember && !element.isAbstract &&
+        compiler.world.allFunctions.contains(element)) {
+      returnType = '${element.type.returnType}';
+    }
+    inferredReturnType =
+        '${compiler.typesTask.getGuaranteedReturnTypeOfElement(element)}';
+    sideEffects = compiler.world.getSideEffectsOfElement(element).toString();
 
     if (element is MemberElement) {
       MemberElement member = element as MemberElement;
@@ -376,7 +380,7 @@ class ElementToJsonVisitor extends ElementVisitor<Map<String, dynamic>> {
       'parameters': parameters,
       'sideEffects': sideEffects,
       'inlinedCount': inlinedCount,
-      'code': code,
+      'code': emittedCode == null ? null : '$emittedCode',
       'type': element.type.toString(),
       'outputUnit': mapper._outputUnit.add(outputUnit)
     };
@@ -393,7 +397,7 @@ class DumpInfoTask extends CompilerTask {
   DumpInfoTask(Compiler compiler)
       : super(compiler);
 
-  String name = "Dump Info";
+  String get name => "Dump Info";
 
   ElementToJsonVisitor infoCollector;
 
@@ -410,7 +414,6 @@ class DumpInfoTask extends CompilerTask {
   // A mapping from Javascript AST Nodes to the size of their
   // pretty-printed contents.
   final Map<jsAst.Node, int> _nodeToSize = <jsAst.Node, int>{};
-  final Map<jsAst.Node, int> _nodeBeforeSize = <jsAst.Node, int>{};
   final Map<Element, int> _fieldNameToSize = <Element, int>{};
 
   final Map<Element, Set<Selector>> selectorsFromElement = {};
@@ -461,29 +464,6 @@ class DumpInfoTask extends CompilerTask {
     }
   }
 
-  /**
-   * A callback that can be called before a jsAst [node] is
-   * pretty-printed. The size of the code buffer ([aftersize])
-   * is also passed.
-   */
-  void enteringAst(jsAst.Node node, int beforeSize) {
-    if (isTracking(node)) {
-      _nodeBeforeSize[node] = beforeSize;
-    }
-  }
-
-  /**
-   * A callback that can be called after a jsAst [node] is
-   * pretty-printed. The size of the code buffer ([aftersize])
-   * is also passed.
-   */
-  void exitingAst(jsAst.Node node, int afterSize) {
-    if (isTracking(node)) {
-      int diff = afterSize - _nodeBeforeSize[node];
-      recordAstSize(node, diff);
-    }
-  }
-
   // Returns true if we care about tracking the size of
   // this node.
   bool isTracking(jsAst.Node code) {
@@ -507,10 +487,10 @@ class DumpInfoTask extends CompilerTask {
 
   // Records the size of a dart AST node after it has been
   // pretty-printed into the output buffer.
-  void recordAstSize(jsAst.Node code, int size) {
-    if (compiler.dumpInfo) {
+  void recordAstSize(jsAst.Node node, int size) {
+    if (isTracking(node)) {
       //TODO: should I be incrementing here instead?
-      _nodeToSize[code] = size;
+      _nodeToSize[node] = size;
     }
   }
 
@@ -575,8 +555,9 @@ class DumpInfoTask extends CompilerTask {
 
 
   void dumpInfoJson(StringSink buffer) {
-    JsonEncoder encoder = const JsonEncoder();
-    DateTime startToJsonTime = new DateTime.now();
+    JsonEncoder encoder = const JsonEncoder.withIndent('  ');
+    Stopwatch stopwatch = new Stopwatch();
+    stopwatch.start();
 
     Map<String, List<Map<String, String>>> holding =
         <String, List<Map<String, String>>>{};
@@ -642,19 +623,18 @@ class DumpInfoTask extends CompilerTask {
       'deferredFiles': compiler.deferredLoadTask.computeDeferredMap(),
       // This increases when new information is added to the map, but the viewer
       // still is compatible.
-      'dump_minor_version': '1'
+      'dump_minor_version': '2'
     };
-
-    Duration toJsonDuration = new DateTime.now().difference(startToJsonTime);
 
     Map<String, dynamic> generalProgramInfo = <String, dynamic> {
       'size': _programSize,
       'dart2jsVersion': infoCollector.dart2jsVersion,
       'compilationMoment': new DateTime.now().toString(),
       'compilationDuration': compiler.totalCompileTime.elapsed.toString(),
-      'toJsonDuration': 0,
+      'toJsonDuration': stopwatch.elapsedMilliseconds,
       'dumpInfoDuration': this.timing.toString(),
-      'noSuchMethodEnabled': backend.enabledNoSuchMethod
+      'noSuchMethodEnabled': backend.enabledNoSuchMethod,
+      'minified': compiler.enableMinification
     };
 
     outJson['program'] = generalProgramInfo;

@@ -11,7 +11,7 @@ import '../dart2jslib.dart';
 import '../dart_types.dart';
 import '../elements/elements.dart';
 import '../elements/modelx.dart'
-    show ClassElementX, FunctionElementX, LibraryElementX;
+    show ElementX, BaseClassElementX, FunctionElementX, LibraryElementX;
 import '../js/js.dart' as js;
 import '../js_backend/js_backend.dart';
 import '../js_emitter/js_emitter.dart' show CodeEmitterTask, NativeEmitter;
@@ -32,7 +32,7 @@ void maybeEnableNative(Compiler compiler,
                        LibraryElementX library) {
   String libraryName = library.canonicalUri.toString();
   if (library.entryCompilationUnit.script.name.contains(
-          'dart/tests/compiler/dart2js_native')
+          'sdk/tests/compiler/dart2js_native')
       || libraryName == 'dart:async'
       || libraryName == 'dart:html'
       || libraryName == 'dart:html_common'

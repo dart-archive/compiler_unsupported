@@ -61,11 +61,9 @@ class BlockCollector extends StatementVisitor {
     blocks.add(block);
   }
 
-  void collect(RootNode node) {
-    node.forEachBody((Statement body) {
-      _addBlock(new Block()..isEntryPoint = true);
-      visitStatement(body);
-    });
+  void collect(FunctionDefinition node) {
+    _addBlock(new Block()..isEntryPoint = true);
+    visitStatement(node.body);
   }
 
   visitLabeledStatement(LabeledStatement node) {
@@ -76,12 +74,15 @@ class BlockCollector extends StatementVisitor {
     visitStatement(node.next);
   }
 
-  visitAssign(Assign node) {
+  visitReturn(Return node) {
     _addStatement(node);
-    visitStatement(node.next);
   }
 
-  visitReturn(Return node) {
+  visitThrow(Throw node) {
+    _addStatement(node);
+  }
+
+  visitRethrow(Rethrow node) {
     _addStatement(node);
   }
 
@@ -167,17 +168,6 @@ class BlockCollector extends StatementVisitor {
     _addStatement(node);
     visitStatement(node.next);
   }
-
-  visitFunctionDeclaration(FunctionDeclaration node) {
-    _addStatement(node);
-    visitStatement(node.next);
-  }
-
-  visitSetField(SetField node) {
-    _addStatement(node);
-    visitStatement(node.next);
-  }
-
 }
 
 class TreeTracer extends TracerUtil with StatementVisitor {
@@ -192,23 +182,16 @@ class TreeTracer extends TracerUtil with StatementVisitor {
   BlockCollector collector;
   int statementCounter;
 
-  void traceGraph(String name, RootNode node) {
-    if (node.isEmpty) return;
+  void traceGraph(String name, FunctionDefinition node) {
     parameters = node.parameters;
     tag("cfg", () {
       printProperty("name", name);
-      printRootNode(node);
+      names = new Names();
+      statementCounter = 0;
+      collector = new BlockCollector();
+      collector.collect(node);
       collector.blocks.forEach(printBlock);
     });
-  }
-
-  void printRootNode(RootNode node) {
-    collector = new BlockCollector();
-    names = new Names();
-    statementCounter = 0;
-    collector = new BlockCollector();
-    collector.collect(node);
-    collector.blocks.forEach(printBlock);
   }
 
   void printBlock(Block block) {
@@ -266,16 +249,16 @@ class TreeTracer extends TracerUtil with StatementVisitor {
     // These do not get added to a block's list of statements.
   }
 
-  visitAssign(Assign node) {
-    String name = names.varName(node.variable);
-    String rhs = expr(node.value);
-    Variable v = node.variable;
-    String extra = "(r=${v.readCount}, w=${v.writeCount})";
-    printStatement(null, "assign $name = $rhs $extra");
-  }
-
   visitReturn(Return node) {
     printStatement(null, "return ${expr(node.value)}");
+  }
+
+  visitThrow(Throw node) {
+    printStatement(null, "throw ${expr(node.value)}");
+  }
+
+  visitRethrow(Rethrow node) {
+    printStatement(null, "rethrow");
   }
 
   visitBreak(Break node) {
@@ -317,10 +300,6 @@ class TreeTracer extends TracerUtil with StatementVisitor {
     printStatement(null, expr(node.expression));
   }
 
-  visitFunctionDeclaration(FunctionDeclaration node) {
-    printStatement(null, 'function ${node.definition.element.name}');
-  }
-
   visitSetField(SetField node) {
     String object = expr(node.object);
     String field = node.field.name;
@@ -345,18 +324,14 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
     return names.varName(node.variable);
   }
 
+  String visitAssign(Assign node) {
+    String variable = names.varName(node.variable);
+    String value = visitExpression(node.value);
+    return '$variable = $value';
+  }
+
   String formatArguments(Invoke node) {
-    List<String> args = new List<String>();
-    int positionalArgumentCount = node.selector.positionalArgumentCount;
-    for (int i = 0; i < positionalArgumentCount; ++i) {
-      args.add(node.arguments[i].accept(this));
-    }
-    for (int i = 0; i < node.selector.namedArgumentCount; ++i) {
-      String name = node.selector.namedArguments[i];
-      String arg = node.arguments[positionalArgumentCount + i].accept(this);
-      args.add("$name: $arg");
-    }
-    return args.join(', ');
+    return node.arguments.map(visitExpression).join(', ');
   }
 
   String visitInvokeStatic(InvokeStatic node) {
@@ -421,12 +396,11 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
     return "this";
   }
 
-  String visitReifyTypeVar(ReifyTypeVar node) {
-    return "typevar [${node.typeVariable.name}]";
-  }
-
   static bool usesInfixNotation(Expression node) {
-    return node is Conditional || node is LogicalOperator;
+    return node is Conditional ||
+           node is LogicalOperator ||
+           node is Assign ||
+           node is SetField;
   }
 
   String visitConditional(Conditional node) {
@@ -449,9 +423,9 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
   }
 
   String visitTypeOperator(TypeOperator node) {
-    String receiver = visitExpression(node.receiver);
+    String value = visitExpression(node.value);
     String type = "${node.type}";
-    return "TypeOperator $receiver ${node.operator} $type";
+    return "TypeOperator $value ${node.operator} $type";
   }
 
   String visitNot(Not node) {
@@ -466,14 +440,6 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
     return "function ${node.definition.element.name}";
   }
 
-  String visitFieldInitializer(FieldInitializer node) {
-    throw "$node should not be visited by $this";
-  }
-
-  String visitSuperInitializer(SuperInitializer node) {
-    throw "$node should not be visited by $this";
-  }
-
   String visitGetField(GetField node) {
     String object = visitExpression(node.object);
     String field = node.field.name;
@@ -481,6 +447,27 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
       object = '($object)';
     }
     return '$object.$field';
+  }
+
+  String visitSetField(SetField node) {
+    String object = visitExpression(node.object);
+    String field = node.field.name;
+    if (usesInfixNotation(node.object)) {
+      object = '($object)';
+    }
+    String value = visitExpression(node.value);
+    return '$object.$field = $value';
+  }
+
+  String visitGetStatic(GetStatic node) {
+    String element = node.element.name;
+    return element;
+  }
+
+  String visitSetStatic(SetStatic node) {
+    String element = node.element.name;
+    String value = visitExpression(node.value);
+    return '$element = $value';
   }
 
   String visitCreateBox(CreateBox node) {
@@ -507,6 +494,12 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
   @override
   String visitTypeExpression(TypeExpression node) {
     return node.dartType.toString();
+  }
+
+  @override
+  String visitCreateInvocationMirror(CreateInvocationMirror node) {
+    String args = node.arguments.map(visitExpression).join(', ');
+    return 'CreateInvocationMirror(${node.selector.name}, $args)';
   }
 }
 

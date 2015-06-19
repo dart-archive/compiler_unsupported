@@ -2,7 +2,16 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of js_backend;
+library dart2js.constant_system.js;
+
+import '../constants/constant_system.dart';
+import '../constants/values.dart';
+import '../constant_system_dart.dart';
+import '../dart_types.dart';
+import '../dart2jslib.dart' show Compiler;
+import '../elements/elements.dart' show ClassElement;
+import '../tree/tree.dart' show DartString, LiteralDartString;
+import 'js_backend.dart';
 
 const JAVA_SCRIPT_CONSTANT_SYSTEM = const JavaScriptConstantSystem();
 
@@ -231,8 +240,11 @@ class JavaScriptConstantSystem extends ConstantSystem {
     return constant;
   }
 
-  NumConstantValue createInt(int i)
-      => convertToJavaScriptConstant(new IntConstantValue(i));
+  @override
+  NumConstantValue createInt(int i) {
+    return convertToJavaScriptConstant(new IntConstantValue(i));
+  }
+
   NumConstantValue createInt32(int i) => new IntConstantValue(i & BITS32);
   NumConstantValue createDouble(double d)
       => convertToJavaScriptConstant(new DoubleConstantValue(d));
@@ -241,6 +253,19 @@ class JavaScriptConstantSystem extends ConstantSystem {
   }
   BoolConstantValue createBool(bool value) => new BoolConstantValue(value);
   NullConstantValue createNull() => new NullConstantValue();
+
+
+  @override
+  ListConstantValue createList(InterfaceType type,
+                               List<ConstantValue> values) {
+    return new ListConstantValue(type, values);
+  }
+
+  @override
+  ConstantValue createType(Compiler compiler, DartType type) {
+    return new TypeConstantValue(
+        type, compiler.backend.typeImplementation.computeType(compiler));
+  }
 
   // Integer checks don't verify that the number is not -0.0.
   bool isInt(ConstantValue constant) => constant.isInt || constant.isMinusZero;
@@ -342,10 +367,6 @@ class JavaScriptMapConstant extends MapConstantValue {
       : this.keyList = keyList,
         super(type, keyList.entries, values);
   bool get isMap => true;
-
-  TypeMask computeMask(Compiler compiler) {
-    return compiler.typesTask.constMapType;
-  }
 
   List<ConstantValue> getDependencies() {
     List<ConstantValue> result = <ConstantValue>[];

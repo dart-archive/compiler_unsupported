@@ -270,16 +270,17 @@ class ConstantEmitter
   @override
   jsAst.Expression visitConstructed(ConstructedConstantValue constant, [_]) {
     Element element = constant.type.element;
-    if (element.isForeign(backend)
+    if (backend.isForeign(element)
         && element.name == 'JS_CONST') {
-      StringConstantValue str = constant.fields[0];
+      StringConstantValue str = constant.fields.values.single;
       String value = str.primitiveValue.slowToString();
       return new jsAst.LiteralExpression(stripComments(value));
     }
     jsAst.Expression constructor =
         backend.emitter.constructorAccess(constant.type.element);
     List<jsAst.Expression> fields =
-        constant.fields.map(constantReferenceGenerator).toList(growable: false);
+        constant.fields.values.map(constantReferenceGenerator)
+        .toList(growable: false);
     jsAst.New instantiation = new jsAst.New(constructor, fields);
     return maybeAddTypeArguments(constant.type, instantiation);
   }
@@ -295,11 +296,11 @@ class ConstantEmitter
         backend.classNeedsRti(type.element)) {
       InterfaceType interface = type;
       RuntimeTypes rti = backend.rti;
-      Iterable<String> arguments = interface.typeArguments
+      Iterable<jsAst.Expression> arguments = interface.typeArguments
           .map((DartType type) =>
-              rti.getTypeRepresentationWithHashes(type, (_){}));
+              rti.getTypeRepresentationWithPlaceholders(type, (_){}));
       jsAst.Expression argumentList =
-          new jsAst.LiteralString('[${arguments.join(', ')}]');
+          new jsAst.ArrayInitializer(arguments.toList());
       return new jsAst.Call(getHelperProperty(backend.getSetRuntimeTypeInfo()),
                             [value, argumentList]);
     }

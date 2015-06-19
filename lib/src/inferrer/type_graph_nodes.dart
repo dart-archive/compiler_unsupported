@@ -808,7 +808,13 @@ class DynamicCallSiteTypeInformation extends CallSiteTypeInformation {
         name == '~/') {
       if (isPositiveInt(receiver) &&
           arguments.hasOnePositionalArgumentThatMatches(isPositiveInt)) {
-        return inferrer.types.positiveIntType;
+        // uint31 + uint31 -> uint32
+        if (name == '+' && isUInt31(receiver) &&
+            arguments.hasOnePositionalArgumentThatMatches(isUInt31)) {
+          return inferrer.types.uint32Type;
+        } else {
+          return inferrer.types.positiveIntType;
+        }
       } else if (arguments.hasOnePositionalArgumentThatMatches(isInt)) {
         return inferrer.types.intType;
       } else if (arguments.hasOnePositionalArgumentThatMatches(isEmpty)) {
@@ -891,7 +897,7 @@ class DynamicCallSiteTypeInformation extends CallSiteTypeInformation {
 
     // Walk over the found targets, and compute the joined union type mask
     // for all these targets.
-    return inferrer.types.joinTypeMasks(targets.map((element) {
+    TypeMask result = inferrer.types.joinTypeMasks(targets.map((element) {
       // If [canReachAll] is true, then we are iterating over all
       // targets that satisfy the untyped selector. We skip the return
       // type of the targets that can only be reached through
@@ -936,6 +942,15 @@ class DynamicCallSiteTypeInformation extends CallSiteTypeInformation {
         return inferrer.typeOfElementWithSelector(element, typedSelector).type;
       }
     }));
+
+    if (call is ast.Send) {
+      ast.Send send = call;
+      if (send.isConditional && receiver.type.isNullable) {
+        // Conditional sends (e.g. `a?.b`) may be null if the receiver is null.
+        result = result.nullable();
+      }
+    }
+    return result;
   }
 
   void giveUp(TypeGraphInferrerEngine inferrer, {bool clearAssignments: true}) {

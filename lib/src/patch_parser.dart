@@ -128,7 +128,7 @@ import 'elements/modelx.dart'
     show LibraryElementX,
          MetadataAnnotationX,
          ClassElementX,
-         FunctionElementX;
+         BaseFunctionElementX;
 import 'helpers/helpers.dart';  // Included for debug helpers.
 import 'library_loader.dart' show LibraryLoader;
 import 'scanner/scannerlib.dart';  // Scanner, Parsers, Listeners
@@ -193,7 +193,7 @@ class PatchParserTask extends CompilerTask {
       try {
         Token token = parser.parseTopLevelDeclaration(cls.beginToken);
         assert(identical(token, cls.endToken.next));
-      } on ParserError catch (e, s) {
+      } on ParserError catch (e) {
         // No need to recover from a parser error in platform libraries, user
         // will never see this if the libraries are tested correctly.
         compiler.internalError(
@@ -362,8 +362,8 @@ abstract class EagerAnnotationHandler<T> {
   /// Checks [element] for metadata matching the [handler]. Return a non-null
   /// annotation marker matching metadata was found.
   static checkAnnotation(Compiler compiler,
-                              Element element,
-                              EagerAnnotationHandler handler) {
+                         Element element,
+                         EagerAnnotationHandler handler) {
     for (Link<MetadataAnnotation> link = element.metadata;
          !link.isEmpty;
          link = link.tail) {
@@ -375,7 +375,8 @@ abstract class EagerAnnotationHandler<T> {
         compiler.enqueuer.resolution.addDeferredAction(element, () {
           annotation.ensureResolved(compiler);
           handler.validate(
-              compiler, element, annotation, annotation.constant.value);
+              compiler, element, annotation,
+              compiler.constants.getConstantValue(annotation.constant));
         });
         return result;
       }
@@ -541,8 +542,8 @@ void tryPatchFunction(DiagnosticListener listener,
 }
 
 void patchFunction(DiagnosticListener listener,
-                   FunctionElementX origin,
-                   FunctionElementX patch) {
+                   BaseFunctionElementX origin,
+                   BaseFunctionElementX patch) {
   if (!origin.modifiers.isExternal) {
     listener.reportError(origin, MessageKind.PATCH_NON_EXTERNAL);
     listener.reportInfo(

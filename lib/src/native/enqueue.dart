@@ -54,6 +54,18 @@ class NativeEnqueuer {
   // TODO(sra): The entry from codegen will not have a resolver.
   void registerJsEmbeddedGlobalCall(Send node, ResolverVisitor resolver) {}
 
+  /**
+   * Handles JS-compiler builtin calls, which can be an instantiation point for
+   * types.
+   *
+   * For example, the following code instantiates and returns a String class
+   *
+   *     JS_BUILTIN('String', 'int2string', 0)
+   *
+   */
+  // TODO(sra): The entry from codegen will not have a resolver.
+  void registerJsBuiltinCall(Send node, ResolverVisitor resolver) {}
+
   /// Emits a summary information using the [log] function.
   void logSummary(log(message)) {}
 
@@ -213,7 +225,7 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
    * Returns the source string of the class named in the extends clause, or
    * `null` if there is no extends clause.
    */
-  String findExtendsNameOfClass(ClassElement classElement) {
+  String findExtendsNameOfClass(BaseClassElementX classElement) {
     //  "class B extends A ... {}"  --> "A"
     //  "class B extends foo.A ... {}"  --> "A"
     //  "class B<T> extends foo.A<T,T> with M1, M2 ... {}"  --> "A"
@@ -307,19 +319,20 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
          !link.isEmpty;
          link = link.tail) {
       MetadataAnnotation annotation = link.head.ensureResolved(compiler);
-      ConstantValue value = annotation.constant.value;
+      ConstantValue value =
+          compiler.constants.getConstantValue(annotation.constant);
       if (!value.isConstructedObject) continue;
       ConstructedConstantValue constructedObject = value;
       if (constructedObject.type.element != annotationClass) continue;
 
-      List<ConstantValue> fields = constructedObject.fields;
+      Iterable<ConstantValue> fields = constructedObject.fields.values;
       // TODO(sra): Better validation of the constant.
-      if (fields.length != 1 || fields[0] is! StringConstantValue) {
+      if (fields.length != 1 || fields.single is! StringConstantValue) {
         PartialMetadataAnnotation partial = annotation;
         compiler.internalError(annotation,
             'Annotations needs one string: ${partial.parseNode(compiler)}');
       }
-      StringConstantValue specStringConstant = fields[0];
+      StringConstantValue specStringConstant = fields.single;
       String specString = specStringConstant.toDartString().slowToString();
       if (name == null) {
         name = specString;
@@ -348,7 +361,7 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
     flushing = false;
   }
 
-  processClass(ClassElementX classElement, cause) {
+  processClass(BaseClassElementX classElement, cause) {
     // TODO(ahe): Fix this assertion to work in incremental compilation.
     assert(compiler.hasIncrementalSupport ||
            !registeredClasses.contains(classElement));
@@ -358,7 +371,9 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
     registeredClasses.add(classElement);
 
     // TODO(ahe): Is this really a global dependency?
-    world.registerInstantiatedClass(classElement, compiler.globalDependencies);
+    classElement.ensureResolved(compiler);
+    world.registerInstantiatedType(
+        classElement.rawType, compiler.globalDependencies);
 
     // Also parse the node to know all its methods because otherwise it will
     // only be parsed if there is a call to one of its constructors.
@@ -410,7 +425,7 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
 
   /// Sets the native name of [element], either from an annotation, or
   /// defaulting to the Dart name.
-  void setNativeName(Element element) {
+  void setNativeName(ElementX element) {
     String name = findJsNameFromAnnotation(element);
     if (name == null) name = element.name;
     element.setNative(name);
@@ -424,7 +439,7 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
   ///    use the declared @JSName as the expression
   /// 3. If [element] does not have a @JSName annotation, qualify the name of
   ///    the method with the @Native name of the enclosing class.
-  void setNativeNameForStaticMethod(Element element) {
+  void setNativeNameForStaticMethod(ElementX element) {
     String name = findJsNameFromAnnotation(element);
     if (name == null) name = element.name;
     if (isIdentifier(name)) {
@@ -492,6 +507,14 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
     flushQueue();
   }
 
+  void registerJsBuiltinCall(Send node, ResolverVisitor resolver) {
+    NativeBehavior behavior =
+        NativeBehavior.ofJsBuiltinCall(node, compiler, resolver);
+    processNativeBehavior(behavior, node);
+    nativeBehaviors[node] = behavior;
+    flushQueue();
+  }
+
   NativeBehavior getNativeBehaviorOf(Send node) => nativeBehaviors[node];
 
   processNativeBehavior(NativeBehavior behavior, cause) {
@@ -503,27 +526,30 @@ abstract class NativeEnqueuerBase implements NativeEnqueuer {
       matchedTypeConstraints.add(type);
       if (type is SpecialType) {
         if (type == SpecialType.JsObject) {
-          world.registerInstantiatedClass(compiler.objectClass, registry);
+          world.registerInstantiatedType(
+              compiler.coreTypes.objectType, registry);
         }
         continue;
       }
       if (type is InterfaceType) {
         if (type.element == compiler.intClass) {
-          world.registerInstantiatedClass(compiler.intClass, registry);
+          world.registerInstantiatedType(type, registry);
         } else if (type.element == compiler.doubleClass) {
-          world.registerInstantiatedClass(compiler.doubleClass, registry);
+          world.registerInstantiatedType(type, registry);
         } else if (type.element == compiler.numClass) {
-          world.registerInstantiatedClass(compiler.doubleClass, registry);
-          world.registerInstantiatedClass(compiler.intClass, registry);
+          world.registerInstantiatedType(
+              compiler.coreTypes.doubleType, registry);
+          world.registerInstantiatedType(
+              compiler.coreTypes.intType, registry);
         } else if (type.element == compiler.stringClass) {
-          world.registerInstantiatedClass(compiler.stringClass, registry);
+          world.registerInstantiatedType(type, registry);
         } else if (type.element == compiler.nullClass) {
-          world.registerInstantiatedClass(compiler.nullClass, registry);
+          world.registerInstantiatedType(type, registry);
         } else if (type.element == compiler.boolClass) {
-          world.registerInstantiatedClass(compiler.boolClass, registry);
+          world.registerInstantiatedType(type, registry);
         } else if (compiler.types.isSubtype(
                       type, backend.listImplementation.rawType)) {
-          world.registerInstantiatedClass(type.element, registry);
+          world.registerInstantiatedType(type, registry);
         }
       }
       assert(type is DartType);

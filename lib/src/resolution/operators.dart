@@ -4,6 +4,9 @@
 
 library dart2js.operators;
 
+import '../elements/elements.dart';
+import '../universe/universe.dart';
+
 enum UnaryOperatorKind {
   NOT,
   NEGATE,
@@ -18,6 +21,11 @@ class UnaryOperator {
   const UnaryOperator(this.kind, this.name, this.selectorName);
 
   bool get isUserDefinable => selectorName != null;
+
+  Selector get selector => new Selector(
+      SelectorKind.OPERATOR,
+      new PublicName(selectorName),
+      CallStructure.NO_ARGS);
 
   String toString() => name;
 
@@ -43,7 +51,6 @@ class UnaryOperator {
   }
 }
 
-
 enum BinaryOperatorKind {
   EQ,
   NOT_EQ,
@@ -63,6 +70,9 @@ enum BinaryOperatorKind {
   AND,
   OR,
   XOR,
+  LOGICAL_AND,
+  LOGICAL_OR,
+  IF_NULL,
 }
 
 class BinaryOperator {
@@ -71,7 +81,10 @@ class BinaryOperator {
 
   const BinaryOperator._(this.kind, this.name);
 
+  /// `true` if this operator can be implemented through an `operator [name]`
+  /// method.
   bool get isUserDefinable => true;
+
   String get selectorName => name;
 
   String toString() => name;
@@ -147,6 +160,18 @@ class BinaryOperator {
   static const BinaryOperator XOR =
       const BinaryOperator._(BinaryOperatorKind.XOR, '^');
 
+  /// The logical && operator.
+  static const BinaryOperator LOGICAL_AND =
+      const _LogicalOperator(BinaryOperatorKind.LOGICAL_AND, '&&');
+
+  /// The binary | operator.
+  static const BinaryOperator LOGICAL_OR =
+      const _LogicalOperator(BinaryOperatorKind.LOGICAL_OR, '||');
+
+  /// The if-null ?? operator.
+  static const BinaryOperator IF_NULL =
+      const _IfNullOperator(BinaryOperatorKind.IF_NULL, '??');
+
   static BinaryOperator parse(String value) {
     switch (value) {
       case '==': return EQ;
@@ -167,12 +192,16 @@ class BinaryOperator {
       case '&': return AND;
       case '^': return XOR;
       case '|': return OR;
+      case '&&': return LOGICAL_AND;
+      case '||': return LOGICAL_OR;
+      case '??': return IF_NULL;
       default: return null;
     }
   }
 }
 
-/// The operator !=, which is not user definable operator but instead is a negation
+/// The operator !=, which is not user definable operator but instead is a
+/// negation of a call to user definable operator, namely ==.
 class _NotEqualsOperator extends BinaryOperator {
   const _NotEqualsOperator() : super._(BinaryOperatorKind.NOT_EQ, '!=');
 
@@ -181,8 +210,30 @@ class _NotEqualsOperator extends BinaryOperator {
   String get selectorName => '==';
 }
 
+/// The operators && and || which are not user definable operators but control
+/// structures.
+class _LogicalOperator extends BinaryOperator {
+  const _LogicalOperator(BinaryOperatorKind kind, String name)
+      : super._(kind, name);
+
+  bool get isUserDefinable => false;
+
+  String get selectorName => null;
+}
+
+/// The operators ?? is not user definable.
+class _IfNullOperator extends BinaryOperator {
+  const _IfNullOperator(BinaryOperatorKind kind, String name)
+      : super._(kind, name);
+
+  bool get isUserDefinable => false;
+
+  String get selectorName => '??';
+}
+
 enum AssignmentOperatorKind {
   ASSIGN,
+  IF_NULL,
   ADD,
   SUB,
   MUL,
@@ -215,6 +266,12 @@ class AssignmentOperator {
   static const AssignmentOperator ASSIGN =
       const AssignmentOperator._(AssignmentOperatorKind.ASSIGN, '=',
                                  null, isUserDefinable: false);
+
+  /// The ??= operator.
+  static const AssignmentOperator IF_NULL =
+      const AssignmentOperator._(AssignmentOperatorKind.IF_NULL, '??=',
+                                 BinaryOperator.IF_NULL,
+                                 isUserDefinable: false);
 
   /// The += assignment operator.
   static const AssignmentOperator ADD =
@@ -274,6 +331,7 @@ class AssignmentOperator {
   static AssignmentOperator parse(String value) {
     switch (value) {
       case '=': return ASSIGN;
+      case '??=': return IF_NULL;
       case '*=': return MUL;
       case '/=': return DIV;
       case '%=': return MOD;

@@ -1,19 +1,11 @@
 // Copyright (c) 2013, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
-
-// IrNodes are kept in a separate library to have precise control over their
-// dependencies on other parts of the system.
 library dart2js.ir_nodes;
 
 import '../constants/expressions.dart';
 import '../constants/values.dart' as values show ConstantValue;
-import '../cps_ir/optimizers.dart';
-import '../dart_types.dart' show DartType, GenericType, TypeVariableType;
-import '../dart2jslib.dart' as dart2js show
-    CURRENT_ELEMENT_SPANNABLE,
-    InternalErrorFunction,
-    invariant;
+import '../dart_types.dart' show DartType, InterfaceType, TypeVariableType;
 import '../elements/elements.dart';
 import '../io/source_information.dart' show SourceInformation;
 import '../universe/universe.dart' show Selector, SelectorKind;
@@ -25,6 +17,16 @@ abstract class Node {
   accept(Visitor visitor);
 }
 
+/// Expressions can be evaluated, and may diverge, throw, and/or have
+/// side-effects.
+///
+/// Evaluation continues by stepping into a sub-expression, invoking a
+/// continuation, or throwing an exception.
+///
+/// Expressions do not a return value. Expressions that produce values should
+/// invoke a [Continuation] with the result as argument. Alternatively, values
+/// that can be obtained without side-effects, divergence, or throwing
+/// exceptions can be built using a [LetPrim].
 abstract class Expression extends Node {
   Expression plug(Expression expr) => throw 'impossible';
 }
@@ -37,11 +39,13 @@ abstract class Definition<T extends Definition<T>> extends Node {
 
   bool get hasAtMostOneUse  => firstRef == null || firstRef.next == null;
   bool get hasExactlyOneUse => firstRef != null && firstRef.next == null;
+  bool get hasNoUses => firstRef == null;
   bool get hasAtLeastOneUse => firstRef != null;
   bool get hasMultipleUses  => !hasAtMostOneUse;
 
   void substituteFor(Definition<T> other) {
-    if (other.firstRef == null) return;
+    if (other == this) return;
+    if (other.hasNoUses) return;
     Reference<T> previous, current = other.firstRef;
     do {
       current.definition = this;
@@ -51,15 +55,18 @@ abstract class Definition<T extends Definition<T>> extends Node {
     previous.next = firstRef;
     if (firstRef != null) firstRef.previous = previous;
     firstRef = other.firstRef;
+    other.firstRef = null;
   }
 }
 
 /// An expression that cannot throw or diverge and has no side-effects.
 /// All primitives are named using the identity of the [Primitive] object.
 ///
-/// Primitives may allocate objects, this is not considered side-effect here.
+/// Primitives may allocate objects; this is not considered side-effect here.
 ///
 /// Although primitives may not mutate state, they may depend on state.
+///
+/// All primitives except [Parameter] must be bound by a [LetPrim].
 abstract class Primitive extends Definition<Primitive> {
   /// The [VariableElement] or [ParameterElement] from which the primitive
   /// binding originated.
@@ -103,10 +110,12 @@ class Reference<T extends Definition<T>> {
   }
 }
 
-/// Binding a value (primitive or constant): 'let val x = V in E'.  The bound
-/// value is in scope in the body.
-/// During one-pass construction a LetVal with an empty body is used to
-/// represent the one-hole context 'let val x = V in []'.
+/// Evaluates a primitive and binds it to variable: `let val x = V in E`.
+///
+/// The bound value is in scope in the body.
+///
+/// During one-pass construction a LetPrim with an empty body is used to
+/// represent the one-hole context `let val x = V in []`.
 class LetPrim extends Expression implements InteriorNode {
   final Primitive primitive;
   Expression body;
@@ -131,9 +140,10 @@ class LetPrim extends Expression implements InteriorNode {
 ///
 /// The bound continuations are in scope in the body and the continuation
 /// parameters are in scope in the respective continuation bodies.
+///
 /// During one-pass construction a LetCont whose first continuation has an empty
 /// body is used to represent the one-hole context
-/// 'let cont ... k(v) = [] ... in E'.
+/// `let cont ... k(v) = [] ... in E`.
 class LetCont extends Expression implements InteriorNode {
   List<Continuation> continuations;
   Expression body;
@@ -213,99 +223,65 @@ abstract class InteriorNode extends Node {
   void set body(Expression body);
 }
 
-/// Invoke a static function or static field getter/setter.
+/// Invoke a static function.
+///
+/// All optional arguments declared by [target] are passed in explicitly, and
+/// occur at the end of [arguments] list, in normalized order.
+///
+/// Discussion:
+/// All information in the [selector] is technically redundant; it will likely
+/// be removed.
 class InvokeStatic extends Expression implements Invoke {
-  /// [FunctionElement] or [FieldElement].
-  final Entity target;
-
-  /**
-   * The selector encodes how the function is invoked: number of positional
-   * arguments, names used in named arguments. This information is required
-   * to build the [StaticCallSiteTypeInformation] for the inference graph.
-   */
+  final FunctionElement target;
   final Selector selector;
-
-  final Reference<Continuation> continuation;
   final List<Reference<Primitive>> arguments;
+  final Reference<Continuation> continuation;
   final SourceInformation sourceInformation;
 
   InvokeStatic(this.target,
                this.selector,
-               Continuation cont,
                List<Primitive> args,
+               Continuation cont,
                this.sourceInformation)
-      : continuation = new Reference<Continuation>(cont),
-        arguments = _referenceList(args) {
-    assert(target is ErroneousElement || selector.name == target.name);
-  }
+      : arguments = _referenceList(args),
+        continuation = new Reference<Continuation>(cont);
 
   accept(Visitor visitor) => visitor.visitInvokeStatic(this);
 }
 
-/// A [CallingConvention] codifies how arguments are matched to parameters when
-/// emitting code for a function call.
-class CallingConvention {
-  final String name;
-  const CallingConvention(this.name);
-  /// The normal way of calling a Dart function: Positional arguments are
-  /// matched with (mandatory and optional) positionals parameters from left to
-  /// right and named arguments are matched by name.
-  static const CallingConvention DART = const CallingConvention("Dart call");
-  /// Intercepted calls have an additional first argument that is the actual
-  /// receiver of the call.  See the documentation of [Interceptor] for more
-  /// information.
-  static const CallingConvention JS_INTERCEPTED =
-      const CallingConvention("intercepted JavaScript call");
-}
-
-/// Invoke a method, operator, getter, setter, or index getter/setter.
-/// Converting a method to a function object is treated as a getter invocation.
+/// Invoke a method on an object.
+///
+/// This includes getters, setters, operators, and index getter/setters.
+///
+/// Tearing off a method is treated like a getter invocation (getters and
+/// tear-offs cannot be distinguished at compile-time).
+///
+/// The [selector] records the names of named arguments. The value of named
+/// arguments occur at the end of the [arguments] list, in normalized order.
+///
+/// Discussion:
+/// If the [selector] is a [TypedSelector], the type information contained
+/// there is used by optimization passes. This is likely to change.
 class InvokeMethod extends Expression implements Invoke {
   Reference<Primitive> receiver;
   Selector selector;
-  CallingConvention callingConvention;
-  final Reference<Continuation> continuation;
   final List<Reference<Primitive>> arguments;
+  final Reference<Continuation> continuation;
+  final SourceInformation sourceInformation;
+
+  /// If true, it is known that the receiver cannot be `null`.
+  ///
+  /// This field is `null` until initialized by optimization phases.
+  bool receiverIsNotNull;
 
   InvokeMethod(Primitive receiver,
-               Selector selector,
+               this.selector,
+               List<Primitive> arguments,
                Continuation continuation,
-               List<Primitive> arguments)
-      : this.internal(new Reference<Primitive>(receiver),
-                      selector,
-                      new Reference<Continuation>(continuation),
-                      _referenceList(arguments));
-
-  InvokeMethod.internal(this.receiver,
-                        this.selector,
-                        this.continuation,
-                        this.arguments,
-                        [this.callingConvention = CallingConvention.DART]) {
-    assert(isValid);
-  }
-
-  /// Returns whether the arguments match the selector under the given calling
-  /// convention.
-  ///
-  /// This check is designed to be used in an assert, as it also checks that the
-  /// selector, arguments, and calling convention have meaningful values.
-  bool get isValid {
-    if (selector == null || callingConvention == null) return false;
-    if (callingConvention != CallingConvention.DART &&
-        callingConvention != CallingConvention.JS_INTERCEPTED) {
-      return false;
-    }
-    int numberOfArguments =
-        callingConvention == CallingConvention.JS_INTERCEPTED
-            ? arguments.length - 1
-            : arguments.length;
-    return selector.kind == SelectorKind.CALL ||
-           selector.kind == SelectorKind.OPERATOR ||
-           (selector.kind == SelectorKind.GETTER && numberOfArguments == 0) ||
-           (selector.kind == SelectorKind.SETTER && numberOfArguments == 1) ||
-           (selector.kind == SelectorKind.INDEX && numberOfArguments == 1) ||
-           (selector.kind == SelectorKind.INDEX && numberOfArguments == 2);
-  }
+               {this.sourceInformation})
+      : this.receiver = new Reference<Primitive>(receiver),
+        this.arguments = _referenceList(arguments),
+        this.continuation = new Reference<Continuation>(continuation);
 
   accept(Visitor visitor) => visitor.visitInvokeMethod(this);
 }
@@ -324,86 +300,89 @@ class InvokeMethod extends Expression implements Invoke {
 /// invocations to intercepted methods, where the effective receiver is instead
 /// passed as a formal parameter.
 ///
-/// When targeting Dart, this instruction is used to represent super calls.
-/// Here, [receiver] must always be a reference to `this`, and [target] must be
-/// a method that is available in the super class.
+/// TODO(sra): Review. A direct call to a method that is mixed into a native
+/// class will still require an explicit argument.
+///
+/// All optional arguments declared by [target] are passed in explicitly, and
+/// occur at the end of [arguments] list, in normalized order.
 class InvokeMethodDirectly extends Expression implements Invoke {
   Reference<Primitive> receiver;
-  final Element target;
+  final FunctionElement target;
   final Selector selector;
-  final Reference<Continuation> continuation;
   final List<Reference<Primitive>> arguments;
+  final Reference<Continuation> continuation;
 
   InvokeMethodDirectly(Primitive receiver,
                        this.target,
                        this.selector,
-                       Continuation cont,
-                       List<Primitive> args)
+                       List<Primitive> arguments,
+                       Continuation continuation)
       : this.receiver = new Reference<Primitive>(receiver),
-        continuation = new Reference<Continuation>(cont),
-        arguments = _referenceList(args) {
-    assert(selector != null);
-    assert(selector.kind == SelectorKind.CALL ||
-           selector.kind == SelectorKind.OPERATOR ||
-           (selector.kind == SelectorKind.GETTER && arguments.isEmpty) ||
-           (selector.kind == SelectorKind.SETTER && arguments.length == 1) ||
-           (selector.kind == SelectorKind.INDEX && arguments.length == 1) ||
-           (selector.kind == SelectorKind.INDEX && arguments.length == 2));
-  }
+        this.arguments = _referenceList(arguments),
+        this.continuation = new Reference<Continuation>(continuation);
 
   accept(Visitor visitor) => visitor.visitInvokeMethodDirectly(this);
 }
 
-/// Non-const call to a constructor. The [target] may be a generative
-/// constructor, factory, or redirecting factory.
+/// Non-const call to a constructor.
+///
+/// The [target] may be a generative constructor (forwarding or normal)
+/// or a non-redirecting factory.
+///
+/// All optional arguments declared by [target] are passed in explicitly, and
+/// occur in the [arguments] list, in normalized order.
+///
+/// Last in the [arguments] list, after the mandatory and optional arguments,
+/// the internal representation of each type argument occurs, unless it could
+/// be determined at build-time that the constructed class has no need for its
+/// runtime type information.
+///
+/// Note that [InvokeConstructor] does it itself allocate an object.
+/// The invoked constructor will do that using [CreateInstance].
 class InvokeConstructor extends Expression implements Invoke {
   final DartType type;
-  final FunctionElement target;
-  final Reference<Continuation> continuation;
+  final ConstructorElement target;
   final List<Reference<Primitive>> arguments;
+  final Reference<Continuation> continuation;
   final Selector selector;
-
-  /// The class being instantiated. This is the same as `target.enclosingClass`
-  /// and `type.element`.
-  ClassElement get targetClass => target.enclosingElement;
-
-  /// True if this is an invocation of a factory constructor.
-  bool get isFactory => target.isFactoryConstructor;
 
   InvokeConstructor(this.type,
                     this.target,
                     this.selector,
-                    Continuation cont,
-                    List<Primitive> args)
-      : continuation = new Reference<Continuation>(cont),
-        arguments = _referenceList(args) {
-    assert(dart2js.invariant(target,
-        target.isErroneous ||
-        type.isDynamic ||
-        type.element == target.enclosingClass.declaration,
-        message: "Constructor invocation target is not a constructor: "
-                 "$target."));
-  }
+                    List<Primitive> args,
+                    Continuation cont)
+      : arguments = _referenceList(args),
+        continuation = new Reference<Continuation>(cont);
 
   accept(Visitor visitor) => visitor.visitInvokeConstructor(this);
 }
 
-/// "as" casts and "is" checks.
-// We might want to turn "is"-checks into a [Primitive] as it can never diverge.
-// But then we need to special-case for is-checks with an erroneous .type as
-// these will throw.
+// TODO(asgerf): Make a Primitive for "is" and an Expression for "as".
+
+/// An "as" cast or an "is" check.
 class TypeOperator extends Expression {
-  final Reference<Primitive> receiver;
+  Reference<Primitive> value;
   final DartType type;
+
+  /// If [type] is an [InterfaceType], this holds the internal representation of
+  /// the type arguments to [type]. Since these may reference type variables
+  /// from the enclosing class, they are not constant.
+  ///
+  /// If [type] is a [TypeVariableType], this is a singleton list with
+  /// the internal representation of the type held in that type variable.
+  ///
+  /// Otherwise the list is empty.
+  final List<Reference<Primitive>> typeArguments;
   final Reference<Continuation> continuation;
-  // TODO(johnniwinther): Use `Operator` class to encapsule the operator type.
   final bool isTypeTest;
 
-  TypeOperator(Primitive receiver,
+  TypeOperator(Primitive value,
                this.type,
+               List<Primitive> typeArguments,
                Continuation cont,
                {bool this.isTypeTest})
-      : this.receiver = new Reference<Primitive>(receiver),
+      : this.value = new Reference<Primitive>(value),
+        this.typeArguments = _referenceList(typeArguments),
         this.continuation = new Reference<Continuation>(cont) {
     assert(isTypeTest != null);
   }
@@ -415,14 +394,49 @@ class TypeOperator extends Expression {
 
 /// Invoke [toString] on each argument and concatenate the results.
 class ConcatenateStrings extends Expression {
-  final Reference<Continuation> continuation;
   final List<Reference<Primitive>> arguments;
+  final Reference<Continuation> continuation;
 
-  ConcatenateStrings(Continuation cont, List<Primitive> args)
-      : continuation = new Reference<Continuation>(cont),
-        arguments = _referenceList(args);
+  ConcatenateStrings(List<Primitive> args, Continuation cont)
+      : arguments = _referenceList(args),
+        continuation = new Reference<Continuation>(cont);
 
   accept(Visitor visitor) => visitor.visitConcatenateStrings(this);
+}
+
+/// Throw a value.
+///
+/// Throw is an expression, i.e., it always occurs in tail position with
+/// respect to a body or expression.
+class Throw extends Expression {
+  Reference<Primitive> value;
+
+  Throw(Primitive value) : value = new Reference<Primitive>(value);
+
+  accept(Visitor visitor) => visitor.visitThrow(this);
+}
+
+/// Rethrow
+///
+/// Rethrow can only occur inside a continuation bound by [LetHandler].  It
+/// implicitly throws the exception parameter of the enclosing handler with
+/// the same stack trace as the enclosing handler.
+class Rethrow extends Expression {
+  accept(Visitor visitor) => visitor.visitRethrow(this);
+}
+
+/// A throw occurring in non-tail position.
+///
+/// The CPS translation of an expression produces a primitive as the value
+/// of the expression.  For convenience in the implementation of the
+/// translation, a [NonTailThrow] is used as that value.  A cleanup pass
+/// removes these and replaces them with [Throw] expressions.
+class NonTailThrow extends Primitive {
+  final Reference<Primitive> value;
+
+  NonTailThrow(Primitive value) : value = new Reference<Primitive>(value);
+
+  accept(Visitor visitor) => visitor.visitNonTailThrow(this);
 }
 
 /// Gets the value from a [MutableVariable].
@@ -462,30 +476,6 @@ class SetMutableVariable extends Expression implements InteriorNode {
     assert(body == null);
     return body = expr;
   }
-}
-
-/// Create a potentially recursive function and store it in a [MutableVariable].
-/// The function can access itself using [GetMutableVariable] on [variable].
-/// There must not exist a [SetMutableVariable] to [variable].
-///
-/// This can be seen as a let rec binding:
-///
-///   let rec [variable] = [definition] in [body]
-///
-class DeclareFunction extends Expression
-                      implements InteriorNode, DartSpecificNode {
-  final MutableVariable variable;
-  final FunctionDefinition definition;
-  Expression body;
-
-  DeclareFunction(this.variable, this.definition);
-
-  Expression plug(Expression expr) {
-    assert(body == null);
-    return body = expr;
-  }
-
-  accept(Visitor visitor) => visitor.visitDeclareFunction(this);
 }
 
 /// Invoke a continuation in tail position.
@@ -530,6 +520,8 @@ class IsTrue extends Condition {
 }
 
 /// Choose between a pair of continuations based on a condition value.
+///
+/// The two continuations must not declare any parameters.
 class Branch extends Expression {
   final Condition condition;
   final Reference<Continuation> trueContinuation;
@@ -542,19 +534,10 @@ class Branch extends Expression {
   accept(Visitor visitor) => visitor.visitBranch(this);
 }
 
-/// Marker interface for nodes that are only handled in the JavaScript backend.
-///
-/// These nodes are generated by the unsugar step or the [JsIrBuilder] and need
-/// special translation to the Tree IR, which is implemented in JsTreeBuilder.
-abstract class JsSpecificNode implements Node {}
-
-/// Marker interface for nodes that are only handled inthe Dart backend.
-abstract class DartSpecificNode implements Node {}
-
 /// Directly assigns to a field on a given object.
-class SetField extends Expression implements InteriorNode, JsSpecificNode {
+class SetField extends Expression implements InteriorNode {
   final Reference<Primitive> object;
-  Element field;
+  FieldElement field;
   final Reference<Primitive> value;
   Expression body;
 
@@ -571,9 +554,9 @@ class SetField extends Expression implements InteriorNode, JsSpecificNode {
 }
 
 /// Directly reads from a field on a given object.
-class GetField extends Primitive implements JsSpecificNode {
+class GetField extends Primitive {
   final Reference<Primitive> object;
-  Element field;
+  FieldElement field;
 
   GetField(Primitive object, this.field)
       : this.object = new Reference<Primitive>(object);
@@ -581,14 +564,62 @@ class GetField extends Primitive implements JsSpecificNode {
   accept(Visitor visitor) => visitor.visitGetField(this);
 }
 
+/// Reads the value of a static field or tears off a static method.
+class GetStatic extends Primitive {
+  /// Can be [FieldElement] or [FunctionElement].
+  final Element element;
+  final SourceInformation sourceInformation;
+
+  GetStatic(this.element, this.sourceInformation);
+
+  accept(Visitor visitor) => visitor.visitGetStatic(this);
+}
+
+/// Sets the value of a static field.
+class SetStatic extends Expression implements InteriorNode {
+  final FieldElement element;
+  final Reference<Primitive> value;
+  Expression body;
+  final SourceInformation sourceInformation;
+
+  SetStatic(this.element, Primitive value, this.sourceInformation)
+      : this.value = new Reference<Primitive>(value);
+
+  Expression plug(Expression expr) {
+    assert(body == null);
+    return body = expr;
+  }
+
+  accept(Visitor visitor) => visitor.visitSetStatic(this);
+}
+
+/// Reads the value of a lazily initialized static field.
+///
+/// If the field has not yet been initialized, its initializer is evaluated
+/// and assigned to the field.
+///
+/// [continuation] is then invoked with the value of the field as argument.
+class GetLazyStatic extends Expression {
+  final FieldElement element;
+  final Reference<Continuation> continuation;
+  final SourceInformation sourceInformation;
+
+  GetLazyStatic(this.element,
+                Continuation continuation,
+                this.sourceInformation)
+      : continuation = new Reference<Continuation>(continuation);
+
+  accept(Visitor visitor) => visitor.visitGetLazyStatic(this);
+}
+
 /// Creates an object for holding boxed variables captured by a closure.
-class CreateBox extends Primitive implements JsSpecificNode {
+class CreateBox extends Primitive {
   accept(Visitor visitor) => visitor.visitCreateBox(this);
 }
 
 /// Creates an instance of a class and initializes its fields and runtime type
 /// information.
-class CreateInstance extends Primitive implements JsSpecificNode {
+class CreateInstance extends Primitive {
   final ClassElement classElement;
 
   /// Initial values for the fields on the class.
@@ -610,7 +641,11 @@ class CreateInstance extends Primitive implements JsSpecificNode {
   accept(Visitor visitor) => visitor.visitCreateInstance(this);
 }
 
-class Identical extends Primitive implements JsSpecificNode {
+/// Compare objects for identity.
+///
+/// It is an error pass in a value that does not correspond to a Dart value,
+/// such as an interceptor or a box.
+class Identical extends Primitive {
   final Reference<Primitive> left;
   final Reference<Primitive> right;
   Identical(Primitive left, Primitive right)
@@ -619,7 +654,7 @@ class Identical extends Primitive implements JsSpecificNode {
   accept(Visitor visitor) => visitor.visitIdentical(this);
 }
 
-class Interceptor extends Primitive implements JsSpecificNode {
+class Interceptor extends Primitive {
   final Reference<Primitive> input;
   final Set<ClassElement> interceptedClasses;
   Interceptor(Primitive input, this.interceptedClasses)
@@ -627,31 +662,29 @@ class Interceptor extends Primitive implements JsSpecificNode {
   accept(Visitor visitor) => visitor.visitInterceptor(this);
 }
 
+/// Create an instance of [Invocation] for use in a call to `noSuchMethod`.
+class CreateInvocationMirror extends Primitive {
+  final Selector selector;
+  final List<Reference<Primitive>> arguments;
+
+  CreateInvocationMirror(this.selector, List<Primitive> arguments)
+      : this.arguments = _referenceList(arguments);
+
+  accept(Visitor visitor) => visitor.visitCreateInvocationMirror(this);
+}
+
 class Constant extends Primitive {
   final ConstantExpression expression;
+  final values.ConstantValue value;
 
-  Constant(this.expression);
-
-  values.ConstantValue get value => expression.value;
+  Constant(this.expression, this.value);
 
   accept(Visitor visitor) => visitor.visitConstant(this);
 }
 
-/// Reify the given type variable as a [Type].
-/// This depends on the current binding of 'this'.
-class ReifyTypeVar extends Primitive implements DartSpecificNode {
-  final TypeVariableElement typeVariable;
-
-  ReifyTypeVar(this.typeVariable);
-
-  values.ConstantValue get constant => null;
-
-  accept(Visitor visitor) => visitor.visitReifyTypeVar(this);
-}
-
 class LiteralList extends Primitive {
   /// The List type being created; this is not the type argument.
-  final GenericType type;
+  final InterfaceType type;
   final List<Reference<Primitive>> values;
 
   LiteralList(this.type, List<Primitive> values)
@@ -670,7 +703,7 @@ class LiteralMapEntry {
 }
 
 class LiteralMap extends Primitive {
-  final GenericType type;
+  final InterfaceType type;
   final List<LiteralMapEntry> entries;
 
   LiteralMap(this.type, this.entries);
@@ -678,8 +711,17 @@ class LiteralMap extends Primitive {
   accept(Visitor visitor) => visitor.visitLiteralMap(this);
 }
 
-/// Create a non-recursive function.
-class CreateFunction extends Primitive implements DartSpecificNode {
+/// Currently unused.
+///
+/// Nested functions (from Dart code) are translated to classes by closure
+/// conversion, hence they are instantiated with [CreateInstance].
+///
+/// We keep this around for now because it might come in handy when we
+/// handle async/await in the CPS IR.
+///
+/// Instantiates a nested function. [MutableVariable]s are in scope in the
+/// inner function, but primitives are not shared across function boundaries.
+class CreateFunction extends Primitive {
   final FunctionDefinition definition;
 
   CreateFunction(this.definition);
@@ -705,7 +747,7 @@ class Parameter extends Primitive {
 
 /// Continuations are normally bound by 'let cont'.  A continuation with one
 /// parameter and no body is used to represent a function's return continuation.
-/// The return continuation is bound by the Function, not by 'let cont'.
+/// The return continuation is bound by the function, not by 'let cont'.
 class Continuation extends Definition<Continuation> implements InteriorNode {
   final List<Parameter> parameters;
   Expression body = null;
@@ -727,146 +769,38 @@ class Continuation extends Definition<Continuation> implements InteriorNode {
   accept(Visitor visitor) => visitor.visitContinuation(this);
 }
 
-abstract class RootNode extends Node {
-  Element get element;
-
-  /// True if there is no body for this root node.
-  ///
-  /// In some parts of the compiler, empty root nodes are used as placeholders
-  /// for abstract methods, external constructors, fields without initializers,
-  /// etc.
-  bool get isEmpty;
-
-  /// List of parameters, or an empty list if this is a field.
-  /// For fields, this list is immutable.
-  List<Definition> get parameters;
-}
-
-// This is basically a function definition with an empty parameter list and a
-// field element instead of a function element and no const declarations, and
-// never a getter or setter, though that's less important.
-class FieldDefinition extends RootNode implements DartSpecificNode {
-  final FieldElement element;
-  List<Definition> get parameters => const <Definition>[];
-  final Body body;
-
-  FieldDefinition(this.element, this.body);
-
-  FieldDefinition.withoutInitializer(this.element)
-      : this.body = null;
-
-  accept(Visitor visitor) => visitor.visitFieldDefinition(this);
-
-  bool get isEmpty => body == null;
-}
-
 /// Identifies a mutable variable.
 class MutableVariable extends Definition {
-  /// Body of source code that declares this mutable variable.
-  ExecutableElement host;
   Entity hint;
 
-  MutableVariable(this.host, this.hint);
+  MutableVariable(this.hint);
 
   accept(Visitor v) => v.visitMutableVariable(this);
 }
 
-class Body extends InteriorNode {
-  Expression body;
-  final Continuation returnContinuation;
-  Body(this.body, this.returnContinuation);
-  accept(Visitor visitor) => visitor.visitBody(this);
-}
-
-/// A function definition, consisting of parameters and a body.  The parameters
-/// include a distinguished continuation parameter (held by the body).
-class FunctionDefinition extends RootNode {
-  final FunctionElement element;
+/// A function definition, consisting of parameters and a body.
+///
+/// There is an explicit parameter for the `this` argument, and a return
+/// continuation to invoke when returning from the function.
+class FunctionDefinition extends InteriorNode {
+  final ExecutableElement element;
   final Parameter thisParameter;
-  /// Mixed list of [Parameter]s and [MutableVariable]s.
-  final List<Definition> parameters;
-  final Body body;
-  final List<ConstDeclaration> localConstants;
-
-  /// Values for optional parameters.
-  final List<ConstantExpression> defaultParameterValues;
+  final List<Parameter> parameters;
+  final Continuation returnContinuation;
+  Expression body;
 
   FunctionDefinition(this.element,
       this.thisParameter,
       this.parameters,
-      this.body,
-      this.localConstants,
-      this.defaultParameterValues);
-
-  FunctionDefinition.abstract(this.element,
-                              this.parameters,
-                              this.defaultParameterValues)
-      : body = null,
-        thisParameter = null,
-        localConstants = const <ConstDeclaration>[];
+      this.returnContinuation,
+      this.body);
 
   accept(Visitor visitor) => visitor.visitFunctionDefinition(this);
-
-  bool get isEmpty => body == null;
-}
-
-abstract class Initializer extends Node implements DartSpecificNode {}
-
-class FieldInitializer extends Initializer {
-  final FieldElement element;
-  final Body body;
-
-  FieldInitializer(this.element, this.body);
-  accept(Visitor visitor) => visitor.visitFieldInitializer(this);
-}
-
-class SuperInitializer extends Initializer {
-  final ConstructorElement target;
-  final List<Body> arguments;
-  final Selector selector;
-  SuperInitializer(this.target, this.arguments, this.selector);
-  accept(Visitor visitor) => visitor.visitSuperInitializer(this);
-}
-
-class ConstructorDefinition extends RootNode implements DartSpecificNode {
-  final ConstructorElement element;
-  final Parameter thisParameter;
-  /// Mixed list of [Parameter]s and [MutableVariable]s.
-  final List<Definition> parameters;
-  final Body body;
-  final List<ConstDeclaration> localConstants;
-  final List<Initializer> initializers;
-
-  /// Values for optional parameters.
-  final List<ConstantExpression> defaultParameterValues;
-
-  ConstructorDefinition(this.element,
-                        this.thisParameter,
-                        this.parameters,
-                        this.body,
-                        this.initializers,
-                        this.localConstants,
-                        this.defaultParameterValues);
-
-  // 'Abstract' here means "has no body" and is used to represent external
-  // constructors.
-  ConstructorDefinition.abstract(
-      this.element,
-      this.parameters,
-      this.defaultParameterValues)
-      : body = null,
-        initializers = null,
-        thisParameter = null,
-        localConstants = const <ConstDeclaration>[];
-
-  accept(Visitor visitor) => visitor.visitConstructorDefinition(this);
-
-  bool get isEmpty => body == null;
 }
 
 /// Converts the internal representation of a type to a Dart object of type
 /// [Type].
-class ReifyRuntimeType extends Primitive implements JsSpecificNode {
+class ReifyRuntimeType extends Primitive {
   /// Reference to the internal representation of a type (as produced, for
   /// example, by [ReadTypeVariable]).
   final Reference<Primitive> value;
@@ -882,7 +816,7 @@ class ReifyRuntimeType extends Primitive implements JsSpecificNode {
 /// The resulting value is an internal representation (and not neccessarily a
 /// Dart object), and must be reified by [ReifyRuntimeType], if it should be
 /// used as a Dart value.
-class ReadTypeVariable extends Primitive implements JsSpecificNode {
+class ReadTypeVariable extends Primitive {
   final TypeVariableType variable;
   final Reference<Primitive> target;
 
@@ -901,7 +835,7 @@ class ReadTypeVariable extends Primitive implements JsSpecificNode {
 /// treated as 'holes' in the term, which means that it must be ensured at
 /// construction, that duplicate occurences of a type variable in [dartType]
 /// are assigned the same value.
-class TypeExpression extends Primitive implements JsSpecificNode {
+class TypeExpression extends Primitive {
   final DartType dartType;
   final List<Reference<Primitive>> arguments;
 
@@ -925,14 +859,7 @@ abstract class Visitor<T> {
   T visit(Node node);
 
   // Concrete classes.
-  T visitFieldDefinition(FieldDefinition node);
   T visitFunctionDefinition(FunctionDefinition node);
-  T visitConstructorDefinition(ConstructorDefinition node);
-  T visitBody(Body node);
-
-  // Initializers
-  T visitFieldInitializer(FieldInitializer node);
-  T visitSuperInitializer(SuperInitializer node);
 
   // Expressions.
   T visitLetPrim(LetPrim node);
@@ -945,31 +872,26 @@ abstract class Visitor<T> {
   T visitInvokeMethodDirectly(InvokeMethodDirectly node);
   T visitInvokeConstructor(InvokeConstructor node);
   T visitConcatenateStrings(ConcatenateStrings node);
+  T visitThrow(Throw node);
+  T visitRethrow(Rethrow node);
   T visitBranch(Branch node);
   T visitTypeOperator(TypeOperator node);
   T visitSetMutableVariable(SetMutableVariable node);
-  T visitDeclareFunction(DeclareFunction node);
+  T visitSetStatic(SetStatic node);
+  T visitGetLazyStatic(GetLazyStatic node);
+  T visitSetField(SetField node);
 
   // Definitions.
   T visitLiteralList(LiteralList node);
   T visitLiteralMap(LiteralMap node);
   T visitConstant(Constant node);
-  T visitReifyTypeVar(ReifyTypeVar node);
   T visitCreateFunction(CreateFunction node);
   T visitGetMutableVariable(GetMutableVariable node);
   T visitParameter(Parameter node);
   T visitContinuation(Continuation node);
   T visitMutableVariable(MutableVariable node);
-
-  // JavaScript specific nodes.
-
-  // Conditions.
-  T visitIsTrue(IsTrue node);
-
-  // Expressions.
-  T visitSetField(SetField node);
-
-  // Definitions.
+  T visitNonTailThrow(NonTailThrow node);
+  T visitGetStatic(GetStatic node);
   T visitIdentical(Identical node);
   T visitInterceptor(Interceptor node);
   T visitCreateInstance(CreateInstance node);
@@ -978,6 +900,10 @@ abstract class Visitor<T> {
   T visitReifyRuntimeType(ReifyRuntimeType node);
   T visitReadTypeVariable(ReadTypeVariable node);
   T visitTypeExpression(TypeExpression node);
+  T visitCreateInvocationMirror(CreateInvocationMirror node);
+
+  // Conditions.
+  T visitIsTrue(IsTrue node);
 }
 
 /// Recursively visits the entire CPS term, and calls abstract `process*`
@@ -989,54 +915,13 @@ class RecursiveVisitor implements Visitor {
 
   processReference(Reference ref) {}
 
-  processBody(Body node) {}
-  visitBody(Body node) {
-    processBody(node);
-    visit(node.returnContinuation);
-    visit(node.body);
-  }
-
-  processFieldDefinition(FieldDefinition node) {}
-  visitFieldDefinition(FieldDefinition node) {
-    processFieldDefinition(node);
-    if (node.body != null) {
-      visit(node.body);
-    }
-  }
-
   processFunctionDefinition(FunctionDefinition node) {}
   visitFunctionDefinition(FunctionDefinition node) {
     processFunctionDefinition(node);
     if (node.thisParameter != null) visit(node.thisParameter);
     node.parameters.forEach(visit);
-    if (node.body != null) {
-      visit(node.body);
-    }
-  }
-
-  processConstructorDefinition(ConstructorDefinition node) {}
-  visitConstructorDefinition(ConstructorDefinition node) {
-    processConstructorDefinition(node);
-    if (node.thisParameter != null) visit(node.thisParameter);
-    node.parameters.forEach(visit);
-    if (node.initializers != null) {
-      node.initializers.forEach(visit);
-    }
-    if (node.body != null) {
-      visit(node.body);
-    }
-  }
-
-  processFieldInitializer(FieldInitializer node) {}
-  visitFieldInitializer(FieldInitializer node) {
-    processFieldInitializer(node);
+    visit(node.returnContinuation);
     visit(node.body);
-  }
-
-  processSuperInitializer(SuperInitializer node) {}
-  visitSuperInitializer(SuperInitializer node) {
-    processSuperInitializer(node);
-    node.arguments.forEach(visit);
   }
 
   // Expressions.
@@ -1114,6 +999,17 @@ class RecursiveVisitor implements Visitor {
     node.arguments.forEach(processReference);
   }
 
+  processThrow(Throw node) {}
+  visitThrow(Throw node) {
+    processThrow(node);
+    processReference(node.value);
+  }
+
+  processRethrow(Rethrow node) {}
+  visitRethrow(Rethrow node) {
+    processRethrow(node);
+  }
+
   processBranch(Branch node) {}
   visitBranch(Branch node) {
     processBranch(node);
@@ -1126,7 +1022,8 @@ class RecursiveVisitor implements Visitor {
   visitTypeOperator(TypeOperator node) {
     processTypeOperator(node);
     processReference(node.continuation);
-    processReference(node.receiver);
+    processReference(node.value);
+    node.typeArguments.forEach(processReference);
   }
 
   processSetMutableVariable(SetMutableVariable node) {}
@@ -1137,15 +1034,11 @@ class RecursiveVisitor implements Visitor {
     visit(node.body);
   }
 
-  processDeclareFunction(DeclareFunction node) {}
-  visitDeclareFunction(DeclareFunction node) {
-    processDeclareFunction(node);
-    visit(node.variable);
-    visit(node.definition);
-    visit(node.body);
+  processGetLazyStatic(GetLazyStatic node) {}
+  visitGetLazyStatic(GetLazyStatic node) {
+    processGetLazyStatic(node);
+    processReference(node.continuation);
   }
-
-  // Definitions.
 
   processLiteralList(LiteralList node) {}
   visitLiteralList(LiteralList node) {
@@ -1163,10 +1056,9 @@ class RecursiveVisitor implements Visitor {
   }
 
   processConstant(Constant node) {}
-  visitConstant(Constant node) => processConstant(node);
-
-  processReifyTypeVar(ReifyTypeVar node) {}
-  visitReifyTypeVar(ReifyTypeVar node) => processReifyTypeVar(node);
+  visitConstant(Constant node)  {
+    processConstant(node);
+  }
 
   processCreateFunction(CreateFunction node) {}
   visitCreateFunction(CreateFunction node) {
@@ -1186,7 +1078,9 @@ class RecursiveVisitor implements Visitor {
   }
 
   processParameter(Parameter node) {}
-  visitParameter(Parameter node) => processParameter(node);
+  visitParameter(Parameter node) {
+    processParameter(node);
+  }
 
   processContinuation(Continuation node) {}
   visitContinuation(Continuation node) {
@@ -1195,15 +1089,12 @@ class RecursiveVisitor implements Visitor {
     if (node.body != null) visit(node.body);
   }
 
-  // Conditions.
-
   processIsTrue(IsTrue node) {}
   visitIsTrue(IsTrue node) {
     processIsTrue(node);
     processReference(node.value);
   }
 
-  // JavaScript specific nodes.
   processIdentical(Identical node) {}
   visitIdentical(Identical node) {
     processIdentical(node);
@@ -1238,6 +1129,18 @@ class RecursiveVisitor implements Visitor {
     processReference(node.object);
   }
 
+  processGetStatic(GetStatic node) {}
+  visitGetStatic(GetStatic node) {
+    processGetStatic(node);
+  }
+
+  processSetStatic(SetStatic node) {}
+  visitSetStatic(SetStatic node) {
+    processSetStatic(node);
+    processReference(node.value);
+    visit(node.body);
+  }
+
   processCreateBox(CreateBox node) {}
   visitCreateBox(CreateBox node) {
     processCreateBox(node);
@@ -1256,9 +1159,20 @@ class RecursiveVisitor implements Visitor {
   }
 
   processTypeExpression(TypeExpression node) {}
-  @override
   visitTypeExpression(TypeExpression node) {
     processTypeExpression(node);
+    node.arguments.forEach(processReference);
+  }
+
+  processNonTailThrow(NonTailThrow node) {}
+  visitNonTailThrow(NonTailThrow node) {
+    processNonTailThrow(node);
+    processReference(node.value);
+  }
+
+  processCreateInvocationMirror(CreateInvocationMirror node) {}
+  visitCreateInvocationMirror(CreateInvocationMirror node) {
+    processCreateInvocationMirror(node);
     node.arguments.forEach(processReference);
   }
 }

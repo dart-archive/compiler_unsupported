@@ -2,7 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of dart2js.cps_ir.optimizers;
+library dart2js.cps_ir.shrinking_reductions;
+
+import 'cps_ir_nodes.dart';
+import 'optimizers.dart';
 
 /**
  * [ShrinkingReducer] applies shrinking reductions to CPS terms as described
@@ -17,9 +20,7 @@ class ShrinkingReducer extends Pass {
 
   /// Applies shrinking reductions to root, mutating root in the process.
   @override
-  void rewrite(RootNode root) {
-    if (root.isEmpty) return;
-
+  void rewrite(FunctionDefinition root) {
     _worklist = new Set<_ReductionTask>();
     _RedexVisitor redexVisitor = new _RedexVisitor(_worklist);
 
@@ -494,31 +495,8 @@ class ParentVisitor extends RecursiveVisitor {
       parameter.parent = node;
       if (parameter is Parameter) parameter.parentIndex = index++;
     });
-  }
-
-  processBody(Body node) {
     node.returnContinuation.parent = node;
     node.body.parent = node;
-  }
-
-  processConstructorDefinition(ConstructorDefinition node) {
-    node.body.parent = node;
-    int index = 0;
-    node.parameters.forEach((Definition parameter) {
-      parameter.parent = node;
-      if (parameter is Parameter) parameter.parentIndex = index++;
-    });
-    node.initializers.forEach((Initializer i) => i.parent = node);
-  }
-
-  // Expressions.
-
-  processFieldInitializer(FieldInitializer node) {
-    node.body.parent = node;
-  }
-
-  processSuperInitializer(SuperInitializer node) {
-    node.arguments.forEach((Body argument) => argument.parent = node);
   }
 
   processLetPrim(LetPrim node) {
@@ -585,8 +563,9 @@ class ParentVisitor extends RecursiveVisitor {
   }
 
   processTypeOperator(TypeOperator node) {
+    node.typeArguments.forEach((Reference ref) => ref.parent = node);
     node.continuation.parent = node;
-    node.receiver.parent = node;
+    node.value.parent = node;
   }
 
   processSetMutableVariable(SetMutableVariable node) {
@@ -595,13 +574,13 @@ class ParentVisitor extends RecursiveVisitor {
     node.value.parent = node;
   }
 
-  processDeclareFunction(DeclareFunction node) {
-    node.variable.parent = node;
-    node.definition.parent = node;
-    node.body.parent = node;
+  processThrow(Throw node) {
+    node.value.parent = node;
   }
 
-  // Definitions.
+  processGetLazyStatic(GetLazyStatic node) {
+    node.continuation.parent = node;
+  }
 
   processLiteralList(LiteralList node) {
     node.values.forEach((Reference ref) => ref.parent = node);
@@ -627,13 +606,9 @@ class ParentVisitor extends RecursiveVisitor {
     });
   }
 
-  // Conditions.
-
   processIsTrue(IsTrue node) {
     node.value.parent = node;
   }
-
-  // JavaScript specific nodes.
 
   processIdentical(Identical node) {
     node.left.parent = node;
@@ -652,6 +627,14 @@ class ParentVisitor extends RecursiveVisitor {
 
   processGetField(GetField node) {
     node.object.parent = node;
+  }
+
+  processGetStatic(GetStatic node) {
+  }
+
+  processSetStatic(SetStatic node) {
+    node.value.parent = node;
+    node.body.parent = node;
   }
 
   processGetMutableVariable(GetMutableVariable node) {
@@ -675,6 +658,10 @@ class ParentVisitor extends RecursiveVisitor {
   }
 
   processTypeExpression(TypeExpression node) {
+    node.arguments.forEach((Reference ref) => ref.parent = node);
+  }
+
+  processCreateInvocationMirror(CreateInvocationMirror node) {
     node.arguments.forEach((Reference ref) => ref.parent = node);
   }
 }

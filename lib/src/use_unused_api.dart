@@ -11,10 +11,11 @@ library dart2js.use_unused_api;
 import '../compiler.dart' as api;
 
 import 'colors.dart' as colors;
+import 'constants/constant_system.dart' as constants;
+import 'constants/expressions.dart' as constants;
 import 'constants/values.dart' as constants;
 import 'cps_ir/cps_ir_builder.dart' as ir_builder;
 import 'cps_ir/cps_ir_builder_task.dart' as ir_builder;
-import 'cps_ir/cps_ir_nodes_sexpr.dart' as cps_ir_nodes_sexpr;
 import 'tree_ir/tree_ir_nodes.dart' as tree_ir;
 import 'dart_types.dart' as dart_types;
 import 'dart2js.dart' as dart2js;
@@ -26,6 +27,7 @@ import 'filenames.dart' as filenames;
 import 'inferrer/concrete_types_inferrer.dart' as concrete_types_inferrer;
 import 'inferrer/type_graph_inferrer.dart' as type_graph_inferrer;
 import 'io/code_output.dart' as io;
+import 'io/source_map_builder.dart' as io;
 import 'js/js.dart' as js;
 import 'js_backend/js_backend.dart' as js_backend;
 import 'js_emitter/js_emitter.dart' as js_emitter;
@@ -41,15 +43,15 @@ import 'scanner/scannerlib.dart' show
     PartialClassElement,
     PartialFunctionElement;
 
-class ElementVisitor extends elements_visitor.ElementVisitor {
-  visitElement(e) {}
+class ElementVisitor extends elements_visitor.BaseElementVisitor {
+  visitElement(e, a) {}
 }
 
 void main(List<String> arguments) {
   useApi();
   dart2js.main(arguments);
   dart2jslib.isPublicName(null);
-  useConstant(null, null);
+  useConstant(null, null, null, null, null);
   useNode(null);
   useUtil(null);
   useSetlet(null);
@@ -64,10 +66,10 @@ void main(List<String> arguments) {
   useColor();
   useFilenames();
   useSsa(null);
-  useCodeBuffer(null);
+  useIo(null, null);
   usedByTests();
-  useElements(null, null, null, null, null);
-  useIr(null, null);
+  useElements();
+  useIr(null);
   useCompiler(null);
   useTypes();
   useCodeEmitterTask(null);
@@ -82,9 +84,15 @@ useApi() {
 }
 
 void useConstant(constants.ConstantValue constant,
-                 dart2jslib.ConstantSystem cs) {
+                 constants.ConstantExpression expression,
+                 constants.ConstructedConstantExpression constructedConstant,
+                 constants.ConstantSystem cs,
+                 constants.Environment env) {
   constant.isObject;
   cs.isBool(constant);
+  constructedConstant.computeInstanceType();
+  constructedConstant.computeInstanceFields();
+  expression.evaluate(null, null);
 }
 
 void useNode(tree.Node node) {
@@ -154,28 +162,28 @@ void useImmutableEmptySet(util.ImmutableEmptySet set) {
 
 void useElementVisitor(ElementVisitor visitor) {
   visitor
-    ..visit(null)
-    ..visitAbstractFieldElement(null)
-    ..visitAmbiguousElement(null)
-    ..visitBoxFieldElement(null)
-    ..visitClassElement(null)
-    ..visitClosureClassElement(null)
-    ..visitClosureFieldElement(null)
-    ..visitCompilationUnitElement(null)
-    ..visitConstructorBodyElement(null)
-    ..visitElement(null)
-    ..visitErroneousElement(null)
-    ..visitFieldParameterElement(null)
-    ..visitFunctionElement(null)
-    ..visitLibraryElement(null)
-    ..visitMixinApplicationElement(null)
-    ..visitPrefixElement(null)
-    ..visitScopeContainerElement(null)
-    ..visitTypeDeclarationElement(null)
-    ..visitTypeVariableElement(null)
-    ..visitTypedefElement(null)
-    ..visitVariableElement(null)
-    ..visitWarnOnUseElement(null);
+    ..visit(null, null)
+    ..visitAbstractFieldElement(null, null)
+    ..visitAmbiguousElement(null, null)
+    ..visitBoxFieldElement(null, null)
+    ..visitClassElement(null, null)
+    ..visitClosureClassElement(null, null)
+    ..visitClosureFieldElement(null, null)
+    ..visitCompilationUnitElement(null, null)
+    ..visitConstructorBodyElement(null, null)
+    ..visitElement(null, null)
+    ..visitErroneousElement(null, null)
+    ..visitFieldParameterElement(null, null)
+    ..visitFunctionElement(null, null)
+    ..visitLibraryElement(null, null)
+    ..visitMixinApplicationElement(null, null)
+    ..visitPrefixElement(null, null)
+    ..visitScopeContainerElement(null, null)
+    ..visitTypeDeclarationElement(null, null)
+    ..visitTypeVariableElement(null, null)
+    ..visitTypedefElement(null, null)
+    ..visitVariableElement(null, null)
+    ..visitWarnOnUseElement(null, null);
 }
 
 useJsNode(js.Node node) {
@@ -211,7 +219,11 @@ useSsa(ssa.HInstruction instruction) {
   new ssa.HStatementSequenceInformation(null);
 }
 
-useCodeBuffer(io.CodeBuffer buffer) {
+useIo(io.CodeBuffer buffer, io.LineColumnMap map) {
+  map..addFirst(null, null, null)
+     ..forEachLine(null)
+     ..getFirstElementsInLine(null)
+     ..forEachColumn(null, null);
 }
 
 usedByTests() {
@@ -233,30 +245,24 @@ usedByTests() {
 }
 
 useElements(
-    elements.ClassElement e,
-    elements.Name n,
-    modelx.FieldElementX f,
-    PartialClassElement pce,
-    PartialFunctionElement pfe) {
+    [elements.ClassElement e,
+     elements.Name n,
+     modelx.FieldElementX f,
+     PartialClassElement pce,
+     PartialFunctionElement pfe,
+     elements.LibraryElement l]) {
   e.lookupClassMember(null);
   e.lookupInterfaceMember(null);
   n.isAccessibleFrom(null);
   f.reuseElement();
   pce.copyWithEnclosing(null);
   pfe.copyWithEnclosing(null);
+  l.forEachImport(null);
 }
 
-useIr(ir_builder.IrBuilderTask task,
-      ir_builder.IrBuilder builder) {
-  task
-    ..hasIr(null)
-    ..getIr(null);
+useIr(ir_builder.IrBuilder builder) {
   builder
-    ..buildIntegerLiteral(null)
-    ..buildDoubleLiteral(null)
-    ..buildBooleanLiteral(null)
-    ..buildNullLiteral()
-    ..buildStringLiteral(null)
+    ..buildStringConstant(null)
     ..buildDynamicGet(null, null);
 }
 
@@ -266,6 +272,7 @@ useCompiler(dart2jslib.Compiler compiler) {
       ..resetAsync(null)
       ..lookupLibrary(null);
   compiler.forgetElement(null);
+  compiler.backend.constantCompilerTask.copyConstantValues(null);
 }
 
 useTypes() {
@@ -288,21 +295,17 @@ useProgramBuilder(program_builder.ProgramBuilder builder) {
 }
 
 useSemanticVisitor() {
-  new semantic_visitor.BulkVisitor().apply(null, null);
+  new semantic_visitor.BulkSendVisitor().apply(null, null);
   new semantic_visitor.TraversalVisitor(null).apply(null, null);
+  new semantic_visitor.BulkDeclarationVisitor().apply(null, null);
 }
 
-class DummyTreeVisitor extends tree_ir.RootVisitor
-                          with tree_ir.InitializerVisitor {
-  visitFunctionDefinition(tree_ir.FunctionDefinition node) {}
-  visitConstructorDefinition(tree_ir.ConstructorDefinition node) {}
-  visitFieldDefinition(tree_ir.FieldDefinition node) {}
-
-  visitFieldInitializer(tree_ir.FieldInitializer node) {}
-  visitSuperInitializer(tree_ir.SuperInitializer node) {}
+class TreeVisitor1 extends tree_ir.ExpressionVisitor1
+                      with tree_ir.StatementVisitor1 {
+  noSuchMethod(inv) {}
 }
 
 useTreeVisitors() {
-  new DummyTreeVisitor().visitRootNode(null);
-  new DummyTreeVisitor().visitInitializer(null);
+  new TreeVisitor1().visitExpression(null, null);
+  new TreeVisitor1().visitStatement(null, null);
 }

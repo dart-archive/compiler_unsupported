@@ -37,6 +37,11 @@ class Universe {
   /// Invariant: Elements are declaration elements.
   final Set<ClassElement> _allInstantiatedClasses = new Set<ClassElement>();
 
+  /// The set of all referenced static fields.
+  ///
+  /// Invariant: Elements are declaration elements.
+  final Set<FieldElement> allReferencedStaticFields = new Set<FieldElement>();
+
   /**
    * Documentation wanted -- johnniwinther
    *
@@ -185,6 +190,13 @@ class Universe {
     return type;
   }
 
+  void registerStaticFieldUse(FieldElement staticField) {
+    assert(Elements.isStaticOrTopLevel(staticField) && staticField.isField);
+    assert(staticField.isDeclaration);
+
+    allReferencedStaticFields.add(staticField);
+  }
+
   void forgetElement(Element element, Compiler compiler) {
     allClosures.remove(element);
     slowDirectlyNestedClosures(element).forEach(compiler.forgetElement);
@@ -285,12 +297,8 @@ class CallStructure {
 
   // TODO(johnniwinther): Cache hash code?
   int get hashCode {
-    int named = namedArguments.length;
-    int hash = mixHashCodeBits(argumentCount, named);
-    for (int i = 0; i < named; i++) {
-      hash = mixHashCodeBits(hash, namedArguments[i].hashCode);
-    }
-    return hash;
+    return Hashing.listHash(namedArguments,
+        Hashing.objectHash(argumentCount, namedArguments.length));
   }
 
   bool operator ==(other) {
@@ -444,7 +452,8 @@ class CallStructure {
     // TODO(ngeoffray): Should the resolver do it instead?
     List<String> namedParameters;
     if (signature.optionalParametersAreNamed) {
-      namedParameters = signature.optionalParameters.mapToList((e) => e.name);
+      namedParameters =
+          signature.optionalParameters.map((e) => e.name).toList();
     }
     CallStructure callStructure =
         new CallStructure(signature.parameterCount, namedParameters);
@@ -535,11 +544,13 @@ class Selector {
            (memberName != INDEX_NAME && memberName != INDEX_SET_NAME));
     assert(kind == SelectorKind.OPERATOR ||
            kind == SelectorKind.INDEX ||
-           !Elements.isOperatorName(memberName.text));
+           !Elements.isOperatorName(memberName.text) ||
+           identical(memberName.text, '??'));
     assert(kind == SelectorKind.CALL ||
            kind == SelectorKind.GETTER ||
            kind == SelectorKind.SETTER ||
-           Elements.isOperatorName(memberName.text));
+           Elements.isOperatorName(memberName.text) ||
+           identical(memberName.text, '??'));
   }
 
   // TODO(johnniwinther): Extract caching.
@@ -615,7 +626,7 @@ class Selector {
 
   factory Selector.getterFrom(Selector selector)
       => new Selector(SelectorKind.GETTER,
-                      selector.memberName,
+                      selector.memberName.getter,
                       CallStructure.NO_ARGS);
 
   factory Selector.setter(String name, LibraryElement library)
@@ -759,9 +770,9 @@ class Selector {
                              Name name,
                              CallStructure callStructure) {
     // Add bits from name and kind.
-    int hash = mixHashCodeBits(name.hashCode, kind.hashCode);
+    int hash = Hashing.mixHashCodeBits(name.hashCode, kind.hashCode);
     // Add bits from the call structure.
-    return mixHashCodeBits(hash, callStructure.hashCode);
+    return Hashing.mixHashCodeBits(hash, callStructure.hashCode);
   }
 
   String toString() {
@@ -810,7 +821,7 @@ class TypedSelector extends Selector {
         .putIfAbsent(untyped, () => new Map<TypeMask, TypedSelector>());
     TypedSelector result = map[mask];
     if (result == null) {
-      int hashCode = mixHashCodeBits(untyped.hashCode, mask.hashCode);
+      int hashCode = Hashing.mixHashCodeBits(untyped.hashCode, mask.hashCode);
       result = map[mask] = new TypedSelector.internal(mask, untyped, hashCode);
     }
     return result;

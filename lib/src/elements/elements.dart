@@ -20,6 +20,7 @@ import '../dart2jslib.dart' show InterfaceType,
                                  Script,
                                  FunctionType,
                                  Selector,
+                                 SourceSpan,
                                  Constant,
                                  Compiler,
                                  Backend,
@@ -199,23 +200,23 @@ abstract class Element implements Entity {
   @deprecated DartType computeType(Compiler compiler);
 
   /// `true` if this element is a library.
-  bool get isLibrary => kind == ElementKind.LIBRARY;
+  bool get isLibrary;
 
   /// `true` if this element is a compilation unit.
-  bool get isCompilationUnit => kind == ElementKind.COMPILATION_UNIT;
+  bool get isCompilationUnit;
 
   /// `true` if this element is defines the scope of prefix used by one or
   /// more import declarations.
-  bool get isPrefix => kind == ElementKind.PREFIX;
+  bool get isPrefix;
 
   /// `true` if this element is a class declaration or a mixin application.
-  bool get isClass => kind == ElementKind.CLASS;
+  bool get isClass;
 
   /// `true` if this element is a type variable declaration.
-  bool get isTypeVariable => kind == ElementKind.TYPE_VARIABLE;
+  bool get isTypeVariable;
 
   /// `true` if this element is a typedef declaration.
-  bool get isTypedef => kind == ElementKind.TYPEDEF;
+  bool get isTypedef;
 
   /// `true` if this element is a top level function, static or instance
   /// method, local function or closure defined by a function expression.
@@ -226,48 +227,46 @@ abstract class Element implements Entity {
   /// See also [isConstructor], [isGenerativeConstructor], and
   /// [isFactoryConstructor] for constructor properties, and [isAccessor],
   /// [isGetter] and [isSetter] for getter/setter properties.
-  bool get isFunction => kind == ElementKind.FUNCTION;
+  bool get isFunction;
 
   /// `true` if this element is an operator method.
   bool get isOperator;
 
   /// `true` if this element is an accessor, that is either an explicit
   /// getter or an explicit setter.
-  bool get isAccessor => isGetter || isSetter;
+  bool get isAccessor;
 
   /// `true` if this element is an explicit getter method.
-  bool get isGetter => kind == ElementKind.GETTER;
+  bool get isGetter;
 
   /// `true` if this element is an explicit setter method.
-  bool get isSetter => kind == ElementKind.SETTER;
+  bool get isSetter;
 
   /// `true` if this element is a generative or factory constructor.
-  bool get isConstructor => isGenerativeConstructor ||  isFactoryConstructor;
+  bool get isConstructor;
 
   /// `true` if this element is a generative constructor, potentially
   /// redirecting.
-  bool get isGenerativeConstructor =>
-      kind == ElementKind.GENERATIVE_CONSTRUCTOR;
+  bool get isGenerativeConstructor;
 
   /// `true` if this element is the body of a generative constructor.
   ///
   /// This is a synthetic element kind used only be the JavaScript backend.
-  bool get isGenerativeConstructorBody =>
-      kind == ElementKind.GENERATIVE_CONSTRUCTOR_BODY;
+  bool get isGenerativeConstructorBody;
 
   /// `true` if this element is a factory constructor,
   /// potentially redirecting.
   bool get isFactoryConstructor;
 
   /// `true` if this element is a local variable.
-  bool get isVariable => kind == ElementKind.VARIABLE;
+  bool get isVariable;
 
   /// `true` if this element is a top level variable, static or instance field.
-  bool get isField => kind == ElementKind.FIELD;
+  bool get isField;
 
   /// `true` if this element is the abstract field implicitly defined by an
   /// explicit getter and/or setter.
-  bool get isAbstractField => kind == ElementKind.ABSTRACT_FIELD;
+  bool get isAbstractField;
 
   /// `true` if this element is formal parameter either from a constructor,
   /// method, or typedef declaration or from an inlined function typed
@@ -275,25 +274,25 @@ abstract class Element implements Entity {
   ///
   /// This property is `false` if this element is an initializing formal.
   /// See [isInitializingFormal].
-  bool get isParameter => kind == ElementKind.PARAMETER;
+  bool get isParameter;
 
   /// `true` if this element is an initializing formal of constructor, that
   /// is a formal of the form `this.foo`.
-  bool get isInitializingFormal => kind == ElementKind.INITIALIZING_FORMAL;
+  bool get isInitializingFormal;
 
   /// `true` if this element represents a resolution error.
-  bool get isErroneous => kind == ElementKind.ERROR;
+  bool get isErroneous;
 
   /// `true` if this element represents an ambiguous name.
   ///
   /// Ambiguous names occur when two imports/exports contain different entities
   /// by the same name. If an ambiguous name is resolved an warning or error
   /// is produced.
-  bool get isAmbiguous => kind == ElementKind.AMBIGUOUS;
+  bool get isAmbiguous;
 
   /// `true` if this element represents an entity whose access causes one or
   /// more warnings.
-  bool get isWarnOnUse => kind == ElementKind.WARN_ON_USE;
+  bool get isWarnOnUse;
 
   bool get isClosure;
 
@@ -340,7 +339,11 @@ abstract class Element implements Entity {
 
   bool get impliesType;
 
+  // TODO(johnniwinther): Remove this.
   Token get position;
+
+  /// The position of the declaration of this element, if available.
+  SourceSpan get sourcePosition;
 
   CompilationUnitElement get compilationUnit;
   LibraryElement get library;
@@ -409,10 +412,6 @@ abstract class Element implements Entity {
   String get fixedBackendName;
 
   bool get isAbstract;
-  bool isForeign(Backend backend);
-
-  void addMetadata(MetadataAnnotation annotation);
-  void setNative(String name);
 
   Scope buildScope();
 
@@ -422,7 +421,7 @@ abstract class Element implements Entity {
   /// Returns the [Element] that holds the [TreeElements] for this element.
   AnalyzableElement get analyzableElement;
 
-  accept(ElementVisitor visitor);
+  accept(ElementVisitor visitor, arg);
 }
 
 class Elements {
@@ -490,6 +489,12 @@ class Elements {
     return true;
   }
 
+  static bool hasAccessToTypeVariables(Element element) {
+    Element outer = element.outermostEnclosingMemberOrTopLevel;
+    return (outer != null && outer.isFactoryConstructor) ||
+        !isInStaticContext(element);
+  }
+
   static bool isStaticOrTopLevelField(Element element) {
     return isStaticOrTopLevel(element)
            && (identical(element.kind, ElementKind.FIELD)
@@ -522,14 +527,16 @@ class Elements {
   static bool isNativeOrExtendsNative(ClassElement element) {
     if (element == null) return false;
     if (element.isNative) return true;
-    assert(element.resolutionState == STATE_DONE);
+    assert(element.isResolved);
     return isNativeOrExtendsNative(element.superclass);
   }
 
   static bool isInstanceSend(Send send, TreeElements elements) {
     Element element = elements[send];
     if (element == null) return !isClosureSend(send, element);
-    return isInstanceMethod(element) || isInstanceField(element);
+    return isInstanceMethod(element) ||
+           isInstanceField(element) ||
+           send.isConditional;
   }
 
   static bool isClosureSend(Send send, Element element) {
@@ -637,7 +644,7 @@ class Elements {
   static String constructOperatorNameOrNull(String op, bool isUnary) {
     if (isMinusOperator(op)) {
       return isUnary ? 'unary-' : op;
-    } else if (isUserDefinableOperator(op)) {
+    } else if (isUserDefinableOperator(op) || op == '??') {
       return op;
     } else {
       return null;
@@ -663,6 +670,7 @@ class Elements {
     if (identical(op, '&=')) return '&';
     if (identical(op, '^=')) return '^';
     if (identical(op, '|=')) return '|';
+    if (identical(op, '??=')) return '??';
 
     return null;
   }
@@ -834,12 +842,14 @@ abstract class ScopeContainerElement implements Element {
 }
 
 abstract class CompilationUnitElement extends Element {
+  /// Use [library] instead.
+  @deprecated
+  get enclosingElement;
+
   Script get script;
   PartOf get partTag;
 
   void forEachLocalMember(f(Element element));
-  void addMember(Element element, DiagnosticListener listener);
-  void setPartOf(PartOf tag, DiagnosticListener listener);
   bool get hasMembers;
 
   int compareTo(CompilationUnitElement other);
@@ -881,37 +891,22 @@ abstract class LibraryElement extends Element
    * an underscore.
    */
   bool get isInternalLibrary;
+
   bool get canUseNative;
   bool get exportsHandled;
 
-  // TODO(kasperl): We should try to get rid of these.
-  void set libraryTag(LibraryName value);
-
   LibraryElement get implementation;
-
-  void addCompilationUnit(CompilationUnitElement element);
-  void addTag(LibraryTag tag, DiagnosticListener listener);
-  void addImport(Element element, Import import, DiagnosticListener listener);
-
-  /// Record which element an import or export tag resolved to.
-  /// (Belongs on builder object).
-  void recordResolvedTag(LibraryDependency tag, LibraryElement library);
 
   /// Return the library element corresponding to an import or export.
   LibraryElement getLibraryFromTag(LibraryDependency tag);
-
-  void addMember(Element element, DiagnosticListener listener);
-  void addToScope(Element element, DiagnosticListener listener);
-
-  // TODO(kasperl): Get rid of this method.
-  Iterable<Element> getNonPrivateElementsInScope();
-
-  void setExports(Iterable<Element> exportedElements);
 
   Element find(String elementName);
   Element findLocal(String elementName);
   Element findExported(String elementName);
   void forEachExport(f(Element element));
+
+  /// Calls [f] for each [Element] imported into this library.
+  void forEachImport(f(Element element));
 
   /// Returns the imports that import element into this library.
   Link<Import> getImportsFor(Element element);
@@ -986,12 +981,17 @@ abstract class MemberElement extends Element implements ExecutableElement {
 }
 
 /// A function, variable or parameter defined in an executable context.
-abstract class LocalElement extends Element implements TypedElement, Local {
+abstract class LocalElement extends Element
+    implements AstElement, TypedElement, Local {
 }
 
 /// A top level, static or instance field, a formal parameter or local variable.
 abstract class VariableElement extends ExecutableElement {
   Expression get initializer;
+
+  /// The constant expression defining the value of the variable if `const`,
+  /// `null` otherwise.
+  ConstantExpression get constant;
 }
 
 /// An entity that defines a local entity (memory slot) in generated code.
@@ -1096,8 +1096,8 @@ abstract class AbstractFieldElement extends Element {
 
 abstract class FunctionSignature {
   FunctionType get type;
-  Link<FormalElement> get requiredParameters;
-  Link<FormalElement> get optionalParameters;
+  List<FormalElement> get requiredParameters;
+  List<FormalElement> get optionalParameters;
 
   int get requiredParameterCount;
   int get optionalParameterCount;
@@ -1129,10 +1129,6 @@ abstract class FunctionElement extends Element
   FunctionElement get patch;
   FunctionElement get origin;
 
-  /// Used to retrieve a link to the abstract field element representing this
-  /// element.
-  AbstractFieldElement get abstractField;
-
   /// Do not use [computeSignature] outside of the resolver; instead retrieve
   /// the signature through the [functionSignature] field.
   /// Trying to access a function signature that has not been computed in
@@ -1154,6 +1150,25 @@ abstract class FunctionElement extends Element
 
   /// `true` if this function is external.
   bool get isExternal;
+}
+
+/// A getter or setter.
+abstract class AccessorElement extends MethodElement {
+  /// Used to retrieve a link to the abstract field element representing this
+  /// element.
+  AbstractFieldElement get abstractField;
+}
+
+/// A getter.
+abstract class GetterElement extends AccessorElement {
+  /// The setter corresponding to this getter, if any.
+  SetterElement get setter;
+}
+
+/// A setter.
+abstract class SetterElement extends AccessorElement {
+  /// The getter corresponding to this setter, if any.
+  GetterElement get getter;
 }
 
 /// Enum for the synchronous/asynchronous function body modifiers.
@@ -1226,6 +1241,12 @@ abstract class ConstructorElement extends FunctionElement
   /// constructor so its immediate redirection target is `null`.
   ConstructorElement get immediateRedirectionTarget;
 
+  bool get isCyclicRedirection;
+
+  /// The prefix of the immediateRedirectionTarget, if it is deferred.
+  /// [null] if it is not deferred.
+  PrefixElement get redirectionDeferredPrefix;
+
   /// Is `true` if this constructor is a redirecting generative constructor.
   bool get isRedirectingGenerative;
 
@@ -1249,6 +1270,13 @@ abstract class ConstructorElement extends FunctionElement
   /// Class `E` has a synthesized constructor, `E.c`, whose defining constructor
   /// is `C.c`.
   ConstructorElement get definingConstructor;
+
+  /// The constant constructor defining the binding of fields if `const`,
+  /// `null` otherwise.
+  ConstantConstructor get constantConstructor;
+
+  /// `true` if this constructor is either `bool.fromEnviroment`
+  bool get isFromEnvironmentConstructor;
 
   /// Use [enclosingClass] instead.
   @deprecated
@@ -1302,15 +1330,11 @@ abstract class TypeDeclarationElement extends Element implements AstElement {
 
   bool get isResolved;
 
-  int get resolutionState;
-
   void ensureResolved(Compiler compiler);
 }
 
 abstract class ClassElement extends TypeDeclarationElement
     implements ScopeContainerElement {
-  int get id;
-
   /// The length of the longest inheritance path from [:Object:].
   int get hierarchyDepth;
 
@@ -1341,7 +1365,6 @@ abstract class ClassElement extends TypeDeclarationElement
   ClassElement get declaration;
   ClassElement get implementation;
 
-  int get supertypeLoadState;
   String get nativeTagInfo;
 
   /// `true` if this class is an enum declaration.
@@ -1373,15 +1396,12 @@ abstract class ClassElement extends TypeDeclarationElement
   /// Returns `true` if the class hierarchy for this class contains errors.
   bool get hasIncompleteHierarchy;
 
-  void addMember(Element element, DiagnosticListener listener);
-  void addToScope(Element element, DiagnosticListener listener);
-
   void addBackendMember(Element element);
   void reverseBackendMembers();
 
   Element lookupMember(String memberName);
-  Element lookupSelector(Selector selector);
-  Element lookupSuperSelector(Selector selector);
+  Element lookupByName(Name memberName);
+  Element lookupSuperByName(Name memberName);
 
   Element lookupLocalMember(String memberName);
   Element lookupBackendMember(String memberName);
@@ -1405,8 +1425,6 @@ abstract class ClassElement extends TypeDeclarationElement
   void forEachStaticField(void f(ClassElement enclosingClass, Element field));
 
   void forEachBackendMember(void f(Element member));
-
-  List<DartType> computeTypeParameters(Compiler compiler);
 
   /// Looks up the member [name] in this class.
   Member lookupClassMember(Name name);

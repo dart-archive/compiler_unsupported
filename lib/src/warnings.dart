@@ -121,6 +121,28 @@ class MessageKind {
   static const MessageKind MEMBER_NOT_FOUND = const MessageKind(
       "No member named '#{memberName}' in class '#{className}'.");
 
+  static const MessageKind AWAIT_MEMBER_NOT_FOUND = const MessageKind(
+      "No member named 'await' in class '#{className}'.",
+      howToFix: "Did you mean to add the 'async' marker "
+                "to '#{functionName}'?",
+      examples: const ["""
+class A {
+  m() => await -3;
+}
+main() => new A().m();
+"""]);
+
+  static const MessageKind AWAIT_MEMBER_NOT_FOUND_IN_CLOSURE =
+      const MessageKind("No member named 'await' in class '#{className}'.",
+      howToFix: "Did you mean to add the 'async' marker "
+                "to the enclosing function?",
+      examples: const ["""
+class A {
+  m() => () => await -3;
+}
+main() => new A().m();
+"""]);
+
   static const MessageKind METHOD_NOT_FOUND = const MessageKind(
       "No method named '#{memberName}' in class '#{className}'.");
 
@@ -129,6 +151,9 @@ class MessageKind {
 
   static const MessageKind SETTER_NOT_FOUND = const MessageKind(
       "No setter named '#{memberName}' in class '#{className}'.");
+
+  static const MessageKind SETTER_NOT_FOUND_IN_SUPER = const MessageKind(
+      "No setter named '#{name}' in superclass of '#{className}'.");
 
   static const MessageKind GETTER_NOT_FOUND = const MessageKind(
       "No getter named '#{memberName}' in class '#{className}'.");
@@ -142,6 +167,9 @@ class MessageKind {
   static const MessageKind NO_INSTANCE_AVAILABLE = const MessageKind(
       "'#{name}' is only available in instance methods.");
 
+  static const MessageKind NO_THIS_AVAILABLE = const MessageKind(
+      "'this' is only available in instance methods.");
+
   static const MessageKind PRIVATE_ACCESS = const MessageKind(
       "'#{name}' is declared private within library "
       "'#{libraryName}'.");
@@ -154,6 +182,35 @@ class MessageKind {
 
   static const MessageKind CANNOT_RESOLVE = const MessageKind(
       "Cannot resolve '#{name}'.");
+
+  static const MessageKind CANNOT_RESOLVE_AWAIT = const MessageKind(
+      "Cannot resolve '#{name}'.",
+      howToFix: "Did you mean to add the 'async' marker "
+                "to '#{functionName}'?",
+      examples: const [
+          "main() => await -3;",
+          "foo() => await -3; main() => foo();"
+      ]);
+
+  static const MessageKind CANNOT_RESOLVE_AWAIT_IN_CLOSURE = const MessageKind(
+      "Cannot resolve '#{name}'.",
+      howToFix: "Did you mean to add the 'async' marker "
+                "to the enclosing function?",
+      examples: const [
+          "main() { (() => await -3)(); }",
+      ]);
+
+  static const MessageKind CANNOT_RESOLVE_IN_INITIALIZER = const MessageKind(
+      "Cannot resolve '#{name}'. It would be implicitly looked up on this "
+      "instance, but instances are not available in initializers.",
+      howToFix: "Try correcting the unresolved reference or move the "
+          "initialization to a constructor body.",
+      examples: const ["""
+class A {
+  var test = unresolvedName;
+}
+main() => new A();
+"""]);
 
   static const MessageKind CANNOT_RESOLVE_CONSTRUCTOR = const MessageKind(
       "Cannot resolve constructor '#{constructorName}'.");
@@ -423,6 +480,22 @@ main() => new C();"""]);
 
   static const MessageKind CONST_CALLS_NON_CONST = const MessageKind(
       "'const' constructor cannot call a non-const constructor.");
+
+  static const MessageKind CONST_CALLS_NON_CONST_FOR_IMPLICIT =
+      const MessageKind(
+          "'const' constructor cannot call a non-const constructor. "
+          "This constructor has an implicit call to a "
+          "super non-const constructor.",
+          howToFix: "Try making the super constructor const.",
+          examples: const ["""
+class C {
+  C(); // missing const
+}
+class D extends C {
+  final d;
+  const D(this.d);
+}
+main() => new D(0);"""]);
 
   static const MessageKind CONST_CONSTRUCTOR_WITH_NONFINAL_FIELDS =
       const MessageKind(
@@ -1114,8 +1187,21 @@ main() => new C();"""]);
   static const MessageKind ASSIGNING_METHOD = const MessageKind(
       "Cannot assign a value to a method.");
 
+  static const MessageKind ASSIGNING_METHOD_IN_SUPER = const MessageKind(
+      "Cannot assign a value to method '#{name}' "
+      "in superclass '#{superclassName}'.");
+
   static const MessageKind ASSIGNING_TYPE = const MessageKind(
       "Cannot assign a value to a type.");
+
+  static const MessageKind IF_NULL_ASSIGNING_TYPE = const MessageKind(
+      "Cannot assign a value to a type. Note that types are never null, "
+      "so this ??= assignment has no effect.",
+      howToFix: "Try removing the '??=' assignment.",
+      options: const ['--enable-null-aware-operators'],
+      examples: const [
+          "class A {} main() { print(A ??= 3);}",
+      ]);
 
   static const MessageKind VOID_NOT_ALLOWED = const MessageKind(
       "Type 'void' can't be used here because it isn't a return type.",
@@ -1498,6 +1584,38 @@ main() {}
 // 'addAll' is misspelled.
 @MirrorsUsed(targets: 'dart.core.List.addAl')
 import 'dart:mirrors';
+
+main() {}
+"""]);
+
+  static const MessageKind INVALID_URI = const MessageKind(
+      "'#{uri}' is not a valid URI.",
+      howToFix: DONT_KNOW_HOW_TO_FIX,
+      examples: const [
+        """
+// can't have a '[' in a URI
+import '../../Udyn[mic ils/expect.dart';
+
+main() {}
+"""]);
+
+  static const MessageKind INVALID_PACKAGE_URI = const MessageKind(
+      "'#{uri}' is not a valid package URI (#{exception}).",
+      howToFix: DONT_KNOW_HOW_TO_FIX,
+      examples: const [
+        """
+// can't have a 'top level' package URI
+import 'package:foo.dart';
+
+main() {}
+""", """
+// can't have 2 slashes
+import 'package://foo/foo.dart';
+
+main() {}
+""", """
+// package name must be a valid identifier
+import 'package:not-valid/foo.dart';
 
 main() {}
 """]);
@@ -1899,6 +2017,10 @@ main() => r\"\"\"
   static const MessageKind UNTERMINATED_TOKEN = const MessageKind(
       // This is a fall-back message that shouldn't happen.
       "Incomplete token.");
+
+  static const MessageKind NULL_AWARE_OPERATORS_DISABLED = const MessageKind(
+      "Null-aware operators like '#{operator}' are currently experimental. "
+      "You can enable them using the --enable-null-aware-operators flag.");
 
   static const MessageKind EXPONENT_MISSING = const MessageKind(
       "Numbers in exponential notation should always contain an exponent"

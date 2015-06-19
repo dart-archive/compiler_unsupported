@@ -5,7 +5,6 @@
 library dart2js.ir_tracer;
 
 import 'dart:async' show EventSink;
-
 import 'cps_ir_nodes.dart' as cps_ir hide Function;
 import '../tracer.dart';
 
@@ -21,8 +20,7 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
 
   visit(cps_ir.Node node) => node.accept(this);
 
-  void traceGraph(String name, cps_ir.RootNode node) {
-    if (node.isEmpty) return; // Don't bother printing an empty trace.
+  void traceGraph(String name, cps_ir.FunctionDefinition node) {
     tag("cfg", () {
       printProperty("name", name);
 
@@ -43,27 +41,7 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
   // Temporary field used during tree walk
   Names names;
 
-  visitFieldDefinition(cps_ir.FieldDefinition node) {
-    unexpectedNode(node);
-  }
-
   visitFunctionDefinition(cps_ir.FunctionDefinition node) {
-    unexpectedNode(node);
-  }
-
-  visitConstructorDefinition(cps_ir.ConstructorDefinition node) {
-    unexpectedNode(node);
-  }
-
-  visitFieldInitializer(cps_ir.FieldInitializer node) {
-    unexpectedNode(node);
-  }
-
-  visitSuperInitializer(cps_ir.SuperInitializer node) {
-    unexpectedNode(node);
-  }
-
-  visitBody(cps_ir.Body node) {
     unexpectedNode(node);
   }
 
@@ -204,6 +182,17 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     printStmt(dummy, "ConcatenateStrings ($args) $kont");
   }
 
+  visitThrow(cps_ir.Throw node) {
+    String dummy = names.name(node);
+    String value = formatReference(node.value);
+    printStmt(dummy, "Throw $value");
+  }
+
+  visitRethrow(cps_ir.Rethrow node) {
+    String dummy = names.name(node);
+    printStmt(dummy, "Rethrow");
+  }
+
   visitLiteralList(cps_ir.LiteralList node) {
     String dummy = names.name(node);
     String values = node.values.map(formatReference).join(', ');
@@ -225,8 +214,9 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     String dummy = names.name(node);
     String operator = node.isTypeTest ? 'is' : 'as';
     List<String> entries = new List<String>();
-    String receiver = formatReference(node.receiver);
-    printStmt(dummy, "TypeOperator ($operator $receiver ${node.type})");
+    String value = formatReference(node.value);
+    String kont = formatReference(node.continuation);
+    printStmt(dummy, "TypeOperator ($operator $value ${node.type}) $kont");
   }
 
   visitInvokeContinuation(cps_ir.InvokeContinuation node) {
@@ -252,13 +242,6 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     visit(node.body);
   }
 
-  visitDeclareFunction(cps_ir.DeclareFunction node) {
-    String dummy = names.name(node);
-    String variable = names.name(node.variable);
-    printStmt(dummy, 'DeclareFunction $variable');
-    visit(node.body);
-  }
-
   String formatReference(cps_ir.Reference ref) {
     cps_ir.Definition target = ref.definition;
     if (target is cps_ir.Continuation && target.isReturnContinuation) {
@@ -271,7 +254,7 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
   String formatPrimitive(cps_ir.Primitive p) => visit(p);
 
   visitConstant(cps_ir.Constant node) {
-    return "Constant ${node.expression.value.toStructuredString()}";
+    return "Constant ${node.value.toStructuredString()}";
   }
 
   visitParameter(cps_ir.Parameter node) {
@@ -305,6 +288,25 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     return 'GetField($object.$field)';
   }
 
+  visitGetStatic(cps_ir.GetStatic node) {
+    String element = node.element.name;
+    return 'GetStatic($element)';
+  }
+
+  visitSetStatic(cps_ir.SetStatic node) {
+    String dummy = names.name(node);
+    String element = node.element.name;
+    String value = formatReference(node.value);
+    printStmt(dummy, 'SetStatic $element = $value');
+    visit(node.body);
+  }
+
+  visitGetLazyStatic(cps_ir.GetLazyStatic node) {
+    String dummy = names.name(node);
+    String kont = formatReference(node.continuation);
+    printStmt(dummy, "GetLazyStatic $kont");
+  }
+
   visitCreateBox(cps_ir.CreateBox node) {
     return 'CreateBox';
   }
@@ -327,10 +329,6 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     return "Interceptor(${formatReference(node.input)})";
   }
 
-  visitReifyTypeVar(cps_ir.ReifyTypeVar node) {
-    return "ReifyTypeVar ${node.typeVariable.name}";
-  }
-
   visitCreateFunction(cps_ir.CreateFunction node) {
     return "CreateFunction ${node.definition.element.name}";
   }
@@ -340,21 +338,28 @@ class IRTracer extends TracerUtil implements cps_ir.Visitor {
     return 'GetMutableVariable $variable';
   }
 
-  @override
   visitReadTypeVariable(cps_ir.ReadTypeVariable node) {
     return "ReadTypeVariable ${node.variable.element} "
         "${formatReference(node.target)}";
   }
 
-  @override
   visitReifyRuntimeType(cps_ir.ReifyRuntimeType node) {
     return "ReifyRuntimeType ${formatReference(node.value)}";
   }
 
-  @override
   visitTypeExpression(cps_ir.TypeExpression node) {
     return "TypeExpression ${node.dartType} "
         "${node.arguments.map(formatReference).join(', ')}";
+  }
+
+  visitNonTailThrow(cps_ir.NonTailThrow node) {
+    String value = formatReference(node.value);
+    return "NonTailThrow($value)";
+  }
+
+  visitCreateInvocationMirror(cps_ir.CreateInvocationMirror node) {
+    String args = node.arguments.map(formatReference).join(', ');
+    return "CreateInvocationMirror(${node.selector.name}, $args)";
   }
 }
 
@@ -431,31 +436,10 @@ class BlockCollector implements cps_ir.Visitor {
 
   visit(cps_ir.Node node) => node.accept(this);
 
-  visitFieldDefinition(cps_ir.FieldDefinition node) {
-    visit(node.body);
-  }
-
   visitFunctionDefinition(cps_ir.FunctionDefinition node) {
-    visit(node.body);
-  }
-
-  visitConstructorDefinition(cps_ir.ConstructorDefinition node) {
-    node.initializers.forEach(visit);
-    visit(node.body);
-  }
-
-  visitBody(cps_ir.Body node) {
     currentBlock = new Block(names.name(node), [], node.body);
     entries.add(currentBlock);
     visit(node.body);
-  }
-
-  visitFieldInitializer(cps_ir.FieldInitializer node) {
-    visit(node.body);
-  }
-
-  visitSuperInitializer(cps_ir.SuperInitializer node) {
-    node.arguments.forEach(visit);
   }
 
   visitLetPrim(cps_ir.LetPrim exp) {
@@ -507,6 +491,12 @@ class BlockCollector implements cps_ir.Visitor {
     addEdgeToContinuation(exp.continuation);
   }
 
+  visitThrow(cps_ir.Throw exp) {
+  }
+
+  visitRethrow(cps_ir.Rethrow exp) {
+  }
+
   visitSetMutableVariable(cps_ir.SetMutableVariable exp) {
     visit(exp.body);
   }
@@ -515,8 +505,12 @@ class BlockCollector implements cps_ir.Visitor {
     visit(exp.body);
   }
 
-  visitDeclareFunction(cps_ir.DeclareFunction exp) {
+  visitSetStatic(cps_ir.SetStatic exp) {
     visit(exp.body);
+  }
+
+  visitGetLazyStatic(cps_ir.GetLazyStatic exp) {
+    addEdgeToContinuation(exp.continuation);
   }
 
   visitBranch(cps_ir.Branch exp) {
@@ -556,9 +550,6 @@ class BlockCollector implements cps_ir.Visitor {
   visitConstant(cps_ir.Constant node) {
     unexpectedNode(node);
   }
-  visitReifyTypeVar(cps_ir.ReifyTypeVar node) {
-    unexpectedNode(node);
-  }
   visitCreateFunction(cps_ir.CreateFunction node) {
     unexpectedNode(node);
   }
@@ -572,6 +563,9 @@ class BlockCollector implements cps_ir.Visitor {
     unexpectedNode(node);
   }
   visitGetField(cps_ir.GetField node) {
+    unexpectedNode(node);
+  }
+  visitGetStatic(cps_ir.GetStatic node) {
     unexpectedNode(node);
   }
   visitCreateBox(cps_ir.CreateBox node) {
@@ -590,18 +584,23 @@ class BlockCollector implements cps_ir.Visitor {
     unexpectedNode(node);
   }
 
-  @override
   visitReadTypeVariable(cps_ir.ReadTypeVariable node) {
     unexpectedNode(node);
   }
 
-  @override
   visitReifyRuntimeType(cps_ir.ReifyRuntimeType node) {
     unexpectedNode(node);
   }
 
-  @override
   visitTypeExpression(cps_ir.TypeExpression node) {
+    unexpectedNode(node);
+  }
+
+  visitNonTailThrow(cps_ir.NonTailThrow node) {
+    unexpectedNode(node);
+  }
+
+  visitCreateInvocationMirror(cps_ir.CreateInvocationMirror node) {
     unexpectedNode(node);
   }
 }

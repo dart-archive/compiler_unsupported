@@ -50,6 +50,8 @@ class ModelEmitter {
 
   static const String deferredExtension = "part.js";
 
+  static const String typeNameProperty = r"builtin$cls";
+
   ModelEmitter(Compiler compiler, Namer namer, this.nativeEmitter)
       : this.compiler = compiler,
         this.namer = namer {
@@ -64,8 +66,12 @@ class ModelEmitter {
   }
 
   js.Expression generateEmbeddedGlobalAccess(String global) {
-    // TODO(floitsch): We should not use "init" for globals.
-    return js.js("init.$global");
+    return js.js(generateEmbeddedGlobalAccessString(global));
+  }
+
+  String generateEmbeddedGlobalAccessString(String global) {
+    // TODO(floitsch): don't use 'init' as global embedder storage.
+    return 'init.$global';
   }
 
   bool isConstantInlinedOrAlreadyEmitted(ConstantValue constant) {
@@ -132,7 +138,10 @@ class ModelEmitter {
     // deferred hash (which depends on the output) when emitting the main
     // fragment.
     fragments.skip(1).forEach((DeferredFragment deferredUnit) {
-      js.Expression ast = emitDeferredFragment(deferredUnit, program.holders);
+      List<js.Expression> types =
+          program.metadataTypes[deferredUnit.outputUnit];
+      js.Expression ast = emitDeferredFragment(types, deferredUnit,
+                                               program.holders);
       String code = js.prettyPrint(ast, compiler).getText();
       totalSize += code.length;
       compiler.outputProvider(deferredUnit.outputFileName, deferredExtension)
@@ -151,13 +160,21 @@ class ModelEmitter {
     return totalSize;
   }
 
-  js.LiteralString unparse(Compiler compiler, js.Node value) {
+  /// Unparses the given [value].
+  ///
+  /// Pretty-prints the given [value] and, if [protectForEval] is
+  /// true, wraps the resulting string in parenthesis. The result is escaped
+  /// and returned.
+  js.LiteralString unparse(Compiler compiler, js.Node value,
+                           {bool protectForEval: true}) {
     String text = js.prettyPrint(value, compiler).getText();
-    if (value is js.Fun) text = '($text)';
-    if (value is js.LiteralExpression &&
-        (value.template.startsWith("function ") ||
-         value.template.startsWith("{"))) {
-      text = '($text)';
+    if (protectForEval) {
+      if (value is js.Fun) text = '($text)';
+      if (value is js.LiteralExpression &&
+      (value.template.startsWith("function ") ||
+      value.template.startsWith("{"))) {
+        text = '($text)';
+      }
     }
     return js.js.escapedString(text);
   }
@@ -192,6 +209,7 @@ class ModelEmitter {
            backend.emitter.staticFunctionAccess(backend.getCyclicThrowHelper()),
        'outputContainsConstantList': program.outputContainsConstantList,
        'embeddedGlobals': emitEmbeddedGlobals(program),
+       'readMetadataTypeFunction': readMetadataTypeFunction,
        'staticNonFinals':
             emitStaticNonFinalFields(fragment.staticNonFinalFields),
        'operatorIsPrefix': js.string(namer.operatorIsPrefix),
@@ -384,15 +402,19 @@ class ModelEmitter {
     globals.add(new js.Property(js.string(IS_HUNK_INITIALIZED),
                                 isHunkInitializedFunction));
 
+    js.Expression typesAccess = generateEmbeddedGlobalAccess(TYPES);
+
     /// See [emitEmbeddedGlobalsForDeferredLoading] for the format of the
     /// deferred hunk.
     js.Expression initializeLoadedHunkFunction =
         js.js("""
           function(hash) {
             var hunk = $deferredInitializersGlobal[hash];
-            $setupProgramName(hunk[0]);
+            $setupProgramName(hunk[0], #typesAccess.length);
             eval(hunk[1]);
-          }""");
+            var deferredTypes = eval(hunk[2]);
+            #typesAccess.push.apply(#typesAccess, deferredTypes);
+          }""", {'typesAccess': typesAccess});
 
     globals.add(new js.Property(js.string(INITIALIZE_LOADED_HUNK),
                                 initializeLoadedHunkFunction));
@@ -408,24 +430,84 @@ class ModelEmitter {
     return new js.Property(js.string(GET_TYPE_FROM_NAME), function);
   }
 
+  static final String readMetadataTypeName = "readMetadataType";
+
+  js.Statement get readMetadataTypeFunction {
+    // Types are non-evaluated and must be compiled at first use.
+    // Compiled strings are guaranteed not to be strings, and it's thus safe
+    // to use a type-test to determine if a type has already been compiled.
+    return js.js.statement('''function $readMetadataTypeName(index) {
+      var type = #typesAccess[index];
+      if (typeof type == 'string') {
+        type = expressionCompile(type);
+        #typesAccess[index] = type;
+      }
+      return type;
+    }''', {"typesAccess": generateEmbeddedGlobalAccess(TYPES)});
+  }
+
+  js.Template get templateForReadType {
+    // TODO(floitsch): make sure that no local variable shadows the access to
+    // the readMetadataType function.
+    return js.js.expressionTemplateFor('$readMetadataTypeName(#)');
+  }
+
+  static final String readMetadataName = "readLazyMetadata";
+  static final String lazyMetadataName = "lazy_$METADATA";
+
+  js.Statement get readMetadataFunction {
+    // Types are non-evaluated and must be compiled at first use.
+    // Compiled strings are guaranteed not to be strings, and it's thus safe
+    // to use a type-test to determine if a type has already been compiled.
+    return js.js.statement('''function $readMetadataName(index) {
+      var lazyMetadata = #lazyMetadataAccess[index];
+      if (typeof lazyMetadata == 'string') {
+        #metadataAccess[index] = expressionCompile(lazyMetadata);
+        #lazyMetadataAccess[index] = null;
+      }
+      return #metadataAccess[index];
+    }''', {
+      "lazyMetadataAccess": generateEmbeddedGlobalAccess(lazyMetadataName),
+      "metadataAccess": generateEmbeddedGlobalAccess(METADATA)
+    });
+  }
+
+  js.Template get templateForReadMetadata {
+    // TODO(floitsch): make sure that no local variable shadows the access to
+    // the readMetadata function.
+    return js.js.expressionTemplateFor('$readMetadataName(#)');
+  }
+
   List<js.Property> emitMetadata(Program program) {
+    // Unparses all given js-expressions (suitable for `expressionCompile`) and
+    // returns the result in a js-array.
+    // If the given [expressions] is null returns the empty js-array.
+    js.ArrayInitializer unparseExpressions(List<js.Expression> expressions) {
+      if (expressions == null) expressions = <js.Expression>[];
+      List<js.LiteralString> unparsedExpressions = expressions
+          .map((expr) => unparse(compiler, expr, protectForEval: false))
+          .toList();
+      return new js.ArrayInitializer(unparsedExpressions);
+    }
 
     List<js.Property> metadataGlobals = <js.Property>[];
 
-    js.Property createGlobal(List<String> list, String global) {
-      String listAsString = "[${list.join(",")}]";
-      js.Expression metadata =
-                js.js.uncachedExpressionTemplate(listAsString).instantiate([]);
-      return new js.Property(js.string(global), metadata);
-    }
+    js.ArrayInitializer unparsedMetadata = unparseExpressions(program.metadata);
+    metadataGlobals.add(new js.Property(js.string(lazyMetadataName),
+                                        unparsedMetadata));
+    metadataGlobals.add(new js.Property(js.string(METADATA),
+                                        new js.ArrayInitializer([])));
 
-    metadataGlobals.add(createGlobal(program.metadata, METADATA));
-    metadataGlobals.add(createGlobal(program.metadataTypes, TYPES));
+    List<js.Expression> types =
+        program.metadataTypes[program.fragments.first.outputUnit];
+    metadataGlobals.add(new js.Property(js.string(TYPES),
+                                        unparseExpressions(types)));
 
     return metadataGlobals;
   }
 
-  js.Expression emitDeferredFragment(DeferredFragment fragment,
+  js.Expression emitDeferredFragment(List<js.Expression> types,
+                                     DeferredFragment fragment,
                                      List<Holder> holders) {
     // TODO(floitsch): initialize eager classes.
     // TODO(floitsch): the hash must depend on the output.
@@ -436,19 +518,26 @@ class ModelEmitter {
 
     deferredCode.add(
         emitLazilyInitializedStatics(fragment.staticLazilyInitializedFields));
-
     deferredCode.add(emitConstants(fragment.constants));
 
     js.ArrayInitializer deferredArray = new js.ArrayInitializer(deferredCode);
 
     // This is the code that must be evaluated after all deferred classes have
     // been setup.
-    js.Statement immediateCode =
-        emitEagerClassInitializations(fragment.libraries);
+    js.Statement immediateCode = new js.Block([
+        emitStaticNonFinalFields(fragment.staticNonFinalFields),
+        emitEagerClassInitializations(fragment.libraries)]);
+
 
     js.LiteralString immediateString = unparse(compiler, immediateCode);
+
+    js.Expression deferredTypes = (types == null)
+        ? js.string("[]")
+        : unparse(compiler, new js.ArrayInitializer(types));
+
     js.ArrayInitializer hunk =
-        new js.ArrayInitializer([deferredArray, immediateString]);
+        new js.ArrayInitializer([deferredArray, immediateString,
+                                 deferredTypes]);
 
     return js.js("$deferredInitializersGlobal[$hash] = #", hunk);
   }
@@ -663,7 +752,7 @@ class ModelEmitter {
   /// * [DartMethod.optionalParameterDefaultValues]
 
   static final String parseFunctionDescriptorBoilerplate = r"""
-function parseFunctionDescriptor(proto, name, descriptor) {
+function parseFunctionDescriptor(proto, name, descriptor, typesOffset) {
   if (descriptor instanceof Array) {
     // 'pos' points to the last read entry.
     var f, pos = -1;
@@ -685,6 +774,9 @@ function parseFunctionDescriptor(proto, name, descriptor) {
       isIntercepted = descriptor[++pos];
       tearOffName = descriptor[++pos];
       reflectionInfo = descriptor[++pos];
+      if (typeof reflectionInfo == "number") {
+        reflectionInfo = reflectionInfo + typesOffset;
+      }
     }
 
     // We iterate in blocks of 3 but have to stop before we reach the (optional)
@@ -839,19 +931,20 @@ function parseFunctionDescriptor(proto, name, descriptor) {
   // Counter to generate unique names for tear offs.
   var functionCounter = 0;
 
-  function $setupProgramName(program) {
+  function $setupProgramName(program, typesOffset) {
     for (var i = 0; i < program.length - 2; i++) {
-      setupLibrary(program[i]);
+      setupLibrary(program[i], typesOffset);
     }
     setupLazyStatics(program[i]);
     setupConstants(program[i + 1]);
   }
 
-  function setupLibrary(library) {
+  function setupLibrary(library, typesOffset) {
     var statics = library[0];
     for (var i = 0; i < statics.length; i += 3) {
       var holderIndex = statics[i + 1];
-      setupStatic(statics[i], holders[holderIndex], statics[i + 2]);
+      setupStatic(statics[i], holders[holderIndex], statics[i + 2],
+                  typesOffset);
     }
 
     var classes = library[1];
@@ -876,7 +969,7 @@ function parseFunctionDescriptor(proto, name, descriptor) {
       }
 
       holdersMap[name] = holders[holderIndex];
-      setupClass(name, holders[holderIndex], cls);
+      setupClass(name, holders[holderIndex], cls, typesOffset);
     }
   }
 
@@ -902,7 +995,7 @@ function parseFunctionDescriptor(proto, name, descriptor) {
     }
   }
 
-  function setupStatic(name, holder, descriptor) {
+  function setupStatic(name, holder, descriptor, typesOffset) {
     if (typeof descriptor == 'string') {
       holder[name] = function() {
         if (descriptor == null) {
@@ -918,7 +1011,7 @@ function parseFunctionDescriptor(proto, name, descriptor) {
     } else {
       // Parse the tear off information and generate compile handlers.
       // TODO(herhut): Share parser with instance methods.      
-      function compileAllStubs() {
+      function compileAllStubs(typesOffset) {
         var funs;
         var fun = compile(name, descriptor[0]);
         fun[#callName] = descriptor[1];
@@ -936,8 +1029,12 @@ function parseFunctionDescriptor(proto, name, descriptor) {
         }
         if (descriptor[2] != null) {  // tear-off name.
           // functions, reflectionInfo, isStatic, name, isIntercepted.
+          var reflectionInfo = descriptor[3];
+          if (typeof reflectionInfo == "number") {
+            reflectionInfo = reflectionInfo + typesOffset;
+          }
           holder[descriptor[2]] = 
-              tearOff(funs, descriptor[3], true, name, false);
+              tearOff(funs, reflectionInfo, true, name, false);
         }
         if (pos < descriptor.length) {
           fun[#argumentCount] = descriptor[pos];
@@ -945,25 +1042,25 @@ function parseFunctionDescriptor(proto, name, descriptor) {
         }
       }
 
-      function setupCompileAllAndDelegateStub(name) {
+      function setupCompileAllAndDelegateStub(name, typesOffset) {
         holder[name] = function() {
           // The descriptor is null if we already compiled this function. This
           // happens when we have calls to the static as arguments to the
           // static: `foo(foo(499))`;
           if (descriptor != null) {
-            compileAllStubs();
+            compileAllStubs(typesOffset);
             descriptor = null;  // GC the descriptor.
           }
           return holder[name].apply(this, arguments);
         };
       }
 
-      setupCompileAllAndDelegateStub(name);
+      setupCompileAllAndDelegateStub(name, typesOffset);
       for (var pos = 4; pos < descriptor.length; pos += 3) {
-        setupCompileAllAndDelegateStub(descriptor[pos]);
+        setupCompileAllAndDelegateStub(descriptor[pos], typesOffset);
       }
       if (descriptor[2] != null) {  // tear-off name.
-        setupCompileAllAndDelegateStub(descriptor[2])
+        setupCompileAllAndDelegateStub(descriptor[2], typesOffset)
       }
     }
   }
@@ -1006,11 +1103,11 @@ function parseFunctionDescriptor(proto, name, descriptor) {
     };
   }
 
-  function setupClass(name, holder, descriptor) {
+  function setupClass(name, holder, descriptor, typesOffset) {
     var patch = function() {
       if (patch.ensureResolved == patch) {
         // We have not yet been compiled.
-        var constructor = compileConstructor(name, descriptor);
+        var constructor = compileConstructor(name, descriptor, typesOffset);
         holder[name] = constructor;
         name = holder = descriptor = null;  // GC the captured arguments.
         // Make sure we can invoke 'ensureResolved' multiple times on the patch
@@ -1039,7 +1136,7 @@ function parseFunctionDescriptor(proto, name, descriptor) {
 
   #parseFunctionDescriptor;
 
-  function compileConstructor(name, descriptor) {
+  function compileConstructor(name, descriptor, typesOffset) {
     descriptor = compile(name, descriptor);
     var prototype = determinePrototype(descriptor);
     var constructor;
@@ -1062,10 +1159,11 @@ function parseFunctionDescriptor(proto, name, descriptor) {
     }
 
     for (var i = functionsIndex; i < descriptor.length; i += 2) {
-      parseFunctionDescriptor(prototype, descriptor[i], descriptor[i + 1]);
+      parseFunctionDescriptor(prototype, descriptor[i], descriptor[i + 1],
+                              typesOffset);
     }
 
-    constructor.builtin\$cls = name;  // Needed for RTI.
+    constructor.$typeNameProperty = name;  // Needed for RTI.
     constructor.prototype = prototype;
     prototype[#operatorIsPrefix + name] = constructor;
     prototype.constructor = constructor;
@@ -1126,10 +1224,17 @@ function parseFunctionDescriptor(proto, name, descriptor) {
     }
   }
 
-  $setupProgramName(program);
+  $setupProgramName(program, 0);
 
   // Initialize globals.
   #embeddedGlobals;
+
+  function expressionCompile(__s__) {
+    'use strict';
+    return eval('(' + __s__ + ')');
+  }
+
+  #readMetadataTypeFunction;
 
   // TODO(floitsch): this order means that native classes may not be
   // referenced from constants. I'm mostly afraid of things like using them as

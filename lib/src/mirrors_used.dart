@@ -4,6 +4,8 @@
 
 library dart2js.mirrors_used;
 
+import 'compile_time_constants.dart' show
+    ConstantCompiler;
 import 'constants/expressions.dart';
 import 'constants/values.dart' show
     ConstantValue,
@@ -20,7 +22,6 @@ import 'dart_types.dart' show
 import 'dart2jslib.dart' show
     Compiler,
     CompilerTask,
-    ConstantCompiler,
     MessageKind,
     TreeElements,
     invariant;
@@ -136,7 +137,8 @@ class MirrorUsageAnalyzerTask extends CompilerTask {
       if (named == null) continue;
       ConstantCompiler constantCompiler = compiler.resolver.constantCompiler;
       ConstantValue value =
-          constantCompiler.compileNode(named.expression, mapping).value;
+          constantCompiler.getConstantValue(
+              constantCompiler.compileNode(named.expression, mapping));
 
       MirrorUsageBuilder builder =
           new MirrorUsageBuilder(
@@ -265,10 +267,11 @@ class MirrorUsageAnalyzer {
     List<MirrorUsage> result = <MirrorUsage>[];
     for (MetadataAnnotation metadata in tag.metadata) {
       metadata.ensureResolved(compiler);
-      Element element =
-          metadata.constant.value.getType(compiler.coreTypes).element;
+      ConstantValue value =
+          compiler.constants.getConstantValue(metadata.constant);
+      Element element = value.getType(compiler.coreTypes).element;
       if (element == compiler.mirrorsUsedClass) {
-        result.add(buildUsage(metadata.constant.value));
+        result.add(buildUsage(value));
       }
     }
     return result;
@@ -328,7 +331,7 @@ class MirrorUsageAnalyzer {
   /// Convert a [constant] to an instance of [MirrorUsage] using information
   /// that was resolved during [MirrorUsageAnalyzerTask.validate].
   MirrorUsage buildUsage(ConstructedConstantValue constant) {
-    Map<Element, ConstantValue> fields = constant.fieldElements;
+    Map<Element, ConstantValue> fields = constant.fields;
     VariableElement symbolsField = compiler.mirrorsUsedClass.lookupLocalMember(
         'symbols');
     VariableElement targetsField = compiler.mirrorsUsedClass.lookupLocalMember(
@@ -567,7 +570,7 @@ class MirrorUsageBuilder {
   Spannable positionOf(ConstantValue constant) {
     Node node;
     elements.forEachConstantNode((Node n, ConstantExpression c) {
-      if (node == null && c.value == constant) {
+      if (node == null && compiler.constants.getConstantValue(c) == constant) {
         node = n;
       }
     });

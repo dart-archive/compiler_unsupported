@@ -37,7 +37,7 @@ class JsTreeBuilder extends Builder {
         identicalFunction,
         identicalSelector,
         <Expression>[getVariableUse(node.left),
-                     getVariableUse(node.right)]);
+                     getVariableUse(node.right)])..isEffectivelyConstant = true;
   }
 
   Expression visitInterceptor(cps_ir.Interceptor node) {
@@ -48,7 +48,7 @@ class JsTreeBuilder extends Builder {
     return new InvokeStatic(
         getInterceptor,
         selector,
-        <Expression>[getVariableUse(node.input)]);
+        <Expression>[getVariableUse(node.input)])..isEffectivelyConstant = true;
   }
 
   Expression visitGetField(cps_ir.GetField node) {
@@ -56,10 +56,11 @@ class JsTreeBuilder extends Builder {
   }
 
   Statement visitSetField(cps_ir.SetField node) {
-    return new SetField(getVariableUse(node.object),
-                        node.field,
-                        getVariableUse(node.value),
-                        visit(node.body));
+    SetField setField =
+        new SetField(getVariableUse(node.object),
+                     node.field,
+                     getVariableUse(node.value));
+    return new ExpressionStatement(setField, visit(node.body));
   }
 
   Expression visitCreateBox(cps_ir.CreateBox node) {
@@ -71,5 +72,10 @@ class JsTreeBuilder extends Builder {
         node.classElement,
         node.arguments.map(getVariableUse).toList(growable: false),
         node.typeInformation.map(getVariableUse).toList(growable: false));
+  }
+
+  Expression visitCreateInvocationMirror(cps_ir.CreateInvocationMirror node) {
+    return new CreateInvocationMirror(node.selector,
+        node.arguments.map(getVariableUse).toList(growable: false));
   }
 }

@@ -117,10 +117,6 @@ class ContainerBuilder extends CodeEmitterHelper {
       expressions.add(stub.code);
       if (member.isInstanceMember) {
         expressions.add(js.string(invocationName));
-      } else {
-        // TOOD(floitsch): Since we know when reading static data versus
-        // instance data, we can eliminate this element.
-        expressions.add(js('null'));
       }
       String callName = stub.callName;
       String callSelectorString = (callName == null) ? 'null' : '"$callName"';
@@ -145,7 +141,7 @@ class ContainerBuilder extends CodeEmitterHelper {
           Iterable<int> metadataIndices =
               parameter.metadata.map((MetadataAnnotation annotation) {
             ConstantValue constant =
-                backend.constants.getConstantForMetadata(annotation).value;
+                backend.constants.getConstantValueForMetadata(annotation);
             backend.constants.addCompileTimeConstantForEmission(constant);
             return task.metadataCollector.reifyMetadata(annotation);
           });

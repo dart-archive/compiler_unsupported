@@ -4,15 +4,24 @@
 
 part of dart2js.semantics_visitor;
 
+/// Interface for bulk handling of a [Node] in a semantic visitor.
+abstract class BulkHandle<R, A> {
+  /// Handle [node] either regardless of semantics or to report that [node] is
+  /// unhandled. [message] contains a message template for the latter case:
+  /// Replace '#' in [message] by `node.toString()` to create a message for the
+  /// error.
+  R bulkHandleNode(Node node, String message, A arg);
+}
+
 /// Mixin that implements all `errorX` methods of [SemanticSendVisitor] by
 /// delegating to a bulk handler.
 ///
 /// Use this mixin to provide a trivial implementation for all `errorX` methods.
-abstract class ErrorBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class ErrorBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleError(Node node, A arg) {
-    return bulkHandleNode(node, "Error expression `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Error expression `#` unhandled.", arg);
   }
 
   @override
@@ -24,558 +33,21 @@ abstract class ErrorBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorAbstractClassConstructorInvoke(
-      NewExpression node,
-      ConstructorElement element,
-      InterfaceType type,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorClassTypeLiteralCompound(
-      Send node,
-      ConstantExpression constant,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorClassTypeLiteralPostfix(
-      Send node,
-      ConstantExpression constant,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorClassTypeLiteralPrefix(
-      Send node,
-      ConstantExpression constant,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorClassTypeLiteralSet(
-      SendSet node,
-      ConstantExpression constant,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorDynamicTypeLiteralCompound(
-      Send node,
-      ConstantExpression constant,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorDynamicTypeLiteralPostfix(
-      Send node,
-      ConstantExpression constant,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorDynamicTypeLiteralPrefix(
-      Send node,
-      ConstantExpression constant,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorDynamicTypeLiteralSet(
-      SendSet node,
-      ConstantExpression constant,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalLocalVariableCompound(
-      Send node,
-      LocalVariableElement
-      variable,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalLocalVariableSet(
-      SendSet node,
-      LocalVariableElement variable,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalParameterCompound(
-      Send node,
-      ParameterElement parameter,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalParameterSet(
-      SendSet node,
-      ParameterElement parameter,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalStaticFieldCompound(
-      Send node,
-      FieldElement field,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalStaticFieldSet(
-      SendSet node,
-      FieldElement field,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalSuperFieldCompound(
-      Send node,
-      FieldElement field,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalSuperFieldSet(
-      SendSet node,
-      FieldElement field,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalTopLevelFieldCompound(
-      Send node,
-      FieldElement field,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorFinalTopLevelFieldSet(
-      SendSet node,
-      FieldElement field,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorLocalFunctionCompound(
-      Send node,
-      LocalFunctionElement function,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorLocalFunctionPostfix(
-      Send node,
-      LocalFunctionElement function,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorLocalFunctionPrefix(
-      Send node,
-      LocalFunctionElement function,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorLocalFunctionSet(
-      SendSet node,
-      LocalFunctionElement function,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorStaticFunctionSet(
-      Send node,
-      MethodElement function,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorStaticGetterSet(
-      SendSet node,
-      FunctionElement getter,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorStaticSetterGet(
-      Send node,
-      FunctionElement setter,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorStaticSetterInvoke(
-      Send node,
-      FunctionElement setter,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorSuperGetterSet(
-      SendSet node,
-      FunctionElement getter,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorSuperMethodSet(
-      Send node,
-      MethodElement method,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorSuperSetterGet(
-      Send node,
-      FunctionElement setter,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorSuperSetterInvoke(
-      Send node,
-      FunctionElement setter,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTopLevelFunctionSet(
-      Send node,
-      MethodElement function,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTopLevelGetterSet(
-      SendSet node,
-      FunctionElement getter,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTopLevelSetterGet(
-      Send node,
-      FunctionElement setter,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTopLevelSetterInvoke(
-      Send node,
-      FunctionElement setter,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypeVariableTypeLiteralCompound(
-      Send node,
-      TypeVariableElement element,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypeVariableTypeLiteralPostfix(
-      Send node,
-      TypeVariableElement element,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypeVariableTypeLiteralPrefix(
-      Send node,
-      TypeVariableElement element,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypeVariableTypeLiteralSet(
-      SendSet node,
-      TypeVariableElement element,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypedefTypeLiteralCompound(
-      Send node,
-      ConstantExpression constant,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypedefTypeLiteralPostfix(
-      Send node,
-      ConstantExpression constant,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypedefTypeLiteralPrefix(
-      Send node,
-      ConstantExpression constant,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorTypedefTypeLiteralSet(
-      SendSet node,
-      ConstantExpression constant,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedCompound(
-      Send node,
-      Element element,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedClassConstructorInvoke(
+  R errorNonConstantConstructorInvoke(
       NewExpression node,
       Element element,
-      MalformedType type,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedConstructorInvoke(
-      NewExpression node,
-      Element constructor,
       DartType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleError(node, arg);
   }
 
   @override
-  R errorUnresolvedGet(
+  R errorUndefinedUnaryExpression(
       Send node,
-      Element element,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedInvoke(
-      Send node,
-      Element element,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedPostfix(
-      Send node,
-      Element element,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedPrefix(
-      Send node,
-      Element element,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedRedirectingFactoryConstructorInvoke(
-       NewExpression node,
-       ConstructorElement constructor,
-       InterfaceType type,
-       NodeList arguments,
-       Selector selector,
-       A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSet(
-      Send node,
-      Element element,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSuperCompoundIndexSet(
-      SendSet node,
-      Element element,
-      Node index,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSuperIndex(
-      Send node,
-      Element function,
-      Node index,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSuperIndexPostfix(
-      Send node,
-      Element function,
-      Node index,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSuperIndexPrefix(
-      Send node,
-      Element function,
-      Node index,
-      IncDecOperator operator,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSuperIndexSet(
-      SendSet node,
-      Element element,
-      Node index,
-      Node rhs,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSuperBinary(
-      Send node,
-      Element element,
-      BinaryOperator operator,
-      Node argument,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
-
-  @override
-  R errorUnresolvedSuperUnary(
-      Send node,
-      UnaryOperator operator,
-      Element element,
+      Operator operator,
+      Node expression,
       A arg) {
     return bulkHandleError(node, arg);
   }
@@ -589,15 +61,6 @@ abstract class ErrorBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandleError(node, arg);
   }
-
-  @override
-  R errorUndefinedUnaryExpression(
-      Send node,
-      Operator operator,
-      Node expression,
-      A arg) {
-    return bulkHandleError(node, arg);
-  }
 }
 
 /// Mixin that implements all `visitXPrefix` methods of [SemanticSendVisitor] by
@@ -605,15 +68,25 @@ abstract class ErrorBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all `visitXPrefix`
 /// methods.
-abstract class PrefixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class PrefixBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandlePrefix(Send node, A arg) {
-    return bulkHandleNode(node, "Prefix expression `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Prefix expression `#` unhandled.", arg);
   }
 
   @override
   R visitDynamicPropertyPrefix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  R visitIfNotNullDynamicPropertyPrefix(
       Send node,
       Node receiver,
       IncDecOperator operator,
@@ -741,6 +214,38 @@ abstract class PrefixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
+  R visitUnresolvedSuperGetterIndexPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterIndexPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPrefix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
   R visitSuperMethodSetterPrefix(
       Send node,
       FunctionElement method,
@@ -788,6 +293,201 @@ abstract class PrefixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandlePrefix(node, arg);
   }
+
+  @override
+  R visitClassTypeLiteralPrefix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitDynamicTypeLiteralPrefix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitLocalFunctionPrefix(
+      Send node,
+      LocalFunctionElement function,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitTypeVariableTypeLiteralPrefix(
+      Send node,
+      TypeVariableElement element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitTypedefTypeLiteralPrefix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitStaticMethodPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitTopLevelMethodPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedPrefix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitFinalLocalVariablePrefix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitFinalParameterPrefix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitFinalStaticFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitFinalSuperFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitSuperMethodPrefix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperPrefix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePrefix(node, arg);
+  }
 }
 
 /// Mixin that implements all `visitXPostfix` methods of [SemanticSendVisitor]
@@ -795,11 +495,11 @@ abstract class PrefixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all `visitXPostfix`
 /// methods.
-abstract class PostfixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class PostfixBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandlePostfix(Send node, A arg) {
-    return bulkHandleNode(node, "Postfix expression `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Postfix expression `#` unhandled.", arg);
   }
 
   @override
@@ -814,6 +514,16 @@ abstract class PostfixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
+  R visitIfNotNullDynamicPropertyPostfix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
   R visitIndexPostfix(
       Send node,
       Node receiver,
@@ -931,6 +641,38 @@ abstract class PostfixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
+  R visitUnresolvedSuperGetterIndexPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterIndexPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPostfix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
   R visitSuperMethodSetterPostfix(
       Send node,
       FunctionElement method,
@@ -978,6 +720,209 @@ abstract class PostfixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandlePostfix(node, arg);
   }
+
+  @override
+  R visitClassTypeLiteralPostfix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitDynamicTypeLiteralPostfix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitLocalFunctionPostfix(
+      Send node,
+      LocalFunctionElement function,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitTypeVariableTypeLiteralPostfix(
+      Send node,
+      TypeVariableElement element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitTypedefTypeLiteralPostfix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitStaticMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  R visitToplevelMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedPostfix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitFinalLocalVariablePostfix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitFinalParameterPostfix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitFinalStaticFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitFinalSuperFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitSuperMethodPostfix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitTopLevelMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperPostfix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return bulkHandlePostfix(node, arg);
+  }
 }
 
 /// Mixin that implements all `visitXCompound` methods of [SemanticSendVisitor]
@@ -985,15 +930,27 @@ abstract class PostfixBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all `xCompound`
 /// methods.
-abstract class CompoundBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class CompoundBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleCompound(Send node, A arg) {
-    return bulkHandleNode(node, "Compound assignment `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Compound assignment `#` unhandled.", arg);
   }
 
   @override
   R visitDynamicPropertyCompound(
+      Send node,
+      Node receiver,
+      AssignmentOperator operator,
+      Node rhs,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyCompound(
       Send node,
       Node receiver,
       AssignmentOperator operator,
@@ -1152,6 +1109,231 @@ abstract class CompoundBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandleCompound(node, arg);
   }
+
+  @override
+  R visitFinalParameterCompound(
+      Send node,
+      ParameterElement parameter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitClassTypeLiteralCompound(
+      Send node,
+      ConstantExpression constant,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitDynamicTypeLiteralCompound(
+      Send node,
+      ConstantExpression constant,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitFinalLocalVariableCompound(
+      Send node,
+      LocalVariableElement
+      variable,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitFinalStaticFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitFinalSuperFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitLocalFunctionCompound(
+      Send node,
+      LocalFunctionElement function,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitTypeVariableTypeLiteralCompound(
+      Send node,
+      TypeVariableElement element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitTypedefTypeLiteralCompound(
+      Send node,
+      ConstantExpression constant,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterCompound(
+      Send node,
+      Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterCompound(
+      Send node,
+      Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterCompound(
+      Send node,
+      MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterCompound(
+      Send node,
+      MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitStaticMethodCompound(
+      Send node,
+      MethodElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitTopLevelMethodCompound(
+      Send node,
+      MethodElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedCompound(
+      Send node,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitSuperFieldFieldCompound(
+      Send node, FieldElement readField,
+      FieldElement writtenField,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitSuperMethodCompound(
+      Send node,
+      FunctionElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperCompound(
+      Send node,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterCompound(
+      Send node, Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterCompound(
+      Send node, MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleCompound(node, arg);
+  }
 }
 
 /// Mixin that implements all `visitXInvoke` methods of [SemanticSendVisitor] by
@@ -1159,11 +1341,11 @@ abstract class CompoundBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all `visitXInvoke`
 /// methods.
-abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class InvokeBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleInvoke(Send node, A arg) {
-    return bulkHandleNode(node, "Invocation `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Invocation `#` unhandled.", arg);
   }
 
   @override
@@ -1171,7 +1353,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1187,11 +1369,21 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
+  R visitIfNotNullDynamicPropertyInvoke(
+      Send node,
+      Node receiver,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
   R visitDynamicTypeLiteralInvoke(
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1211,7 +1403,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       LocalFunctionElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1221,7 +1413,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       LocalVariableElement variable,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1231,7 +1423,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ParameterElement parameter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1241,7 +1433,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1251,7 +1443,17 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       MethodElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitStaticFunctionIncompatibleInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1261,7 +1463,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1271,7 +1473,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1281,7 +1483,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1291,7 +1493,17 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       MethodElement method,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitSuperMethodIncompatibleInvoke(
+      Send node,
+      MethodElement method,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1300,7 +1512,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   R visitThisInvoke(
       Send node,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1319,7 +1531,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1329,7 +1541,17 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       MethodElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitTopLevelFunctionIncompatibleInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1339,7 +1561,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1349,7 +1571,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       TypeVariableElement element,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1359,7 +1581,7 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1369,7 +1591,57 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ConstantExpression constant,
       NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitUnresolvedInvoke(
+      Send node,
+      Element element,
+      NodeList arguments,
       Selector selector,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperInvoke(
+      Send node,
+      Element function,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitStaticSetterInvoke(
+      Send node,
+      FunctionElement setter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitSuperSetterInvoke(
+      Send node,
+      FunctionElement setter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInvoke(node, arg);
+  }
+
+  @override
+  R visitTopLevelSetterInvoke(
+      Send node,
+      FunctionElement setter,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleInvoke(node, arg);
   }
@@ -1380,11 +1652,11 @@ abstract class InvokeBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all `visitXGet`
 /// methods.
-abstract class GetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class GetBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleGet(Node node, A arg) {
-    return bulkHandleNode(node, "Read `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Read `#` unhandled.", arg);
   }
 
   @override
@@ -1397,6 +1669,15 @@ abstract class GetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 
   @override
   R visitDynamicPropertyGet(
+      Send node,
+      Node receiver,
+      Selector selector,
+      A arg) {
+    return bulkHandleGet(node, arg);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyGet(
       Send node,
       Node receiver,
       Selector selector,
@@ -1544,6 +1825,46 @@ abstract class GetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandleGet(node, arg);
   }
+
+  @override
+  R visitUnresolvedGet(
+      Send node,
+      Element element,
+      A arg) {
+    return bulkHandleGet(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGet(
+      Send node,
+      Element element,
+      A arg) {
+    return bulkHandleGet(node, arg);
+  }
+
+  @override
+  R visitStaticSetterGet(
+      Send node,
+      FunctionElement setter,
+      A arg) {
+    return bulkHandleGet(node, arg);
+  }
+
+  @override
+  R visitSuperSetterGet(
+      Send node,
+      FunctionElement setter,
+      A arg) {
+    return bulkHandleGet(node, arg);
+  }
+
+  @override
+  R visitTopLevelSetterGet(
+      Send node,
+      FunctionElement setter,
+      A arg) {
+    return bulkHandleGet(node, arg);
+  }
 }
 
 /// Mixin that implements all `visitXSet` methods of [SemanticSendVisitor] by
@@ -1551,15 +1872,25 @@ abstract class GetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all `visitXSet`
 /// methods.
-abstract class SetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class SetBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleSet(Send node, A arg) {
-    return bulkHandleNode(node, "Assignment `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Assignment `#` unhandled.", arg);
   }
 
   @override
   R visitDynamicPropertySet(
+      SendSet node,
+      Node receiver,
+      Selector selector,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertySet(
       SendSet node,
       Node receiver,
       Selector selector,
@@ -1648,6 +1979,159 @@ abstract class SetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandleSet(node, arg);
   }
+
+  @override
+  R visitClassTypeLiteralSet(
+      SendSet node,
+      ConstantExpression constant,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitDynamicTypeLiteralSet(
+      SendSet node,
+      ConstantExpression constant,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitFinalLocalVariableSet(
+      SendSet node,
+      LocalVariableElement variable,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitFinalParameterSet(
+      SendSet node,
+      ParameterElement parameter,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitFinalStaticFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitFinalSuperFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitLocalFunctionSet(
+      SendSet node,
+      LocalFunctionElement function,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitStaticFunctionSet(
+      Send node,
+      MethodElement function,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitStaticGetterSet(
+      SendSet node,
+      FunctionElement getter,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitSuperGetterSet(
+      SendSet node,
+      FunctionElement getter,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitSuperMethodSet(
+      Send node,
+      MethodElement method,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitTopLevelFunctionSet(
+      Send node,
+      MethodElement function,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitTopLevelGetterSet(
+      SendSet node,
+      FunctionElement getter,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitTypeVariableTypeLiteralSet(
+      SendSet node,
+      TypeVariableElement element,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitTypedefTypeLiteralSet(
+      SendSet node,
+      ConstantExpression constant,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSet(
+      Send node,
+      Element element,
+      Node rhs,
+      A arg) {
+    return bulkHandleSet(node, arg);
+  }
 }
 
 /// Mixin that implements all `visitXIndexSet` methods of [SemanticSendVisitor]
@@ -1655,11 +2139,11 @@ abstract class SetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all `visitXIndexSet`
 /// methods.
-abstract class IndexSetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class IndexSetBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleIndexSet(Send node, A arg) {
-    return bulkHandleNode(node, "Index set expression `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Index set expression `#` unhandled.", arg);
   }
 
   @override
@@ -1696,9 +2180,54 @@ abstract class IndexSetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
+  R visitUnresolvedSuperGetterCompoundIndexSet(
+      SendSet node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleIndexSet(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterCompoundIndexSet(
+      SendSet node,
+      MethodElement getter,
+      Element element,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleIndexSet(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperCompoundIndexSet(
+      SendSet node,
+      Element element,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return bulkHandleIndexSet(node, arg);
+  }
+
+  @override
   R visitSuperIndexSet(
       SendSet node,
       FunctionElement function,
+      Node index,
+      Node rhs,
+      A arg) {
+    return bulkHandleIndexSet(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperIndexSet(
+      SendSet node,
+      Element element,
       Node index,
       Node rhs,
       A arg) {
@@ -1711,11 +2240,11 @@ abstract class IndexSetBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all binary visitor
 /// methods.
-abstract class BinaryBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class BinaryBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleBinary(Send node, A arg) {
-    return bulkHandleNode(node, "Binary expression `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Binary expression `#` unhandled.", arg);
   }
 
   @override
@@ -1791,6 +2320,35 @@ abstract class BinaryBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandleBinary(node, arg);
   }
+
+  @override
+  R visitUnresolvedSuperBinary(
+      Send node,
+      FunctionElement function,
+      BinaryOperator operator,
+      Node argument,
+      A arg) {
+    return bulkHandleBinary(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperInvoke(
+      Send node,
+      Element function,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return bulkHandleBinary(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperIndex(
+      Send node,
+      FunctionElement function,
+      Node index,
+      A arg) {
+    return bulkHandleBinary(node, arg);
+  }
 }
 
 /// Mixin that implements all unary visitor methods in [SemanticSendVisitor] by
@@ -1798,11 +2356,11 @@ abstract class BinaryBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all unary visitor
 /// methods.
-abstract class UnaryBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class UnaryBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleUnary(Send node, A arg) {
-    return bulkHandleNode(node, "Unary expression `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Unary expression `#` unhandled.", arg);
   }
 
   @override
@@ -1814,8 +2372,11 @@ abstract class UnaryBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R visitSuperUnary(Send node, UnaryOperator operator,
-                    FunctionElement function, A arg) {
+  R visitSuperUnary(
+      Send node,
+      UnaryOperator operator,
+      FunctionElement function,
+      A arg) {
     return bulkHandleUnary(node, arg);
   }
 
@@ -1827,6 +2388,15 @@ abstract class UnaryBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandleUnary(node, arg);
   }
+
+  @override
+  R visitUnresolvedSuperUnary(
+      Send node,
+      UnaryOperator operator,
+      FunctionElement function,
+      A arg) {
+    return bulkHandleUnary(node, arg);
+  }
 }
 
 /// Mixin that implements all purely structural visitor methods in
@@ -1834,8 +2404,8 @@ abstract class UnaryBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for all purely structural
 /// visitor methods.
-abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class BaseBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   @override
   R visitAs(
@@ -1843,7 +2413,7 @@ abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Node expression,
       DartType type,
       A arg) {
-    return bulkHandleNode(node, 'As cast `$node` unhandled.', arg);
+    return bulkHandleNode(node, 'As cast `#` unhandled.', arg);
   }
 
   @override
@@ -1851,7 +2421,7 @@ abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       Node expression,
       A arg) {
-    return bulkHandleNode(node, 'Assert `$node` unhandled.', arg);
+    return bulkHandleNode(node, 'Assert `#` unhandled.', arg);
   }
 
   @override
@@ -1860,7 +2430,7 @@ abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Node expression,
       DartType type,
       A arg) {
-    return bulkHandleNode(node, 'Is test `$node` unhandled.', arg);
+    return bulkHandleNode(node, 'Is test `#` unhandled.', arg);
   }
 
   @override
@@ -1869,7 +2439,16 @@ abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Node expression,
       DartType type,
       A arg) {
-    return bulkHandleNode(node, 'Is not test `$node` unhandled.', arg);
+    return bulkHandleNode(node, 'Is not test `#` unhandled.', arg);
+  }
+
+  @override
+  R visitIfNull(
+      Send node,
+      Node left,
+      Node right,
+      A arg) {
+    return bulkHandleNode(node, 'If-null (Lazy ?? `#`) unhandled.', arg);
   }
 
   @override
@@ -1878,7 +2457,7 @@ abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Node left,
       Node right,
       A arg) {
-    return bulkHandleNode(node, 'Lazy and `$node` unhandled.', arg);
+    return bulkHandleNode(node, 'Lazy and `#` unhandled.', arg);
   }
 
   @override
@@ -1887,7 +2466,7 @@ abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Node left,
       Node right,
       A arg) {
-    return bulkHandleNode(node, 'Lazy or `$node` unhandled.', arg);
+    return bulkHandleNode(node, 'Lazy or `#` unhandled.', arg);
   }
 }
 
@@ -1896,11 +2475,11 @@ abstract class BaseBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 ///
 /// Use this mixin to provide a trivial implementation for `super` calls
 /// visitor methods.
-abstract class SuperBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class SuperBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleSuper(Send node, A arg) {
-    return bulkHandleNode(node, "Super call `$node` unhandled.", arg);
+    return bulkHandleNode(node, "Super call `#` unhandled.", arg);
   }
 
   @override
@@ -1977,7 +2556,7 @@ abstract class SuperBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleSuper(node, arg);
   }
@@ -2084,7 +2663,7 @@ abstract class SuperBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleSuper(node, arg);
   }
@@ -2143,7 +2722,17 @@ abstract class SuperBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       MethodElement method,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleSuper(node, arg);
+  }
+
+  @override
+  R visitSuperMethodIncompatibleInvoke(
+      Send node,
+      MethodElement method,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleSuper(node, arg);
   }
@@ -2205,14 +2794,71 @@ abstract class SuperBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       A arg) {
     return bulkHandleSuper(node, arg);
   }
+
+  @override
+  R visitUnresolvedSuperBinary(
+      Send node,
+      Element element,
+      BinaryOperator operator,
+      Node argument,
+      A arg) {
+    return bulkHandleSuper(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGet(
+      Send node,
+      Element element,
+      A arg) {
+    return bulkHandleSuper(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperInvoke(
+      Send node,
+      Element function,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return bulkHandleSuper(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperIndex(
+      Send node,
+      Element function,
+      Node index,
+      A arg) {
+    return bulkHandleSuper(node, arg);
+  }
+
+  @override
+  R visitUnresolvedSuperUnary(
+      Send node,
+      UnaryOperator operator,
+      Element element,
+      A arg) {
+    return bulkHandleSuper(node, arg);
+  }
 }
 
-abstract class NewBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
-  R bulkHandleNode(Node node, String message, A arg);
+abstract class NewBulkMixin<R, A>
+    implements SemanticSendVisitor<R, A>, BulkHandle<R, A> {
 
   R bulkHandleNew(NewExpression node, A arg) {
     return bulkHandleNode(
-        node, "Constructor invocation `$node` unhandled.", arg);
+        node, "Constructor invocation `#` unhandled.", arg);
+  }
+
+  @override
+  R visitAbstractClassConstructorInvoke(
+      NewExpression node,
+      ConstructorElement element,
+      InterfaceType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleNew(node, arg);
   }
 
   @override
@@ -2223,36 +2869,75 @@ abstract class NewBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
     return bulkHandleNew(node, arg);
   }
 
+  @override
+  R visitBoolFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      BoolFromEnvironmentConstantExpression constant,
+      A arg) {
+    return bulkHandleNew(node, arg);
+  }
+
+  @override
+  R visitIntFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      IntFromEnvironmentConstantExpression constant,
+      A arg) {
+    return bulkHandleNew(node, arg);
+  }
+
+  @override
+  R visitStringFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      StringFromEnvironmentConstantExpression constant,
+      A arg) {
+    return bulkHandleNew(node, arg);
+  }
+
+  @override
+  R visitConstructorIncompatibleInvoke(
+      NewExpression node,
+      ConstructorElement constructor,
+      InterfaceType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleNew(node, arg);
+  }
+
+  @override
   R visitGenerativeConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleNew(node, arg);
   }
 
+  @override
   R visitRedirectingGenerativeConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleNew(node, arg);
   }
 
+  @override
   R visitFactoryConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return bulkHandleNew(node, arg);
   }
 
+  @override
   R visitRedirectingFactoryConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
@@ -2260,8 +2945,41 @@ abstract class NewBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
       ConstructorElement effectiveTarget,
       InterfaceType effectiveTargetType,
       NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleNew(node, arg);
+  }
+
+  @override
+  R visitUnresolvedClassConstructorInvoke(
+      NewExpression node,
+      Element element,
+      DartType type,
+      NodeList arguments,
       Selector selector,
       A arg) {
+    return bulkHandleNew(node, arg);
+  }
+
+  @override
+  R visitUnresolvedConstructorInvoke(
+      NewExpression node,
+      Element constructor,
+      DartType type,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return bulkHandleNew(node, arg);
+  }
+
+  @override
+  R visitUnresolvedRedirectingFactoryConstructorInvoke(
+       NewExpression node,
+       ConstructorElement constructor,
+       InterfaceType type,
+       NodeList arguments,
+       CallStructure callStructure,
+       A arg) {
     return bulkHandleNew(node, arg);
   }
 }
@@ -2271,7 +2989,7 @@ abstract class NewBulkMixin<R, A> implements SemanticSendVisitor<R, A> {
 /// This class is useful in itself, but shows how to use the `BulkX` mixins and
 /// tests that the union of the `BulkX` mixins implement all `visit` and `error`
 /// methods of [SemanticSendVisitor].
-class BulkVisitor<R, A> extends SemanticSendVisitor<R, A>
+class BulkSendVisitor<R, A> extends SemanticSendVisitor<R, A>
     with GetBulkMixin<R, A>,
          SetBulkMixin<R, A>,
          ErrorBulkMixin<R, A>,
@@ -2286,17 +3004,496 @@ class BulkVisitor<R, A> extends SemanticSendVisitor<R, A>
          NewBulkMixin<R, A> {
   @override
   R apply(Node node, A arg) {
-    throw new UnimplementedError("BulkVisitor.apply unimplemented");
+    throw new UnimplementedError("BulkSendVisitor.apply unimplemented");
   }
 
   @override
   R bulkHandleNode(Node node, String message, A arg) {
-    throw new UnimplementedError("BulkVisitor.bulkHandleNode unimplemented");
+    throw new UnimplementedError(
+        "BulkSendVisitor.bulkHandleNode unimplemented");
   }
 }
 
+/// Mixin that implements all `visitXParameterDecl` and
+/// `visitXInitializingFormalDecl` methods of [SemanticDeclarationVisitor]
+/// by delegating to a bulk handler.
+///
+/// Use this mixin to provide a trivial implementation for these methods.
+abstract class ParameterBulkMixin<R, A>
+    implements SemanticDeclarationVisitor<R, A>, BulkHandle<R, A> {
+
+  R bulkHandleParameterDeclaration(VariableDefinitions node, A arg) {
+    return bulkHandleNode(
+        node, "Parameter declaration `#` unhandled.", arg);
+  }
+
+  @override
+  R visitInitializingFormalDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      InitializingFormalElement parameter,
+      int index,
+      A arg) {
+    return bulkHandleParameterDeclaration(node, arg);
+  }
+
+  @override
+  R visitNamedInitializingFormalDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      InitializingFormalElement parameter,
+      ConstantExpression defaultValue,
+      A arg) {
+    return bulkHandleParameterDeclaration(node, arg);
+  }
+
+  @override
+  R visitNamedParameterDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      ParameterElement parameter,
+      ConstantExpression defaultValue,
+      A arg) {
+    return bulkHandleParameterDeclaration(node, arg);
+  }
+
+  @override
+  R visitOptionalInitializingFormalDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      InitializingFormalElement parameter,
+      ConstantExpression defaultValue,
+      int index,
+      A arg) {
+    return bulkHandleParameterDeclaration(node, arg);
+  }
+
+  @override
+  R visitOptionalParameterDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      ParameterElement parameter,
+      ConstantExpression defaultValue,
+      int index,
+      A arg) {
+    return bulkHandleParameterDeclaration(node, arg);
+  }
+
+  @override
+  R visitParameterDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      ParameterElement parameter,
+      int index,
+      A arg) {
+    return bulkHandleParameterDeclaration(node, arg);
+  }
+}
+
+/// Mixin that implements all `visitXConstructorDecl` methods of
+/// [SemanticDeclarationVisitor] by delegating to a bulk handler.
+///
+/// Use this mixin to provide a trivial implementation for these methods.
+abstract class ConstructorBulkMixin<R, A>
+    implements SemanticDeclarationVisitor<R, A>, BulkHandle<R, A> {
+
+  R bulkHandleConstructorDeclaration(FunctionExpression node, A arg) {
+    return bulkHandleNode(
+        node, "Constructor declaration `#` unhandled.", arg);
+  }
+
+  @override
+  R visitFactoryConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleConstructorDeclaration(node, arg);
+  }
+
+  @override
+  R visitGenerativeConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      NodeList initializers,
+      Node body,
+      A arg) {
+    return bulkHandleConstructorDeclaration(node, arg);
+  }
+
+  @override
+  R visitRedirectingFactoryConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      InterfaceType redirectionType,
+      ConstructorElement redirectionTarget,
+      A arg) {
+    return bulkHandleConstructorDeclaration(node, arg);
+  }
+
+  @override
+  R visitRedirectingGenerativeConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      NodeList initializers,
+      A arg) {
+    return bulkHandleConstructorDeclaration(node, arg);
+  }
+}
+
+/// Mixin that implements all constructor initializer visitor methods of
+/// [SemanticDeclarationVisitor] by delegating to a bulk handler.
+///
+/// Use this mixin to provide a trivial implementation for these methods.
+abstract class InitializerBulkMixin<R, A>
+    implements SemanticDeclarationVisitor<R, A>, BulkHandle<R, A> {
+
+  R bulkHandleInitializer(Node node, A arg) {
+    return bulkHandleNode(
+        node, "Initializer `#` unhandled.", arg);
+  }
+
+  @override
+  R errorUnresolvedFieldInitializer(
+      SendSet node,
+      Element element,
+      Node initializer,
+      A arg) {
+    return bulkHandleInitializer(node, arg);
+  }
+
+  @override
+  R errorUnresolvedSuperConstructorInvoke(
+      Send node,
+      Element element,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return bulkHandleInitializer(node, arg);
+  }
+
+  @override
+  R errorUnresolvedThisConstructorInvoke(
+      Send node,
+      Element element,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return bulkHandleInitializer(node, arg);
+  }
+
+  @override
+  R visitFieldInitializer(
+      SendSet node,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    return bulkHandleInitializer(node, arg);
+  }
+
+  @override
+  R visitSuperConstructorInvoke(
+      Send node,
+      ConstructorElement superConstructor,
+      InterfaceType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInitializer(node, arg);
+  }
+
+  @override
+  R visitImplicitSuperConstructorInvoke(
+      FunctionExpression node,
+      ConstructorElement superConstructor,
+      InterfaceType type,
+      A arg) {
+    return bulkHandleInitializer(node, arg);
+  }
+
+  @override
+  R visitThisConstructorInvoke(
+      Send node,
+      ConstructorElement thisConstructor,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return bulkHandleInitializer(node, arg);
+  }
+}
+
+/// Mixin that implements all function declaration visitor methods of
+/// [SemanticDeclarationVisitor] by delegating to a bulk handler.
+///
+/// Use this mixin to provide a trivial implementation for these methods.
+abstract class FunctionBulkMixin<R, A>
+    implements SemanticDeclarationVisitor<R, A>, BulkHandle<R, A> {
+
+  R bulkHandleFunctionDeclaration(FunctionExpression node, A arg) {
+    return bulkHandleNode(
+        node, "Function declaration `#` unhandled.", arg);
+  }
+
+  @override
+  R visitAbstractGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitAbstractMethodDeclaration(
+      FunctionExpression node,
+      MethodElement method,
+      NodeList parameters,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitAbstractSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitClosureDeclaration(
+      FunctionExpression node,
+      LocalFunctionElement closure,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitInstanceGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitInstanceMethodDeclaration(
+      FunctionExpression node,
+      MethodElement method,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitInstanceSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitLocalFunctionDeclaration(
+      FunctionExpression node,
+      LocalFunctionElement function,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitStaticFunctionDeclaration(
+      FunctionExpression node,
+      MethodElement function,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitStaticGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitStaticSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitTopLevelFunctionDeclaration(
+      FunctionExpression node,
+      MethodElement function,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitTopLevelGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+
+  @override
+  R visitTopLevelSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    return bulkHandleFunctionDeclaration(node, arg);
+  }
+}
+
+/// Mixin that implements all variable/field declaration visitor methods of
+/// [SemanticDeclarationVisitor] by delegating to a bulk handler.
+///
+/// Use this mixin to provide a trivial implementation for these methods.
+abstract class VariableBulkMixin<R, A>
+    implements SemanticDeclarationVisitor<R, A>, BulkHandle<R, A> {
+
+  R bulkHandleVariableDeclaration(VariableDefinitions node, A arg) {
+    return bulkHandleNode(
+        node, "Variable declaration `#` unhandled.", arg);
+  }
+
+  @override
+  R visitInstanceFieldDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    return bulkHandleVariableDeclaration(node, arg);
+  }
+
+  @override
+  R visitLocalConstantDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      LocalVariableElement variable,
+      ConstantExpression constant,
+      A arg) {
+    return bulkHandleVariableDeclaration(node, arg);
+  }
+
+  @override
+  R visitLocalVariableDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      LocalVariableElement variable,
+      Node initializer,
+      A arg) {
+    return bulkHandleVariableDeclaration(node, arg);
+  }
+
+  @override
+  R visitStaticConstantDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      ConstantExpression constant,
+      A arg) {
+    return bulkHandleVariableDeclaration(node, arg);
+  }
+
+  @override
+  R visitStaticFieldDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    return bulkHandleVariableDeclaration(node, arg);
+  }
+
+  @override
+  R visitTopLevelConstantDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      ConstantExpression constant,
+      A arg) {
+    return bulkHandleVariableDeclaration(node, arg);
+  }
+
+  @override
+  R visitTopLevelFieldDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    return bulkHandleVariableDeclaration(node, arg);
+  }
+}
+
+/// Visitor that implements [SemanticDeclarationVisitor] by the use of `BulkX`
+/// mixins.
+///
+/// This class is useful in itself, but shows how to use the `BulkX` mixins and
+/// tests that the union of the `BulkX` mixins implement all `visit` and `error`
+/// methods of [SemanticDeclarationVisitor].
+class BulkDeclarationVisitor<R, A> extends SemanticDeclarationVisitor<R, A>
+    with ConstructorBulkMixin<R, A>,
+         FunctionBulkMixin<R, A>,
+         VariableBulkMixin<R, A>,
+         ParameterBulkMixin<R, A>,
+         InitializerBulkMixin<R, A> {
+  @override
+  R apply(Node node, A arg) {
+    throw new UnimplementedError("BulkDeclVisitor.apply unimplemented");
+  }
+
+  @override
+  R bulkHandleNode(Node node, String message, A arg) {
+    throw new UnimplementedError(
+        "BulkDeclVisitor.bulkHandleNode unimplemented");
+  }
+
+  @override
+  applyInitializers(FunctionExpression constructor, A arg) {
+    throw new UnimplementedError(
+        "BulkDeclVisitor.applyInitializers unimplemented");
+  }
+
+  @override
+  applyParameters(NodeList parameters, A arg) {
+    throw new UnimplementedError(
+        "BulkDeclVisitor.applyParameters unimplemented");
+  }
+}
+
+
 /// [SemanticSendVisitor] that visits subnodes.
-class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
+class TraversalSendMixin<R, A> implements SemanticSendVisitor<R, A> {
   @override
   R apply(Node node, A arg) {
     throw new UnimplementedError("TraversalMixin.apply unimplemented");
@@ -2312,7 +3509,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorClassTypeLiteralSet(
+  R visitClassTypeLiteralSet(
       SendSet node,
       ConstantExpression constant,
       Node rhs,
@@ -2322,7 +3519,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorDynamicTypeLiteralSet(
+  R visitDynamicTypeLiteralSet(
       SendSet node,
       ConstantExpression constant,
       Node rhs,
@@ -2332,7 +3529,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalLocalVariableCompound(
+  R visitFinalLocalVariableCompound(
       Send node,
       LocalVariableElement variable,
       AssignmentOperator operator,
@@ -2343,7 +3540,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalLocalVariableSet(
+  R visitFinalLocalVariableSet(
       SendSet node,
       LocalVariableElement variable,
       Node rhs,
@@ -2353,7 +3550,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalParameterCompound(
+  R visitFinalParameterCompound(
       Send node,
       ParameterElement parameter,
       AssignmentOperator operator,
@@ -2364,7 +3561,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalParameterSet(
+  R visitFinalParameterSet(
       SendSet node,
       ParameterElement parameter,
       Node rhs,
@@ -2374,7 +3571,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalStaticFieldCompound(
+  R visitFinalStaticFieldCompound(
       Send node,
       FieldElement field,
       AssignmentOperator operator,
@@ -2385,7 +3582,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalStaticFieldSet(
+  R visitFinalStaticFieldSet(
       SendSet node,
       FieldElement field,
       Node rhs,
@@ -2395,7 +3592,17 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalSuperFieldCompound(
+  R visitFinalSuperFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitFinalTopLevelFieldCompound(
       Send node,
       FieldElement field,
       AssignmentOperator operator,
@@ -2406,7 +3613,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalSuperFieldSet(
+  R visitFinalTopLevelFieldSet(
       SendSet node,
       FieldElement field,
       Node rhs,
@@ -2416,28 +3623,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorFinalTopLevelFieldCompound(
-      Send node,
-      FieldElement field,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    apply(rhs, arg);
-    return null;
-  }
-
-  @override
-  R errorFinalTopLevelFieldSet(
-      SendSet node,
-      FieldElement field,
-      Node rhs,
-      A arg) {
-    apply(rhs, arg);
-    return null;
-  }
-
-  @override
-  R errorLocalFunctionCompound(
+  R visitLocalFunctionCompound(
       Send node,
       LocalFunctionElement function,
       AssignmentOperator operator,
@@ -2448,7 +3634,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorLocalFunctionPostfix(
+  R visitLocalFunctionPostfix(
       Send node,
       LocalFunctionElement function,
       IncDecOperator operator,
@@ -2457,7 +3643,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorLocalFunctionPrefix(
+  R visitLocalFunctionPrefix(
       Send node,
       LocalFunctionElement function,
       IncDecOperator operator,
@@ -2466,7 +3652,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorLocalFunctionSet(
+  R visitLocalFunctionSet(
       SendSet node,
       LocalFunctionElement function,
       Node rhs,
@@ -2476,7 +3662,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorStaticFunctionSet(
+  R visitStaticFunctionSet(
       Send node,
       MethodElement function,
       Node rhs,
@@ -2486,7 +3672,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorStaticGetterSet(
+  R visitStaticGetterSet(
       SendSet node,
       FunctionElement getter,
       Node rhs,
@@ -2496,7 +3682,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorStaticSetterGet(
+  R visitStaticSetterGet(
       Send node,
       FunctionElement setter,
       A arg) {
@@ -2504,18 +3690,18 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorStaticSetterInvoke(
+  R visitStaticSetterInvoke(
       Send node,
       FunctionElement setter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorSuperGetterSet(
+  R visitSuperGetterSet(
       SendSet node,
       FunctionElement getter,
       Node rhs,
@@ -2525,7 +3711,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorSuperMethodSet(
+  R visitSuperMethodSet(
       Send node,
       MethodElement method,
       Node rhs,
@@ -2535,7 +3721,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorSuperSetterGet(
+  R visitSuperSetterGet(
       Send node,
       FunctionElement setter,
       A arg) {
@@ -2543,18 +3729,18 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorSuperSetterInvoke(
+  R visitSuperSetterInvoke(
       Send node,
       FunctionElement setter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorTopLevelFunctionSet(
+  R visitTopLevelFunctionSet(
       Send node,
       MethodElement function,
       Node rhs,
@@ -2564,7 +3750,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTopLevelGetterSet(
+  R visitTopLevelGetterSet(
       SendSet node,
       FunctionElement getter,
       Node rhs,
@@ -2574,7 +3760,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTopLevelSetterGet(
+  R visitTopLevelSetterGet(
       Send node,
       FunctionElement setter,
       A arg) {
@@ -2582,18 +3768,18 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTopLevelSetterInvoke(
+  R visitTopLevelSetterInvoke(
       Send node,
       FunctionElement setter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorTypeVariableTypeLiteralSet(
+  R visitTypeVariableTypeLiteralSet(
       SendSet node,
       TypeVariableElement element,
       Node rhs,
@@ -2603,7 +3789,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTypedefTypeLiteralSet(
+  R visitTypedefTypeLiteralSet(
       SendSet node,
       ConstantExpression constant,
       Node rhs,
@@ -2613,12 +3799,31 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSuperIndex(
+  R visitUnresolvedSuperIndex(
       Send node,
       Element function,
       Node index,
       A arg) {
     apply(index, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperGet(
+      Send node,
+      Element element,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperInvoke(
+      Send node,
+      Element function,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    apply(arguments, arg);
     return null;
   }
 
@@ -2654,7 +3859,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorClassTypeLiteralCompound(
+  R visitClassTypeLiteralCompound(
       Send node,
       ConstantExpression constant,
       AssignmentOperator operator,
@@ -2677,14 +3882,14 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorClassTypeLiteralPostfix(
+  R visitClassTypeLiteralPostfix(
       Send node,
       ConstantExpression constant,
       IncDecOperator operator,
@@ -2693,7 +3898,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorClassTypeLiteralPrefix(
+  R visitClassTypeLiteralPrefix(
       Send node,
       ConstantExpression constant,
       IncDecOperator operator,
@@ -2728,7 +3933,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -2736,6 +3941,20 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
 
   @override
   R visitDynamicPropertyCompound(
+      Send node,
+      Node receiver,
+      AssignmentOperator operator,
+      Node rhs,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    apply(receiver, arg);
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyCompound(
       Send node,
       Node receiver,
       AssignmentOperator operator,
@@ -2759,7 +3978,29 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
+  R visitIfNotNullDynamicPropertyGet(
+      Send node,
+      Node receiver,
+      Selector selector,
+      A arg) {
+    apply(receiver, arg);
+    return null;
+  }
+
+  @override
   R visitDynamicPropertyInvoke(
+      Send node,
+      Node receiver,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    apply(receiver, arg);
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyInvoke(
       Send node,
       Node receiver,
       NodeList arguments,
@@ -2783,7 +4024,31 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
+  R visitIfNotNullDynamicPropertyPostfix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    apply(receiver, arg);
+    return null;
+  }
+
+  @override
   R visitDynamicPropertyPrefix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    apply(receiver, arg);
+    return null;
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyPrefix(
       Send node,
       Node receiver,
       IncDecOperator operator,
@@ -2801,12 +4066,25 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Selector selector,
       Node rhs,
       A arg) {
+    apply(receiver, arg);
     apply(rhs, arg);
     return null;
   }
 
   @override
-  R errorDynamicTypeLiteralCompound(
+  R visitIfNotNullDynamicPropertySet(
+      SendSet node,
+      Node receiver,
+      Selector selector,
+      Node rhs,
+      A arg) {
+    apply(receiver, arg);
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitDynamicTypeLiteralCompound(
       Send node,
       ConstantExpression constant,
       AssignmentOperator operator,
@@ -2829,14 +4107,14 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorDynamicTypeLiteralPostfix(
+  R visitDynamicTypeLiteralPostfix(
       Send node,
       ConstantExpression constant,
       IncDecOperator operator,
@@ -2845,7 +4123,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorDynamicTypeLiteralPrefix(
+  R visitDynamicTypeLiteralPrefix(
       Send node,
       ConstantExpression constant,
       IncDecOperator operator,
@@ -2933,7 +4211,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       LocalFunctionElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -2963,7 +4241,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       LocalVariableElement variable,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -2994,6 +4272,17 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Node rhs,
       A arg) {
     apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitIfNull(
+      Send node,
+      Node left,
+      Node right,
+      A arg) {
+    apply(left, arg);
+    apply(right, arg);
     return null;
   }
 
@@ -3063,7 +4352,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ParameterElement parameter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3121,7 +4410,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3168,7 +4457,18 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       MethodElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitStaticFunctionIncompatibleInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3187,7 +4487,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3345,7 +4645,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3456,7 +4756,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3529,7 +4829,18 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       MethodElement method,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitSuperMethodIncompatibleInvoke(
+      Send node,
+      MethodElement method,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3605,7 +4916,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   R visitThisInvoke(
       Send node,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3695,7 +5006,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3742,7 +5053,18 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       MethodElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitTopLevelFunctionIncompatibleInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3761,7 +5083,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -3842,7 +5164,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTypeVariableTypeLiteralCompound(
+  R visitTypeVariableTypeLiteralCompound(
       Send node,
       TypeVariableElement element,
       AssignmentOperator operator,
@@ -3865,14 +5187,14 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       TypeVariableElement element,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorTypeVariableTypeLiteralPostfix(
+  R visitTypeVariableTypeLiteralPostfix(
       Send node,
       TypeVariableElement element,
       IncDecOperator operator,
@@ -3881,7 +5203,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTypeVariableTypeLiteralPrefix(
+  R visitTypeVariableTypeLiteralPrefix(
       Send node,
       TypeVariableElement element,
       IncDecOperator operator,
@@ -3890,7 +5212,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTypedefTypeLiteralCompound(
+  R visitTypedefTypeLiteralCompound(
       Send node,
       ConstantExpression constant,
       AssignmentOperator operator,
@@ -3913,14 +5235,14 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorTypedefTypeLiteralPostfix(
+  R visitTypedefTypeLiteralPostfix(
       Send node,
       ConstantExpression constant,
       IncDecOperator operator,
@@ -3929,7 +5251,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorTypedefTypeLiteralPrefix(
+  R visitTypedefTypeLiteralPrefix(
       Send node,
       ConstantExpression constant,
       IncDecOperator operator,
@@ -3948,7 +5270,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedCompound(
+  R visitUnresolvedCompound(
       Send node,
       Element element,
       AssignmentOperator operator,
@@ -3959,7 +5281,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedGet(
+  R visitUnresolvedGet(
       Send node,
       Element element,
       A arg) {
@@ -3967,7 +5289,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedInvoke(
+  R visitUnresolvedInvoke(
       Send node,
       Element element,
       NodeList arguments,
@@ -3978,7 +5300,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedPostfix(
+  R visitUnresolvedPostfix(
       Send node,
       Element element,
       IncDecOperator operator,
@@ -3987,7 +5309,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedPrefix(
+  R visitUnresolvedPrefix(
       Send node,
       Element element,
       IncDecOperator operator,
@@ -3996,7 +5318,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSet(
+  R visitUnresolvedSet(
       Send node,
       Element element,
       Node rhs,
@@ -4028,7 +5350,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSuperIndexSet(
+  R visitUnresolvedSuperIndexSet(
       Send node,
       Element element,
       Node index,
@@ -4040,7 +5362,35 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSuperCompoundIndexSet(
+  R visitUnresolvedSuperGetterCompoundIndexSet(
+      SendSet node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(index, arg);
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperSetterCompoundIndexSet(
+      SendSet node,
+      MethodElement getter,
+      Element element,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(index, arg);
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperCompoundIndexSet(
       SendSet node,
       Element element,
       Node index,
@@ -4053,7 +5403,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSuperBinary(
+  R visitUnresolvedSuperBinary(
       Send node,
       Element element,
       BinaryOperator operator,
@@ -4064,7 +5414,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSuperUnary(
+  R visitUnresolvedSuperUnary(
       Send node,
       UnaryOperator operator,
       Element element,
@@ -4073,9 +5423,10 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSuperIndexPostfix(
+  R visitUnresolvedSuperGetterIndexPostfix(
       Send node,
-      Element function,
+      Element element,
+      MethodElement setter,
       Node index,
       IncDecOperator operator,
       A arg) {
@@ -4084,9 +5435,56 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedSuperIndexPrefix(
+  R visitUnresolvedSuperSetterIndexPostfix(
       Send node,
-      Element function,
+      MethodElement getter,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    apply(index, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPostfix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    apply(index, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperGetterIndexPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    apply(index, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperSetterIndexPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    apply(index, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPrefix(
+      Send node,
+      Element element,
       Node index,
       IncDecOperator operator,
       A arg) {
@@ -4151,19 +5549,43 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedClassConstructorInvoke(
+  R visitBoolFromEnvironmentConstructorInvoke(
       NewExpression node,
-      Element constructor,
-      MalformedType type,
+      BoolFromEnvironmentConstantExpression constant,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitIntFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      IntFromEnvironmentConstantExpression constant,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitStringFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      StringFromEnvironmentConstantExpression constant,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitConstructorIncompatibleInvoke(
+      NewExpression node,
+      ConstructorElement constructor,
+      InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorUnresolvedConstructorInvoke(
+  R visitUnresolvedClassConstructorInvoke(
       NewExpression node,
       Element constructor,
       DartType type,
@@ -4173,12 +5595,26 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
     apply(arguments, arg);
     return null;
   }
+
+  @override
+  R visitUnresolvedConstructorInvoke(
+      NewExpression node,
+      Element constructor,
+      DartType type,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
   R visitFactoryConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -4190,7 +5626,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -4204,7 +5640,7 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       ConstructorElement effectiveTarget,
       InterfaceType effectiveTargetType,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
@@ -4216,18 +5652,664 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     apply(arguments, arg);
     return null;
   }
 
   @override
-  R errorAbstractClassConstructorInvoke(
+  R visitAbstractClassConstructorInvoke(
       NewExpression node,
       ConstructorElement element,
       InterfaceType type,
       NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedRedirectingFactoryConstructorInvoke(
+      NewExpression node,
+      ConstructorElement constructor,
+      InterfaceType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R errorNonConstantConstructorInvoke(
+      NewExpression node,
+      Element element,
+      DartType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedStaticGetterCompound(
+      Send node,
+      Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterCompound(
+      Send node,
+      Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedStaticSetterCompound(
+      Send node,
+      MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterCompound(
+      Send node,
+      MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitStaticMethodCompound(
+      Send node,
+      MethodElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitStaticMethodPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitTopLevelMethodPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitStaticMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitTopLevelMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalLocalVariablePostfix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalLocalVariablePrefix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalParameterPostfix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalParameterPrefix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalStaticFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalStaticFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitSuperFieldFieldCompound(
+      Send node, FieldElement readField,
+      FieldElement writtenField,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitFinalSuperFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitFinalSuperFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalSuperFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitSuperMethodCompound(
+      Send node,
+      FunctionElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitSuperMethodPostfix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitSuperMethodPrefix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalTopLevelFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitFinalTopLevelFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitTopLevelMethodCompound(
+      Send node,
+      FunctionElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperCompound(
+      Send node,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperPostfix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperPrefix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperGetterCompound(
+      Send node, Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperSetterCompound(
+      Send node, MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    apply(rhs, arg);
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return null;
+  }
+}
+
+/// [SemanticDeclarationVisitor] that visits subnodes.
+class TraversalDeclarationMixin<R, A>
+    implements SemanticDeclarationVisitor<R, A> {
+  @override
+  R apply(Node node, A arg) {
+    throw new UnimplementedError("TraversalMixin.apply unimplemented");
+  }
+
+  @override
+  applyInitializers(FunctionExpression constructor, A arg) {
+    throw new UnimplementedError(
+        "TraversalMixin.applyInitializers unimplemented");
+  }
+
+  @override
+  applyParameters(NodeList parameters, A arg) {
+    throw new UnimplementedError(
+        "TraversalMixin.applyParameters unimplemented");
+  }
+
+  @override
+  R visitAbstractMethodDeclaration(
+      FunctionExpression node,
+      MethodElement method,
+      NodeList parameters,
+      A arg) {
+    applyParameters(parameters, arg);
+    return null;
+  }
+
+  @override
+  R visitClosureDeclaration(
+      FunctionExpression node,
+      LocalFunctionElement function,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitFactoryConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitFieldInitializer(
+      SendSet node,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    apply(initializer, arg);
+    return null;
+  }
+
+  @override
+  R visitGenerativeConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      NodeList initializers,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    applyInitializers(node, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitInstanceMethodDeclaration(
+      FunctionExpression node,
+      MethodElement method,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitLocalFunctionDeclaration(
+      FunctionExpression node,
+      LocalFunctionElement function,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitRedirectingFactoryConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      InterfaceType redirectionType,
+      ConstructorElement redirectionTarget,
+      A arg) {
+    applyParameters(parameters, arg);
+    return null;
+  }
+
+  @override
+  R visitRedirectingGenerativeConstructorDeclaration(
+      FunctionExpression node,
+      ConstructorElement constructor,
+      NodeList parameters,
+      NodeList initializers,
+      A arg) {
+    applyParameters(parameters, arg);
+    applyInitializers(node, arg);
+    return null;
+  }
+
+  @override
+  R visitStaticFunctionDeclaration(
+      FunctionExpression node,
+      MethodElement function,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitSuperConstructorInvoke(
+      Send node,
+      ConstructorElement superConstructor,
+      InterfaceType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitImplicitSuperConstructorInvoke(
+      FunctionExpression node,
+      ConstructorElement superConstructor,
+      InterfaceType type,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitThisConstructorInvoke(
+      Send node,
+      ConstructorElement thisConstructor,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitTopLevelFunctionDeclaration(
+      FunctionExpression node,
+      MethodElement function,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R errorUnresolvedFieldInitializer(
+      SendSet node,
+      Element element,
+      Node initializer,
+      A arg) {
+    apply(initializer, arg);
+    return null;
+  }
+
+  @override
+  R errorUnresolvedSuperConstructorInvoke(
+      Send node,
+      Element element,
+      NodeList arguments,
       Selector selector,
       A arg) {
     apply(arguments, arg);
@@ -4235,14 +6317,241 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
   }
 
   @override
-  R errorUnresolvedRedirectingFactoryConstructorInvoke(
-      NewExpression node,
-      ConstructorElement constructor,
-      InterfaceType type,
+  R errorUnresolvedThisConstructorInvoke(
+      Send node,
+      Element element,
       NodeList arguments,
       Selector selector,
       A arg) {
     apply(arguments, arg);
+    return null;
+  }
+
+  @override
+  R visitLocalVariableDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      LocalVariableElement variable,
+      Node initializer,
+      A arg) {
+    if (initializer != null) {
+      apply(initializer, arg);
+    }
+    return null;
+  }
+
+  @override
+  R visitOptionalParameterDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      ParameterElement parameter,
+      ConstantExpression defaultValue,
+      int index,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitParameterDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      ParameterElement parameter,
+      int index,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitInitializingFormalDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      InitializingFormalElement initializingFormal,
+      int index,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitLocalConstantDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      LocalVariableElement variable,
+      ConstantExpression constant,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitNamedInitializingFormalDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      InitializingFormalElement initializingFormal,
+      ConstantExpression defaultValue,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitNamedParameterDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      ParameterElement parameter,
+      ConstantExpression defaultValue,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitOptionalInitializingFormalDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      InitializingFormalElement initializingFormal,
+      ConstantExpression defaultValue,
+      int index,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitInstanceFieldDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    if (initializer != null) {
+      apply(initializer, arg);
+    }
+    return null;
+  }
+
+  @override
+  R visitStaticConstantDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      ConstantExpression constant,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitStaticFieldDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    if (initializer != null) {
+      apply(initializer, arg);
+    }
+    return null;
+  }
+
+  @override
+  R visitTopLevelConstantDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      ConstantExpression constant,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitTopLevelFieldDeclaration(
+      VariableDefinitions node,
+      Node definition,
+      FieldElement field,
+      Node initializer,
+      A arg) {
+    if (initializer != null) {
+      apply(initializer, arg);
+    }
+    return null;
+  }
+
+  @override
+  R visitAbstractGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      A arg) {
+    return null;
+  }
+
+  @override
+  R visitAbstractSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      A arg) {
+    applyParameters(parameters, arg);
+    return null;
+  }
+
+  @override
+  R visitInstanceGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      Node body,
+      A arg) {
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitInstanceSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitStaticGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      Node body,
+      A arg) {
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitStaticSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitTopLevelGetterDeclaration(
+      FunctionExpression node,
+      MethodElement getter,
+      Node body,
+      A arg) {
+    apply(body, arg);
+    return null;
+  }
+
+  @override
+  R visitTopLevelSetterDeclaration(
+      FunctionExpression node,
+      MethodElement setter,
+      NodeList parameters,
+      Node body,
+      A arg) {
+    applyParameters(parameters, arg);
+    apply(body, arg);
     return null;
   }
 }
@@ -4250,14 +6559,27 @@ class TraversalMixin<R, A> implements SemanticSendVisitor<R, A> {
 /// AST visitor that visits all normal [Send] and [SendSet] nodes using the
 /// [SemanticVisitor].
 class TraversalVisitor<R, A> extends SemanticVisitor<R, A>
-    with TraversalMixin<R, A> {
+    with TraversalSendMixin<R, A>,
+         TraversalDeclarationMixin<R, A> {
   TraversalVisitor(TreeElements elements) : super(elements);
 
   SemanticSendVisitor<R, A> get sendVisitor => this;
 
+  SemanticDeclarationVisitor<R, A> get declVisitor => this;
+
   R apply(Node node, A arg) {
     node.accept(this);
     return null;
+  }
+
+  @override
+  applyInitializers(FunctionExpression constructor, A arg) {
+    visitInitializers(constructor, arg);
+  }
+
+  @override
+  applyParameters(NodeList parameters, A arg) {
+    visitParameters(parameters, arg);
   }
 
   @override
@@ -4270,44 +6592,15 @@ class TraversalVisitor<R, A> extends SemanticVisitor<R, A>
     node.visitChildren(this);
     return null;
   }
-
-  void visitParameters(NodeList parameters) {
-
-  }
-
-  void visitInitializers(NodeList initializers) {
-    // TODO(johnniwinther): Visit subnodes of initializers.
-  }
-
-  @override
-  R visitFunctionExpression(FunctionExpression node) {
-    if (node.parameters != null) {
-      visitParameters(node.parameters);
-    }
-    if (node.initializers != null) {
-      visitInitializers(node.initializers);
-    }
-    if (node.body != null) {
-      apply(node.body, null);
-    }
-    return null;
-  }
 }
 
-/// Mixin that groups all `visitStaticX` and `visitTopLevelX` method by
-/// delegating calls to `handleStaticX` methods.
+/// Mixin that groups all non-compound `visitStaticX` and `visitTopLevelX`
+/// method by delegating calls to `handleStaticX` methods.
 ///
 /// This mixin is useful for the cases where both top level members and static
 /// class members are handled uniformly.
 abstract class BaseImplementationOfStaticsMixin<R, A>
     implements SemanticSendVisitor<R, A> {
-  R handleStaticFieldCompound(
-      Send node,
-      FieldElement field,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg);
-
   R handleStaticFieldGet(
       Send node,
       FieldElement field,
@@ -4317,15 +6610,8 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       Send node,
       FieldElement field,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg);
-
-  R handleStaticFieldPostfixPrefix(
-      Send node,
-      FieldElement field,
-      IncDecOperator operator,
-      A arg,
-      {bool isPrefix});
 
   R handleStaticFieldSet(
       SendSet node,
@@ -4342,7 +6628,14 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       Send node,
       MethodElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
+      A arg);
+
+  R handleStaticFunctionIncompatibleInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
       A arg);
 
   R handleStaticGetterGet(
@@ -4350,12 +6643,332 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       FunctionElement getter,
       A arg);
 
+  R handleStaticGetterSet(
+      Send node,
+      FunctionElement getter,
+      Node rhs,
+      A arg);
+
   R handleStaticGetterInvoke(
       Send node,
       FunctionElement getter,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg);
+
+  R handleStaticSetterGet(
+      SendSet node,
+      FunctionElement setter,
+      A arg);
+
+  R handleStaticSetterSet(
+      SendSet node,
+      FunctionElement setter,
+      Node rhs,
+      A arg);
+
+  R handleStaticSetterInvoke(
+      Send node,
+      FunctionElement setter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg);
+
+  R handleFinalStaticFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg);
+
+  R handleStaticFunctionSet(
+      SendSet node,
+      MethodElement function,
+      Node rhs,
+      A arg);
+
+  @override
+  R visitStaticFieldGet(
+      Send node,
+      FieldElement field,
+      A arg) {
+    return handleStaticFieldGet(node, field, arg);
+  }
+
+  @override
+  R visitStaticFieldInvoke(
+      Send node,
+      FieldElement field,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticFieldInvoke(node, field, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitStaticFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    return handleStaticFieldSet(node, field, rhs, arg);
+  }
+
+  @override
+  R visitStaticFunctionGet(
+      Send node,
+      MethodElement function,
+      A arg) {
+    return handleStaticFunctionGet(node, function, arg);
+  }
+
+  @override
+  R visitStaticFunctionInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticFunctionInvoke(
+        node, function, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitStaticFunctionIncompatibleInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticFunctionIncompatibleInvoke(
+        node, function, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitStaticGetterGet(
+      Send node,
+      FunctionElement getter,
+      A arg) {
+    return handleStaticGetterGet(node, getter, arg);
+  }
+
+  @override
+  R visitStaticGetterInvoke(
+      Send node,
+      FunctionElement getter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticGetterInvoke(
+        node, getter, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitStaticSetterSet(
+      SendSet node,
+      FunctionElement setter,
+      Node rhs,
+      A arg) {
+    return handleStaticSetterSet(node, setter, rhs, arg);
+  }
+
+  @override
+  R visitTopLevelFieldGet(
+      Send node,
+      FieldElement field,
+      A arg) {
+    return handleStaticFieldGet(node, field, arg);
+  }
+
+  @override
+  R visitTopLevelFieldInvoke(
+      Send node,
+      FieldElement field,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticFieldInvoke(node, field, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitTopLevelFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    return handleStaticFieldSet(node, field, rhs, arg);
+  }
+
+  @override
+  R visitTopLevelFunctionGet(
+      Send node,
+      MethodElement function,
+      A arg) {
+    return handleStaticFunctionGet(node, function, arg);
+  }
+
+  @override
+  R visitTopLevelFunctionInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticFunctionInvoke(
+        node, function, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitTopLevelFunctionIncompatibleInvoke(
+      Send node,
+      MethodElement function,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticFunctionIncompatibleInvoke(
+        node, function, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitTopLevelGetterGet(
+      Send node,
+      FunctionElement getter,
+      A arg) {
+    return handleStaticGetterGet(node, getter, arg);
+  }
+
+  @override
+  R visitTopLevelGetterSet(
+      SendSet node,
+      FunctionElement getter,
+      Node rhs,
+      A arg) {
+    return handleStaticGetterSet(node, getter, rhs, arg);
+  }
+
+  @override
+  R visitTopLevelGetterInvoke(
+      Send node,
+      FunctionElement getter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticGetterInvoke(
+        node, getter, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitTopLevelSetterSet(
+      SendSet node,
+      FunctionElement setter,
+      Node rhs,
+      A arg) {
+    return handleStaticSetterSet(node, setter, rhs, arg);
+  }
+
+  @override
+  R visitStaticSetterInvoke(
+      Send node,
+      FunctionElement setter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticSetterInvoke(
+        node, setter, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitTopLevelSetterInvoke(
+      Send node,
+      FunctionElement setter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleStaticSetterInvoke(
+        node, setter, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitStaticSetterGet(
+      Send node,
+      FunctionElement setter,
+      A arg) {
+    return handleStaticSetterGet(node, setter, arg);
+  }
+
+  @override
+  R visitStaticGetterSet(
+      SendSet node,
+      FunctionElement getter,
+      Node rhs,
+      A arg) {
+    return handleStaticGetterSet(node, getter, rhs, arg);
+  }
+
+  @override
+  R visitTopLevelSetterGet(
+      Send node,
+      FunctionElement setter,
+      A arg) {
+    return handleStaticSetterGet(node, setter, arg);
+  }
+
+  @override
+  R visitFinalStaticFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    return handleFinalStaticFieldSet(node, field, rhs, arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldSet(
+      SendSet node,
+      FieldElement field,
+      Node rhs,
+      A arg) {
+    return handleFinalStaticFieldSet(node, field, rhs, arg);
+  }
+
+  @override
+  R visitStaticFunctionSet(
+      Send node,
+      MethodElement function,
+      Node rhs,
+      A arg) {
+    return handleStaticFunctionSet(node, function, rhs, arg);
+  }
+
+  @override
+  R visitTopLevelFunctionSet(
+      Send node,
+      MethodElement function,
+      Node rhs,
+      A arg) {
+    return handleStaticFunctionSet(node, function, rhs, arg);
+  }
+}
+
+/// Mixin that groups all compounds visitors `visitStaticX` and `visitTopLevelX`
+/// method by delegating calls to `handleStaticX` methods.
+///
+/// This mixin is useful for the cases where both top level members and static
+/// class members are handled uniformly.
+abstract class BaseImplementationOfStaticCompoundsMixin<R, A>
+    implements SemanticSendVisitor<R, A> {
+  R handleStaticFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg);
+
+  R handleStaticFieldPostfixPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
 
   R handleStaticGetterSetterCompound(
       Send node,
@@ -4389,11 +7002,65 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       A arg,
       {bool isPrefix});
 
-  R handleStaticSetterSet(
-      SendSet node,
-      FunctionElement setter,
+  R handleFinalStaticFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
       Node rhs,
       A arg);
+
+  R handleFinalStaticFieldPostfixPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleStaticMethodCompound(
+      Send node,
+      FunctionElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg);
+
+  R handleStaticMethodPostfixPrefix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedStaticGetterCompound(
+      Send node,
+      Element element,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg);
+
+  R handleUnresolvedStaticGetterPostfixPrefix(
+      Send node,
+      Element element,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedStaticSetterCompound(
+      Send node,
+      FunctionElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg);
+
+  R handleUnresolvedStaticSetterPostfixPrefix(
+      Send node,
+      FunctionElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
 
   @override
   R visitStaticFieldCompound(
@@ -4403,24 +7070,6 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       Node rhs,
       A arg) {
     return handleStaticFieldCompound(node, field, operator, rhs, arg);
-  }
-
-  @override
-  R visitStaticFieldGet(
-      Send node,
-      FieldElement field,
-      A arg) {
-    return handleStaticFieldGet(node, field, arg);
-  }
-
-  @override
-  R visitStaticFieldInvoke(
-      Send node,
-      FieldElement field,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleStaticFieldInvoke(node, field, arguments, selector, arg);
   }
 
   @override
@@ -4441,51 +7090,6 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       A arg) {
     return handleStaticFieldPostfixPrefix(
         node, field, operator, arg, isPrefix: true);
-  }
-
-  @override
-  R visitStaticFieldSet(
-      SendSet node,
-      FieldElement field,
-      Node rhs,
-      A arg) {
-    return handleStaticFieldSet(node, field, rhs, arg);
-  }
-
-  @override
-  R visitStaticFunctionGet(
-      Send node,
-      MethodElement function,
-      A arg) {
-    return handleStaticFunctionGet(node, function, arg);
-  }
-
-  @override
-  R visitStaticFunctionInvoke(
-      Send node,
-      MethodElement function,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleStaticFunctionInvoke(node, function, arguments, selector, arg);
-  }
-
-  @override
-  R visitStaticGetterGet(
-      Send node,
-      FunctionElement getter,
-      A arg) {
-    return handleStaticGetterGet(node, getter, arg);
-  }
-
-  @override
-  R visitStaticGetterInvoke(
-      Send node,
-      FunctionElement getter,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleStaticGetterInvoke(node, getter, arguments, selector, arg);
   }
 
   @override
@@ -4557,15 +7161,6 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
   }
 
   @override
-  R visitStaticSetterSet(
-      SendSet node,
-      FunctionElement setter,
-      Node rhs,
-      A arg) {
-    return handleStaticSetterSet(node, setter, rhs, arg);
-  }
-
-  @override
   R visitTopLevelFieldCompound(
       Send node,
       FieldElement field,
@@ -4573,24 +7168,6 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       Node rhs,
       A arg) {
     return handleStaticFieldCompound(node, field, operator, rhs, arg);
-  }
-
-  @override
-  R visitTopLevelFieldGet(
-      Send node,
-      FieldElement field,
-      A arg) {
-    return handleStaticFieldGet(node, field, arg);
-  }
-
-  @override
-  R visitTopLevelFieldInvoke(
-      Send node,
-      FieldElement field,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleStaticFieldInvoke(node, field, arguments, selector, arg);
   }
 
   @override
@@ -4611,51 +7188,6 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
       A arg) {
     return handleStaticFieldPostfixPrefix(
         node, field, operator, arg, isPrefix: true);
-  }
-
-  @override
-  R visitTopLevelFieldSet(
-      SendSet node,
-      FieldElement field,
-      Node rhs,
-      A arg) {
-    return handleStaticFieldSet(node, field, rhs, arg);
-  }
-
-  @override
-  R visitTopLevelFunctionGet(
-      Send node,
-      MethodElement function,
-      A arg) {
-    return handleStaticFunctionGet(node, function, arg);
-  }
-
-  @override
-  R visitTopLevelFunctionInvoke(
-      Send node,
-      MethodElement function,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleStaticFunctionInvoke(node, function, arguments, selector, arg);
-  }
-
-  @override
-  R visitTopLevelGetterGet(
-      Send node,
-      FunctionElement getter,
-      A arg) {
-    return handleStaticGetterGet(node, getter, arg);
-  }
-
-  @override
-  R visitTopLevelGetterInvoke(
-      Send node,
-      FunctionElement getter,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleStaticGetterInvoke(node, getter, arguments, selector, arg);
   }
 
   @override
@@ -4727,29 +7259,143 @@ abstract class BaseImplementationOfStaticsMixin<R, A>
   }
 
   @override
-  R visitTopLevelSetterSet(
-      SendSet node,
-      FunctionElement setter,
+  R visitFinalStaticFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
       Node rhs,
       A arg) {
-    return handleStaticSetterSet(node, setter, rhs, arg);
+    return handleFinalStaticFieldCompound(
+        node, field, operator, rhs, arg);
+  }
+
+  @override
+  R visitFinalStaticFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleFinalStaticFieldPostfixPrefix(
+        node, field, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitFinalStaticFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleFinalStaticFieldPostfixPrefix(
+        node, field, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitStaticMethodCompound(
+      Send node,
+      FunctionElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticMethodCompound(
+        node, method, operator, rhs, arg);
+  }
+
+  @override
+  R visitStaticMethodPostfix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticMethodPostfixPrefix(
+        node, method, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitStaticMethodPrefix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticMethodPostfixPrefix(
+        node, method, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterCompound(
+      Send node,
+      Element element,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleUnresolvedStaticGetterCompound(
+        node, element, setter, operator, rhs, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPostfix(
+      Send node,
+      Element element,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedStaticGetterPostfixPrefix(
+        node, element, setter, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPrefix(
+      Send node,
+      Element element,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedStaticGetterPostfixPrefix(
+        node, element, setter, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterCompound(
+      Send node,
+      FunctionElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleUnresolvedStaticSetterCompound(
+        node, getter, element, operator, rhs, arg);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPostfix(
+      Send node,
+      FunctionElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedStaticSetterPostfixPrefix(
+        node, getter, element, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPrefix(
+      Send node,
+      FunctionElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedStaticSetterPostfixPrefix(
+        node, getter, element, operator, arg, isPrefix: true);
   }
 }
 
-/// Mixin that groups all `visitLocalX` and `visitParameterX` method by
-/// delegating calls to `handleLocalX` methods.
+/// Mixin that groups all non-compound `visitLocalX` and `visitParameterX`
+/// methods by delegating calls to `handleLocalX` methods.
 ///
 /// This mixin is useful for the cases where both parameters, local variables,
 /// and local functions, captured or not, are handled uniformly.
 abstract class BaseImplementationOfLocalsMixin<R, A>
     implements SemanticSendVisitor<R, A> {
-  R handleLocalCompound(
-      Send node,
-      LocalElement element,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg);
-
   R handleLocalGet(
       Send node,
       LocalElement element,
@@ -4759,17 +7405,16 @@ abstract class BaseImplementationOfLocalsMixin<R, A>
       Send node,
       LocalElement element,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg);
 
-  R handleLocalPostfixPrefix(
-      Send node,
-      LocalElement element,
-      IncDecOperator operator,
-      A arg,
-      {bool isPrefix});
-
   R handleLocalSet(
+      SendSet node,
+      LocalElement element,
+      Node rhs,
+      A arg);
+
+  R handleImmutableLocalSet(
       SendSet node,
       LocalElement element,
       Node rhs,
@@ -4788,19 +7433,9 @@ abstract class BaseImplementationOfLocalsMixin<R, A>
       Send node,
       LocalFunctionElement function,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
-    return handleLocalInvoke(node, function, arguments, selector, arg);
-  }
-
-  @override
-  R visitLocalVariableCompound(
-      Send node,
-      LocalVariableElement variable,
-      AssignmentOperator operator,
-      Node rhs,
-      A arg) {
-    return handleLocalCompound(node, variable, operator, rhs, arg);
+    return handleLocalInvoke(node, function, arguments, callStructure, arg);
   }
 
   @override
@@ -4816,9 +7451,104 @@ abstract class BaseImplementationOfLocalsMixin<R, A>
       Send node,
       LocalVariableElement variable,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
-    return handleLocalInvoke(node, variable, arguments, selector, arg);
+    return handleLocalInvoke(node, variable, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitLocalVariableSet(
+      SendSet node,
+      LocalVariableElement variable,
+      Node rhs,
+      A arg) {
+    return handleLocalSet(node, variable, rhs, arg);
+  }
+
+  @override
+  R visitParameterGet(
+      Send node,
+      ParameterElement parameter,
+      A arg) {
+    return handleLocalGet(node, parameter, arg);
+  }
+
+  @override
+  R visitParameterInvoke(
+      Send node,
+      ParameterElement parameter,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleLocalInvoke(node, parameter, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitParameterSet(
+      SendSet node,
+      ParameterElement parameter,
+      Node rhs,
+      A arg) {
+    return handleLocalSet(node, parameter, rhs, arg);
+  }
+
+  @override
+  R visitFinalLocalVariableSet(
+      SendSet node,
+      LocalVariableElement variable,
+      Node rhs,
+      A arg) {
+    return handleImmutableLocalSet(node, variable, rhs, arg);
+  }
+
+  @override
+  R visitFinalParameterSet(
+      SendSet node,
+      ParameterElement parameter,
+      Node rhs,
+      A arg) {
+    return handleImmutableLocalSet(node, parameter, rhs, arg);
+  }
+
+  @override
+  R visitLocalFunctionSet(
+      SendSet node,
+      LocalFunctionElement function,
+      Node rhs,
+      A arg) {
+    return handleImmutableLocalSet(node, function, rhs, arg);
+  }
+}
+
+/// Mixin that groups all compound `visitLocalX` and `visitParameterX` methods
+/// by delegating calls to `handleLocalX` methods.
+///
+/// This mixin is useful for the cases where both parameters, local variables,
+/// and local functions, captured or not, are handled uniformly.
+abstract class BaseImplementationOfLocalCompoundsMixin<R, A>
+    implements SemanticSendVisitor<R, A> {
+  R handleLocalCompound(
+      Send node,
+      LocalElement element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg);
+
+  R handleLocalPostfixPrefix(
+      Send node,
+      LocalElement element,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  @override
+  R visitLocalVariableCompound(
+      Send node,
+      LocalVariableElement variable,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleLocalCompound(node, variable, operator, rhs, arg);
   }
 
   @override
@@ -4842,15 +7572,6 @@ abstract class BaseImplementationOfLocalsMixin<R, A>
   }
 
   @override
-  R visitLocalVariableSet(
-      SendSet node,
-      LocalVariableElement variable,
-      Node rhs,
-      A arg) {
-    return handleLocalSet(node, variable, rhs, arg);
-  }
-
-  @override
   R visitParameterCompound(
       Send node,
       ParameterElement parameter,
@@ -4858,24 +7579,6 @@ abstract class BaseImplementationOfLocalsMixin<R, A>
       Node rhs,
       A arg) {
     return handleLocalCompound(node, parameter, operator, rhs, arg);
-  }
-
-  @override
-  R visitParameterGet(
-      Send node,
-      ParameterElement parameter,
-      A arg) {
-    return handleLocalGet(node, parameter, arg);
-  }
-
-  @override
-  R visitParameterInvoke(
-      Send node,
-      ParameterElement parameter,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleLocalInvoke(node, parameter, arguments, selector, arg);
   }
 
   @override
@@ -4897,15 +7600,6 @@ abstract class BaseImplementationOfLocalsMixin<R, A>
     return handleLocalPostfixPrefix(
         node, parameter, operator, arg, isPrefix: true);
   }
-
-  @override
-  R visitParameterSet(
-      SendSet node,
-      ParameterElement parameter,
-      Node rhs,
-      A arg) {
-    return handleLocalSet(node, parameter, rhs, arg);
-  }
 }
 
 /// Mixin that groups all `visitConstantX` and `visitXTypeLiteralY` methods for
@@ -4924,7 +7618,7 @@ abstract class BaseImplementationOfConstantsMixin<R, A>
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg);
 
   @override
@@ -4940,15 +7634,39 @@ abstract class BaseImplementationOfConstantsMixin<R, A>
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
-    return handleConstantInvoke(node, constant, arguments, selector, arg);
+    return handleConstantInvoke(node, constant, arguments, callStructure, arg);
   }
 
   @override
   R visitConstConstructorInvoke(
       NewExpression node,
       ConstructedConstantExpression constant,
+      A arg) {
+    return handleConstantGet(node, constant, arg);
+  }
+
+  @override
+  R visitBoolFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      BoolFromEnvironmentConstantExpression constant,
+      A arg) {
+    return handleConstantGet(node, constant, arg);
+  }
+
+  @override
+  R visitIntFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      IntFromEnvironmentConstantExpression constant,
+      A arg) {
+    return handleConstantGet(node, constant, arg);
+  }
+
+  @override
+  R visitStringFromEnvironmentConstructorInvoke(
+      NewExpression node,
+      StringFromEnvironmentConstantExpression constant,
       A arg) {
     return handleConstantGet(node, constant, arg);
   }
@@ -4966,9 +7684,9 @@ abstract class BaseImplementationOfConstantsMixin<R, A>
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
-    return handleConstantInvoke(node, constant, arguments, selector, arg);
+    return handleConstantInvoke(node, constant, arguments, callStructure, arg);
   }
 
   @override
@@ -4984,9 +7702,9 @@ abstract class BaseImplementationOfConstantsMixin<R, A>
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
-    return handleConstantInvoke(node, constant, arguments, selector, arg);
+    return handleConstantInvoke(node, constant, arguments, callStructure, arg);
   }
 
   @override
@@ -5002,29 +7720,20 @@ abstract class BaseImplementationOfConstantsMixin<R, A>
       Send node,
       ConstantExpression constant,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
-    return handleConstantInvoke(node, constant, arguments, selector, arg);
+    return handleConstantInvoke(node, constant, arguments, callStructure, arg);
   }
 }
 
-/// Mixin that groups all `visitDynamicPropertyX` and `visitThisPropertyY`
-/// methods for by delegating calls to `handleDynamicX` methods, providing
-/// `null` as the receiver for the this properties.
+/// Mixin that groups all non-compound `visitDynamicPropertyX` and
+/// `visitThisPropertyY` methods for by delegating calls to `handleDynamicX`
+/// methods, providing `null` as the receiver for the this properties.
 ///
 /// This mixin is useful for the cases where dynamic and this properties are
 /// handled uniformly.
 abstract class BaseImplementationOfDynamicsMixin<R, A>
     implements SemanticSendVisitor<R, A> {
-  R handleDynamicCompound(
-      Send node,
-      Node receiver,
-      AssignmentOperator operator,
-      Node rhs,
-      Selector getterSelector,
-      Selector setterSelector,
-      A arg);
-
   R handleDynamicGet(
       Send node,
       Node receiver,
@@ -5038,6 +7747,116 @@ abstract class BaseImplementationOfDynamicsMixin<R, A>
       Selector selector,
       A arg);
 
+  R handleDynamicSet(
+      SendSet node,
+      Node receiver,
+      Selector selector,
+      Node rhs,
+      A arg);
+
+  @override
+  R visitDynamicPropertyGet(
+      Send node,
+      Node receiver,
+      Selector selector,
+      A arg) {
+    return handleDynamicGet(node, receiver, selector, arg);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyGet(
+      Send node,
+      Node receiver,
+      Selector selector,
+      A arg) {
+    // TODO(johnniwinther): should these redirect to handleDynamicX?
+    return handleDynamicGet(node, receiver, selector, arg);
+  }
+
+  @override
+  R visitDynamicPropertyInvoke(
+      Send node,
+      Node receiver,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return handleDynamicInvoke(node, receiver, arguments, selector, arg);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyInvoke(
+      Send node,
+      Node receiver,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return handleDynamicInvoke(node, receiver, arguments, selector, arg);
+  }
+
+  @override
+  R visitDynamicPropertySet(
+      SendSet node,
+      Node receiver,
+      Selector selector,
+      Node rhs,
+      A arg) {
+    return handleDynamicSet(node, receiver, selector, rhs, arg);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertySet(
+      SendSet node,
+      Node receiver,
+      Selector selector,
+      Node rhs,
+      A arg) {
+    return handleDynamicSet(node, receiver, selector, rhs, arg);
+  }
+
+  @override
+  R visitThisPropertyGet(
+      Send node,
+      Selector selector,
+      A arg) {
+    return handleDynamicGet(node, null, selector, arg);
+  }
+
+  @override
+  R visitThisPropertyInvoke(
+      Send node,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return handleDynamicInvoke(node, null, arguments, selector, arg);
+  }
+
+  @override
+  R visitThisPropertySet(
+      SendSet node,
+      Selector selector,
+      Node rhs,
+      A arg) {
+    return handleDynamicSet(node, null, selector, rhs, arg);
+  }
+}
+
+/// Mixin that groups all compounds of `visitDynamicPropertyX` and
+/// `visitThisPropertyY` methods for by delegating calls to `handleDynamicX`
+/// methods, providing `null` as the receiver for the this properties.
+///
+/// This mixin is useful for the cases where dynamic and this properties are
+/// handled uniformly.
+abstract class BaseImplementationOfDynamicCompoundsMixin<R, A>
+    implements SemanticSendVisitor<R, A> {
+  R handleDynamicCompound(
+      Send node,
+      Node receiver,
+      AssignmentOperator operator,
+      Node rhs,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg);
+
   R handleDynamicPostfixPrefix(
       Send node,
       Node receiver,
@@ -5046,13 +7865,6 @@ abstract class BaseImplementationOfDynamicsMixin<R, A>
       Selector setterSelector,
       A arg,
       {bool isPrefix});
-
-  R handleDynamicSet(
-      SendSet node,
-      Node receiver,
-      Selector selector,
-      Node rhs,
-      A arg);
 
   R handleDynamicIndexPostfixPrefix(
       Send node,
@@ -5076,26 +7888,33 @@ abstract class BaseImplementationOfDynamicsMixin<R, A>
   }
 
   @override
-  R visitDynamicPropertyGet(
+  R visitIfNotNullDynamicPropertyCompound(
       Send node,
       Node receiver,
-      Selector selector,
+      AssignmentOperator operator,
+      Node rhs,
+      Selector getterSelector,
+      Selector setterSelector,
       A arg) {
-    return handleDynamicGet(node, receiver, selector, arg);
-  }
-
-  @override
-  R visitDynamicPropertyInvoke(
-      Send node,
-      Node receiver,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleDynamicInvoke(node, receiver, arguments, selector, arg);
+    return handleDynamicCompound(
+        node, receiver, operator, rhs, getterSelector, setterSelector, arg);
   }
 
   @override
   R visitDynamicPropertyPostfix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicPostfixPrefix(
+        node, receiver, operator,
+        getterSelector, setterSelector, arg, isPrefix: false);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyPostfix(
       Send node,
       Node receiver,
       IncDecOperator operator,
@@ -5121,13 +7940,16 @@ abstract class BaseImplementationOfDynamicsMixin<R, A>
   }
 
   @override
-  R visitDynamicPropertySet(
-      SendSet node,
+  R visitIfNotNullDynamicPropertyPrefix(
+      Send node,
       Node receiver,
-      Selector selector,
-      Node rhs,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
       A arg) {
-    return handleDynamicSet(node, receiver, selector, rhs, arg);
+    return handleDynamicPostfixPrefix(
+        node, receiver, operator,
+        getterSelector, setterSelector, arg, isPrefix: true);
   }
 
   @override
@@ -5140,23 +7962,6 @@ abstract class BaseImplementationOfDynamicsMixin<R, A>
       A arg) {
     return handleDynamicCompound(
         node, null, operator, rhs, getterSelector, setterSelector, arg);
-  }
-
-  @override
-  R visitThisPropertyGet(
-      Send node,
-      Selector selector,
-      A arg) {
-    return handleDynamicGet(node, null, selector, arg);
-  }
-
-  @override
-  R visitThisPropertyInvoke(
-      Send node,
-      NodeList arguments,
-      Selector selector,
-      A arg) {
-    return handleDynamicInvoke(node, null, arguments, selector, arg);
   }
 
   @override
@@ -5184,15 +7989,6 @@ abstract class BaseImplementationOfDynamicsMixin<R, A>
   }
 
   @override
-  R visitThisPropertySet(
-      SendSet node,
-      Selector selector,
-      Node rhs,
-      A arg) {
-    return handleDynamicSet(node, null, selector, rhs, arg);
-  }
-
-  @override
   R visitIndexPostfix(
       Send node,
       Node receiver,
@@ -5214,6 +8010,2145 @@ abstract class BaseImplementationOfDynamicsMixin<R, A>
         node, receiver, index, operator, arg, isPrefix: true);
   }
 }
+
+/// The getter kind for statically resolved compound expressions.
+enum CompoundGetter {
+  /// The compound reads from a field.
+  FIELD,
+
+  /// The compound reads from a getter.
+  GETTER,
+
+  /// The compound reads (closurizes) a method.
+  METHOD,
+
+  /// The getter is unresolved. The accompanied element is an erroneous element.
+  UNRESOLVED,
+}
+
+/// The setter kind for statically resolved compound expressions.
+enum CompoundSetter {
+  /// The compound writes to a field.
+  FIELD,
+
+  /// The compound writes to a setter.
+  SETTER,
+
+  /// The setter is unresolved or unassignable. The accompanied element may be
+  /// `null`, and erroneous element, or the unassignable element.
+  INVALID,
+}
+
+/// The kind of a [CompoundRhs].
+enum CompoundKind {
+  /// A prefix expression, like `--a`.
+  PREFIX,
+
+  /// A postfix expression, like `a++`.
+  POSTFIX,
+
+  /// A compound assignment, like `a *= b`.
+  ASSIGNMENT,
+}
+
+/// The right-hand side of a compound expression.
+abstract class CompoundRhs {
+  /// The kind of compound.
+  CompoundKind get kind;
+
+  /// The binary operator implied by the compound operator.
+  BinaryOperator get operator;
+
+  /// The explicit right hand side in case of a compound assignment, `null`
+  /// otherwise.
+  Node get rhs;
+}
+
+/// A prefix or postfix of [incDecOperator].
+class IncDecCompound implements CompoundRhs {
+  final CompoundKind kind;
+  final IncDecOperator incDecOperator;
+
+  IncDecCompound(this.kind, this.incDecOperator);
+
+  BinaryOperator get operator => incDecOperator.binaryOperator;
+
+  Node get rhs => null;
+}
+
+/// A compound assignment with [assignmentOperator] and [rhs].
+class AssignmentCompound implements CompoundRhs {
+  final AssignmentOperator assignmentOperator;
+  final Node rhs;
+
+  AssignmentCompound(this.assignmentOperator, this.rhs);
+
+  CompoundKind get kind => CompoundKind.ASSIGNMENT;
+
+  BinaryOperator get operator => assignmentOperator.binaryOperator;
+}
+
+/// Simplified handling of compound assignments and prefix/postfix expressions.
+abstract class BaseImplementationOfCompoundsMixin<R, A>
+    implements SemanticSendVisitor<R, A> {
+
+  /// Handle a super compounds, like `super.foo += 42` or `--super.bar`.
+  R handleSuperCompounds(
+      SendSet node,
+      Element getter,
+      CompoundGetter getterKind,
+      Element setter,
+      CompoundSetter setterKind,
+      CompoundRhs rhs,
+      A arg);
+
+  /// Handle a static or top level compounds, like `foo += 42` or `--bar`.
+  R handleStaticCompounds(
+      SendSet node,
+      Element getter,
+      CompoundGetter getterKind,
+      Element setter,
+      CompoundSetter setterKind,
+      CompoundRhs rhs,
+      A arg);
+
+  /// Handle a local compounds, like `foo += 42` or `--bar`. If [isSetterValid]
+  /// is false [local] is unassignable.
+  R handleLocalCompounds(
+      SendSet node,
+      LocalElement local,
+      CompoundRhs rhs,
+      A arg,
+      {bool isSetterValid});
+
+  /// Handle a compounds on a type literal constant, like `Object += 42` or
+  /// `--Object`.
+  R handleTypeLiteralConstantCompounds(
+      SendSet node,
+      ConstantExpression constant,
+      CompoundRhs rhs,
+      A arg);
+
+  /// Handle a compounds on a type variable type literal, like `T += 42` or
+  /// `--T`.
+  R handleTypeVariableTypeLiteralCompounds(
+      SendSet node,
+      TypeVariableElement typeVariable,
+      CompoundRhs rhs,
+      A arg);
+
+  /// Handle a dynamic compounds, like `o.foo += 42` or `--o.foo`. [receiver] is
+  /// `null` for properties on `this`, like `--this.foo` or `--foo`.
+  R handleDynamicCompounds(
+      Send node,
+      Node receiver,
+      CompoundRhs rhs,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg);
+
+  R visitDynamicPropertyCompound(
+      Send node,
+      Node receiver,
+      AssignmentOperator operator,
+      Node rhs,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        receiver,
+        new AssignmentCompound(operator, rhs),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  R visitIfNotNullDynamicPropertyCompound(
+      Send node,
+      Node receiver,
+      AssignmentOperator operator,
+      Node rhs,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        receiver,
+        new AssignmentCompound(operator, rhs),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  @override
+  R visitThisPropertyCompound(
+      Send node,
+      AssignmentOperator operator,
+      Node rhs,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        null,
+        new AssignmentCompound(operator, rhs),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  @override
+  R visitParameterCompound(
+      Send node,
+      ParameterElement parameter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        parameter,
+        new AssignmentCompound(operator, rhs),
+        arg,
+        isSetterValid: true);
+  }
+
+  @override
+  R visitFinalParameterCompound(
+      Send node,
+      ParameterElement parameter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        parameter,
+        new AssignmentCompound(operator, rhs),
+        arg,
+        isSetterValid: false);
+  }
+
+  @override
+  R visitLocalVariableCompound(
+      Send node,
+      LocalVariableElement variable,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        variable,
+        new AssignmentCompound(operator, rhs),
+        arg,
+        isSetterValid: true);
+  }
+
+  @override
+  R visitFinalLocalVariableCompound(
+      Send node,
+      LocalVariableElement variable,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        variable,
+        new AssignmentCompound(operator, rhs),
+        arg,
+        isSetterValid: false);
+  }
+
+  @override
+  R visitLocalFunctionCompound(
+      Send node,
+      LocalFunctionElement function,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        function,
+        new AssignmentCompound(operator, rhs),
+        arg,
+        isSetterValid: false);
+  }
+
+  @override
+  R visitStaticFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitFinalStaticFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        null, CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitStaticGetterSetterCompound(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitStaticMethodSetterCompound(
+      Send node,
+      FunctionElement method,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitTopLevelFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        null, CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitTopLevelGetterSetterCompound(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitTopLevelMethodSetterCompound(
+      Send node,
+      FunctionElement method,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitFinalSuperFieldCompound(
+      Send node,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitSuperGetterSetterCompound(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitSuperMethodSetterCompound(
+      Send node,
+      FunctionElement method,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        method, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldSetterCompound(
+      Send node,
+      FieldElement field,
+      FunctionElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        setter, CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitSuperGetterFieldCompound(
+      Send node,
+      FunctionElement getter,
+      FieldElement field,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        field, CompoundSetter.FIELD,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitClassTypeLiteralCompound(
+      Send node,
+      ConstantExpression constant,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitTypedefTypeLiteralCompound(
+      Send node,
+      ConstantExpression constant,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitTypeVariableTypeLiteralCompound(
+      Send node,
+      TypeVariableElement element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleTypeVariableTypeLiteralCompounds(
+        node,
+        element,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitDynamicTypeLiteralCompound(
+      Send node,
+      ConstantExpression constant,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+
+  R visitDynamicPropertyPrefix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        receiver,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  R visitIfNotNullDynamicPropertyPrefix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        receiver,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  @override
+  R visitParameterPrefix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        parameter,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg,
+        isSetterValid: true);
+  }
+
+  @override
+  R visitLocalVariablePrefix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        variable,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg,
+        isSetterValid: true);
+  }
+
+  @override
+  R visitLocalFunctionPrefix(
+      Send node,
+      LocalFunctionElement function,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        function,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg,
+        isSetterValid: false);
+  }
+
+
+  R visitThisPropertyPrefix(
+      Send node,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        null,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  @override
+  R visitStaticFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitStaticGetterSetterPrefix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+
+  R visitStaticMethodSetterPrefix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelGetterSetterPrefix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelMethodSetterPrefix(
+      Send node,
+      FunctionElement method,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldFieldPrefix(
+      Send node,
+      FieldElement readField,
+      FieldElement writtenField,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        readField, CompoundGetter.FIELD,
+        writtenField, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldSetterPrefix(
+      Send node,
+      FieldElement field,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+
+  R visitSuperGetterSetterPrefix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperGetterFieldPrefix(
+      Send node,
+      FunctionElement getter,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperMethodSetterPrefix(
+      Send node,
+      FunctionElement method,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        method, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitClassTypeLiteralPrefix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTypedefTypeLiteralPrefix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTypeVariableTypeLiteralPrefix(
+      Send node,
+      TypeVariableElement element,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeVariableTypeLiteralCompounds(
+        node,
+        element,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitDynamicTypeLiteralPrefix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitDynamicPropertyPostfix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        receiver,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  @override
+  R visitIfNotNullDynamicPropertyPostfix(
+      Send node,
+      Node receiver,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        receiver,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  @override
+  R visitParameterPostfix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        parameter,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg,
+        isSetterValid: true);
+  }
+
+  @override
+  R visitLocalVariablePostfix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        variable,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg,
+        isSetterValid: true);
+  }
+
+  @override
+  R visitLocalFunctionPostfix(
+      Send node,
+      LocalFunctionElement function,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        function,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg,
+        isSetterValid: false);
+  }
+
+
+  R visitThisPropertyPostfix(
+      Send node,
+      IncDecOperator operator,
+      Selector getterSelector,
+      Selector setterSelector,
+      A arg) {
+    return handleDynamicCompounds(
+        node,
+        null,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        getterSelector,
+        setterSelector,
+        arg);
+  }
+
+  @override
+  R visitStaticFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitStaticGetterSetterPostfix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+
+  R visitStaticMethodSetterPostfix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelGetterSetterPostfix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelMethodSetterPostfix(
+      Send node,
+      FunctionElement method,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldFieldPostfix(
+      Send node,
+      FieldElement readField,
+      FieldElement writtenField,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        readField, CompoundGetter.FIELD,
+        writtenField, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldSetterPostfix(
+      Send node,
+      FieldElement field,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field, CompoundGetter.FIELD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+
+  R visitSuperGetterSetterPostfix(
+      Send node,
+      FunctionElement getter,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperGetterFieldPostfix(
+      Send node,
+      FunctionElement getter,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter, CompoundGetter.GETTER,
+        field, CompoundSetter.FIELD,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperMethodSetterPostfix(
+      Send node,
+      FunctionElement method,
+      FunctionElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        method, CompoundGetter.METHOD,
+        setter, CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitClassTypeLiteralPostfix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTypedefTypeLiteralPostfix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTypeVariableTypeLiteralPostfix(
+      Send node,
+      TypeVariableElement element,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeVariableTypeLiteralCompounds(
+        node,
+        element,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitDynamicTypeLiteralPostfix(
+      Send node,
+      ConstantExpression constant,
+      IncDecOperator operator,
+      A arg) {
+    return handleTypeLiteralConstantCompounds(
+        node,
+        constant,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitStaticMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedPostfix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitStaticMethodPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitTopLevelMethodPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedPrefix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedStaticGetterCompound(
+      Send node,
+      Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelGetterCompound(
+      Send node,
+      Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedStaticSetterCompound(
+      Send node,
+      MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedTopLevelSetterCompound(
+      Send node,
+      MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitStaticMethodCompound(
+      Send node,
+      MethodElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitTopLevelMethodCompound(
+      Send node,
+      MethodElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedCompound(
+      Send node,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        element,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitFinalLocalVariablePostfix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        variable,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg,
+        isSetterValid: false);
+  }
+
+  @override
+  R visitFinalLocalVariablePrefix(
+      Send node,
+      LocalVariableElement variable,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        variable,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg,
+        isSetterValid: false);
+  }
+
+  @override
+  R visitFinalParameterPostfix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        parameter,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg,
+        isSetterValid: false);
+  }
+
+  @override
+  R visitFinalParameterPrefix(
+      Send node,
+      ParameterElement parameter,
+      IncDecOperator operator,
+      A arg) {
+    return handleLocalCompounds(
+        node,
+        parameter,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg,
+        isSetterValid: false);
+  }
+
+  @override
+  R visitFinalStaticFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field,
+        CompoundGetter.FIELD,
+        field,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitFinalStaticFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field,
+        CompoundGetter.FIELD,
+        field,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperFieldFieldCompound(
+      Send node,
+      FieldElement readField,
+      FieldElement writtenField,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        readField,
+        CompoundGetter.FIELD,
+        writtenField,
+        CompoundSetter.FIELD,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitFinalSuperFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field,
+        CompoundGetter.FIELD,
+        field,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitFinalSuperFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        field,
+        CompoundGetter.FIELD,
+        field,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperMethodCompound(
+      Send node,
+      FunctionElement method,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitSuperMethodPostfix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitSuperMethodPrefix(
+      Send node,
+      FunctionElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        method,
+        CompoundGetter.METHOD,
+        method,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field,
+        CompoundGetter.FIELD,
+        field,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitFinalTopLevelFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleStaticCompounds(
+        node,
+        field,
+        CompoundGetter.FIELD,
+        field,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperCompound(
+      Send node,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        element,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperPostfix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperPrefix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterCompound(
+      Send node, Element element,
+      MethodElement setter,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        element,
+        CompoundGetter.UNRESOLVED,
+        setter,
+        CompoundSetter.SETTER,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterCompound(
+      Send node,
+      MethodElement getter,
+      Element element,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new AssignmentCompound(operator, rhs),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.POSTFIX, operator),
+        arg);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperCompounds(
+        node,
+        getter,
+        CompoundGetter.GETTER,
+        element,
+        CompoundSetter.INVALID,
+        new IncDecCompound(CompoundKind.PREFIX, operator),
+        arg);
+  }
+}
+
+/// Simplified handling of indexed compound assignments and prefix/postfix
+/// expressions.
+abstract class BaseImplementationOfIndexCompoundsMixin<R, A>
+    implements SemanticSendVisitor<R, A> {
+
+  /// Handle a dynamic index compounds, like `receiver[index] += rhs` or
+  /// `--receiver[index]`.
+  R handleIndexCompounds(
+      SendSet node,
+      Node receiver,
+      Node index,
+      CompoundRhs rhs,
+      A arg);
+
+  /// Handle a super index compounds, like `super[index] += rhs` or
+  /// `--super[index]`.
+  R handleSuperIndexCompounds(
+      SendSet node,
+      Element indexFunction,
+      Element indexSetFunction,
+      Node index,
+      CompoundRhs rhs,
+      A arg,
+      {bool isGetterValid,
+       bool isSetterValid});
+
+  @override
+  R visitSuperCompoundIndexSet(
+      Send node,
+      FunctionElement indexFunction,
+      FunctionElement indexSetFunction,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, indexFunction, indexSetFunction, index,
+        new AssignmentCompound(operator, rhs), arg,
+        isGetterValid: true, isSetterValid: true);
+  }
+
+  @override
+  R visitSuperIndexPostfix(
+      Send node,
+      FunctionElement indexFunction,
+      FunctionElement indexSetFunction,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, indexFunction, indexSetFunction, index,
+        new IncDecCompound(CompoundKind.POSTFIX, operator), arg,
+        isGetterValid: true, isSetterValid: true);
+  }
+
+  @override
+  R visitSuperIndexPrefix(
+      Send node,
+      FunctionElement indexFunction,
+      FunctionElement indexSetFunction,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, indexFunction, indexSetFunction, index,
+        new IncDecCompound(CompoundKind.PREFIX, operator), arg,
+        isGetterValid: true, isSetterValid: true);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterCompoundIndexSet(
+      Send node,
+      Element indexFunction,
+      FunctionElement indexSetFunction,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, indexFunction, indexSetFunction, index,
+        new AssignmentCompound(operator, rhs), arg,
+        isGetterValid: false, isSetterValid: true);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterCompoundIndexSet(
+      Send node,
+      FunctionElement indexFunction,
+      Element indexSetFunction,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, indexFunction, indexSetFunction, index,
+        new AssignmentCompound(operator, rhs), arg,
+        isGetterValid: true, isSetterValid: false);
+  }
+
+  @override
+  R visitUnresolvedSuperCompoundIndexSet(
+      Send node,
+      Element element,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, element, element, index,
+        new AssignmentCompound(operator, rhs), arg,
+        isGetterValid: false, isSetterValid: false);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterIndexPostfix(
+      Send node,
+      Element element,
+      FunctionElement indexSetFunction,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, element, indexSetFunction, index,
+        new IncDecCompound(CompoundKind.POSTFIX, operator), arg,
+        isGetterValid: false, isSetterValid: true);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterIndexPrefix(
+      Send node,
+      Element element,
+      FunctionElement indexSetFunction,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, element, indexSetFunction, index,
+        new IncDecCompound(CompoundKind.PREFIX, operator), arg,
+        isGetterValid: false, isSetterValid: true);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterIndexPostfix(
+      Send node,
+      MethodElement indexFunction,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, indexFunction, element, index,
+        new IncDecCompound(CompoundKind.POSTFIX, operator), arg,
+        isGetterValid: true, isSetterValid: false);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterIndexPrefix(
+      Send node,
+      MethodElement indexFunction,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, indexFunction, element, index,
+        new IncDecCompound(CompoundKind.PREFIX, operator), arg,
+        isGetterValid: true, isSetterValid: false);
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPostfix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, element, element, index,
+        new IncDecCompound(CompoundKind.POSTFIX, operator), arg,
+        isGetterValid: false, isSetterValid: false);
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPrefix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperIndexCompounds(
+        node, element, element, index,
+        new IncDecCompound(CompoundKind.PREFIX, operator), arg,
+        isGetterValid: false, isSetterValid: false);
+  }
+
+  @override
+  R visitCompoundIndexSet(
+      SendSet node,
+      Node receiver,
+      Node index,
+      AssignmentOperator operator,
+      Node rhs,
+      A arg) {
+    return handleIndexCompounds(
+        node, receiver, index,
+        new AssignmentCompound(operator, rhs), arg);
+  }
+
+  @override
+  R visitIndexPostfix(
+      Send node,
+      Node receiver,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleIndexCompounds(
+        node, receiver, index,
+        new IncDecCompound(CompoundKind.POSTFIX, operator), arg);
+  }
+
+  @override
+  R visitIndexPrefix(
+      Send node,
+      Node receiver,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleIndexCompounds(
+        node, receiver, index,
+        new IncDecCompound(CompoundKind.PREFIX, operator), arg);
+  }
+}
+
+
 
 /// Mixin that groups all `visitSuperXPrefix`, `visitSuperXPostfix` methods by
 /// delegating calls to `handleSuperXPostfixPrefix` methods.
@@ -5267,6 +10202,69 @@ abstract class BaseImplementationOfSuperIncDecsMixin<R, A>
       FunctionElement indexFunction,
       FunctionElement indexSetFunction,
       Node index,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedSuperGetterIndexPostfixPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedSuperSetterIndexPostfixPrefix(
+      Send node,
+      FunctionElement indexFunction,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedSuperIndexPostfixPrefix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleFinalSuperFieldPostfixPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleSuperMethodPostfixPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedSuperPostfixPrefix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedSuperGetterPostfixPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg,
+      {bool isPrefix});
+
+  R handleUnresolvedSuperSetterPostfixPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
       IncDecOperator operator,
       A arg,
       {bool isPrefix});
@@ -5426,6 +10424,180 @@ abstract class BaseImplementationOfSuperIncDecsMixin<R, A>
         node, indexFunction, indexSetFunction,
         index, operator, arg, isPrefix: true);
   }
+
+  @override
+  R visitUnresolvedSuperGetterIndexPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperGetterIndexPostfixPrefix(
+        node, element, setter, index, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterIndexPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperGetterIndexPostfixPrefix(
+        node, element, setter, index, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterIndexPostfix(
+      Send node,
+      MethodElement indexFunction,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperSetterIndexPostfixPrefix(
+        node, indexFunction, element, index, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterIndexPrefix(
+      Send node,
+      MethodElement indexFunction,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperSetterIndexPostfixPrefix(
+        node, indexFunction, element, index, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPostfix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperIndexPostfixPrefix(
+        node, element, index, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedSuperIndexPrefix(
+      Send node,
+      Element element,
+      Node index,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperIndexPostfixPrefix(
+        node, element, index, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitFinalSuperFieldPostfix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleFinalSuperFieldPostfixPrefix(
+        node, field, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitFinalSuperFieldPrefix(
+      Send node,
+      FieldElement field,
+      IncDecOperator operator,
+      A arg) {
+    return handleFinalSuperFieldPostfixPrefix(
+        node, field, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitSuperMethodPostfix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperMethodPostfixPrefix(
+        node, method, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitSuperMethodPrefix(
+      Send node,
+      MethodElement method,
+      IncDecOperator operator,
+      A arg) {
+    return handleSuperMethodPostfixPrefix(
+        node, method, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitUnresolvedSuperPostfix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperPostfixPrefix(
+        node, element, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedSuperPrefix(
+      Send node,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperPostfixPrefix(
+        node, element, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPostfix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperGetterPostfixPrefix(
+        node, element, setter, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedSuperGetterPrefix(
+      Send node,
+      Element element,
+      MethodElement setter,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperGetterPostfixPrefix(
+        node, element, setter, operator, arg, isPrefix: true);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPostfix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperSetterPostfixPrefix(
+        node, getter, element, operator, arg, isPrefix: false);
+  }
+
+  @override
+  R visitUnresolvedSuperSetterPrefix(
+      Send node,
+      MethodElement getter,
+      Element element,
+      IncDecOperator operator,
+      A arg) {
+    return handleUnresolvedSuperSetterPostfixPrefix(
+        node, getter, element, operator, arg, isPrefix: true);
+  }
 }
 
 /// Mixin that groups the non-constant `visitXConstructorInvoke` methods by
@@ -5441,7 +10613,7 @@ abstract class BaseImplementationOfNewMixin<R, A>
       ConstructorElement constructor,
       DartType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg);
 
   R visitGenerativeConstructorInvoke(
@@ -5449,34 +10621,37 @@ abstract class BaseImplementationOfNewMixin<R, A>
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return handleConstructorInvoke(
-        node, constructor, type, arguments, selector, arg);
+        node, constructor, type, arguments, callStructure, arg);
   }
 
+  @override
   R visitRedirectingGenerativeConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return handleConstructorInvoke(
-        node, constructor, type, arguments, selector, arg);
+        node, constructor, type, arguments, callStructure, arg);
   }
 
+  @override
   R visitFactoryConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
       InterfaceType type,
       NodeList arguments,
-      Selector selector,
+      CallStructure callStructure,
       A arg) {
     return handleConstructorInvoke(
-        node, constructor, type, arguments, selector, arg);
+        node, constructor, type, arguments, callStructure, arg);
   }
 
+  @override
   R visitRedirectingFactoryConstructorInvoke(
       NewExpression node,
       ConstructorElement constructor,
@@ -5484,9 +10659,57 @@ abstract class BaseImplementationOfNewMixin<R, A>
       ConstructorElement effectiveTarget,
       InterfaceType effectiveTargetType,
       NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleConstructorInvoke(
+        node, constructor, type, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitUnresolvedConstructorInvoke(
+      NewExpression node,
+      Element constructor,
+      DartType type,
+      NodeList arguments,
       Selector selector,
       A arg) {
     return handleConstructorInvoke(
-        node, constructor, type, arguments, selector, arg);
+        node, constructor, type, arguments, selector.callStructure, arg);
+  }
+
+  @override
+  R visitUnresolvedClassConstructorInvoke(
+      NewExpression node,
+      Element element,
+      DartType type,
+      NodeList arguments,
+      Selector selector,
+      A arg) {
+    return handleConstructorInvoke(
+        node, element, type, arguments, selector.callStructure, arg);
+  }
+
+  @override
+  R visitAbstractClassConstructorInvoke(
+      NewExpression node,
+      ConstructorElement constructor,
+      InterfaceType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleConstructorInvoke(
+        node, constructor, type, arguments, callStructure, arg);
+  }
+
+  @override
+  R visitUnresolvedRedirectingFactoryConstructorInvoke(
+      NewExpression node,
+      ConstructorElement constructor,
+      InterfaceType type,
+      NodeList arguments,
+      CallStructure callStructure,
+      A arg) {
+    return handleConstructorInvoke(
+        node, constructor, type, arguments, callStructure, arg);
   }
 }

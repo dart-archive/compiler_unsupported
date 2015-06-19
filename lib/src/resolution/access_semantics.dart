@@ -27,17 +27,29 @@ enum AccessKind {
   /// an enclosing function or method.
   LOCAL_FUNCTION,
 
-  /// The destination of the access is a variable that is defined locally within
-  /// an enclosing function or method.
+  /// The destination of the access is a non-final variable that is defined
+  /// locally within an enclosing function or method.
   LOCAL_VARIABLE,
 
-  /// The destination of the access is a variable that is defined as a parameter
-  /// to an enclosing function or method.
+  /// The destination of the access is a final variable that is defined locally
+  /// within an enclosing function or method.
+  FINAL_LOCAL_VARIABLE,
+
+  /// The destination of the access is a variable that is defined as a non-final
+  /// parameter to an enclosing function or method.
   PARAMETER,
 
-  /// The destination of the access is a field that is defined statically within
-  /// a class.
+  /// The destination of the access is a variable that is defined as a final
+  /// parameter to an enclosing function or method.
+  FINAL_PARAMETER,
+
+  /// The destination of the access is a non-final field that is defined
+  /// statically within a class.
   STATIC_FIELD,
+
+  /// The destination of the access is a final field that is defined statically
+  /// within a class.
+  FINAL_STATIC_FIELD,
 
   /// The destination of the access is a method that is defined statically
   /// within a class.
@@ -51,9 +63,13 @@ enum AccessKind {
   /// statically within a class.
   STATIC_SETTER,
 
-  /// The destination of the access is a top level variable defined within a
-  /// library.
+  /// The destination of the access is a non-final top level variable defined
+  /// within a library.
   TOPLEVEL_FIELD,
+
+  /// The destination of the access is a final top level variable defined within
+  /// a library.
+  FINAL_TOPLEVEL_FIELD,
 
   /// The destination of the access is a top level method defined within a
   /// library.
@@ -91,9 +107,13 @@ enum AccessKind {
   /// of the enclosing class.
   THIS_PROPERTY,
 
-  /// The destination of the access is a field of the super class of the
-  /// enclosing class.
+  /// The destination of the access is a non-final field of the super class of
+  /// the enclosing class.
   SUPER_FIELD,
+
+  /// The destination of the access is a final field of the super class of the
+  /// enclosing class.
+  SUPER_FINAL_FIELD,
 
   /// The destination of the access is a method of the super class of the
   /// enclosing class.
@@ -116,18 +136,31 @@ enum AccessKind {
 
   /// The destination of the access is unresolved in a static context.
   UNRESOLVED,
+
+  /// The destination of the access is unresolved super access.
+  UNRESOLVED_SUPER,
 }
 
 enum CompoundAccessKind {
-  /// Read from a static getter and write to static setter.
+  /// Read from a static getter and write to a static setter.
   STATIC_GETTER_SETTER,
-  /// Read from a static method (closurize) and write to static setter.
+  /// Read from a static method (closurize) and write to a static setter.
   STATIC_METHOD_SETTER,
+
+  /// Read from an unresolved static getter and write to a static setter.
+  UNRESOLVED_STATIC_GETTER,
+  /// Read from a static getter and write to an unresolved static setter.
+  UNRESOLVED_STATIC_SETTER,
 
   /// Read from a top level getter and write to a top level setter.
   TOPLEVEL_GETTER_SETTER,
   /// Read from a top level method (closurize) and write to top level setter.
   TOPLEVEL_METHOD_SETTER,
+
+  /// Read from an unresolved top level getter and write to a top level setter.
+  UNRESOLVED_TOPLEVEL_GETTER,
+  /// Read from a top level getter and write to an unresolved top level setter.
+  UNRESOLVED_TOPLEVEL_SETTER,
 
   /// Read from one superclass field and write to another.
   SUPER_FIELD_FIELD,
@@ -140,6 +173,11 @@ enum CompoundAccessKind {
   SUPER_METHOD_SETTER,
   /// Read from a superclass getter and write to a superclass field.
   SUPER_GETTER_FIELD,
+
+  /// Read from a superclass where the getter (and maybe setter) is unresolved.
+  UNRESOLVED_SUPER_GETTER,
+  /// Read from a superclass getter and write to an unresolved setter.
+  UNRESOLVED_SUPER_SETTER,
 }
 
 /**
@@ -250,6 +288,9 @@ class StaticAccess extends AccessSemantics {
   StaticAccess.superField(FieldElement this.element)
       : super._(AccessKind.SUPER_FIELD);
 
+  StaticAccess.superFinalField(FieldElement this.element)
+      : super._(AccessKind.SUPER_FINAL_FIELD);
+
   StaticAccess.superMethod(MethodElement this.element)
       : super._(AccessKind.SUPER_METHOD);
 
@@ -265,11 +306,20 @@ class StaticAccess extends AccessSemantics {
   StaticAccess.localVariable(LocalVariableElement this.element)
       : super._(AccessKind.LOCAL_VARIABLE);
 
+  StaticAccess.finalLocalVariable(LocalVariableElement this.element)
+      : super._(AccessKind.FINAL_LOCAL_VARIABLE);
+
   StaticAccess.parameter(ParameterElement this.element)
       : super._(AccessKind.PARAMETER);
 
+  StaticAccess.finalParameter(ParameterElement this.element)
+      : super._(AccessKind.FINAL_PARAMETER);
+
   StaticAccess.staticField(FieldElement this.element)
       : super._(AccessKind.STATIC_FIELD);
+
+  StaticAccess.finalStaticField(FieldElement this.element)
+      : super._(AccessKind.FINAL_STATIC_FIELD);
 
   StaticAccess.staticMethod(MethodElement this.element)
       : super._(AccessKind.STATIC_METHOD);
@@ -283,6 +333,9 @@ class StaticAccess extends AccessSemantics {
   StaticAccess.topLevelField(FieldElement this.element)
       : super._(AccessKind.TOPLEVEL_FIELD);
 
+  StaticAccess.finalTopLevelField(FieldElement this.element)
+      : super._(AccessKind.FINAL_TOPLEVEL_FIELD);
+
   StaticAccess.topLevelMethod(MethodElement this.element)
       : super._(AccessKind.TOPLEVEL_METHOD);
 
@@ -294,6 +347,9 @@ class StaticAccess extends AccessSemantics {
 
   StaticAccess.unresolved(this.element)
       : super._(AccessKind.UNRESOLVED);
+
+  StaticAccess.unresolvedSuper(this.element)
+      : super._(AccessKind.UNRESOLVED_SUPER);
 }
 
 class CompoundAccessSemantics extends AccessSemantics {
@@ -307,6 +363,22 @@ class CompoundAccessSemantics extends AccessSemantics {
       : super._(AccessKind.COMPOUND);
 
   Element get element => setter;
+
+  String toString() {
+    StringBuffer sb = new StringBuffer();
+    sb.write('CompoundAccessSemantics[');
+    sb.write('kind=$compoundAccessKind');
+    if (getter != null) {
+      sb.write(',getter=');
+      sb.write('${getter}');
+    }
+    if (setter != null) {
+      sb.write(',setter=');
+      sb.write('${setter}');
+    }
+    sb.write(']');
+    return sb.toString();
+  }
 }
 
 /// Enum representing the different kinds of destinations which a constructor
@@ -366,17 +438,32 @@ enum ConstructorAccessKind {
   ///
   ABSTRACT,
 
-  /// An invocation of an unresolved constructor or an unresolved type.
+  /// An invocation of a constructor on an unresolved type.
+  ///
+  /// For instance
+  ///     m() => new Unresolved();
+  ///
+  UNRESOLVED_TYPE,
+
+  /// An invocation of an unresolved constructor.
   ///
   /// For instance
   ///     class C {
   ///       C();
   ///     }
-  ///     m1() => new C.unresolved();
-  ///     m2() => new Unresolved();
+  ///     m() => new C.unresolved();
   ///
-  // TODO(johnniwinther): Differentiate between error types.
-  ERRONEOUS,
+  UNRESOLVED_CONSTRUCTOR,
+
+  /// An const invocation of an non-constant constructor.
+  ///
+  /// For instance
+  ///     class C {
+  ///       C();
+  ///     }
+  ///     m() => const C();
+  ///
+  NON_CONSTANT_CONSTRUCTOR,
 
   /// An invocation of an ill-defined redirecting factory constructor.
   ///
@@ -387,6 +474,17 @@ enum ConstructorAccessKind {
   ///     m() => new C();
   ///
   ERRONEOUS_REDIRECTING_FACTORY,
+
+
+  /// An invocation of a constructor with incompatible arguments.
+  ///
+  /// For instance
+  ///     class C {
+  ///       C();
+  ///     }
+  ///     m() => new C(true);
+  ///
+  INCOMPATIBLE,
 }
 
 /// Data structure used to classify the semantics of a constructor invocation.
@@ -409,9 +507,14 @@ class ConstructorAccessSemantics {
   /// `true` if this invocation is erroneous.
   bool get isErroneous {
     return kind == ConstructorAccessKind.ABSTRACT ||
-           kind == ConstructorAccessKind.ERRONEOUS ||
-           kind == ConstructorAccessKind.ERRONEOUS_REDIRECTING_FACTORY;
+           kind == ConstructorAccessKind.UNRESOLVED_TYPE ||
+           kind == ConstructorAccessKind.UNRESOLVED_CONSTRUCTOR ||
+           kind == ConstructorAccessKind.NON_CONSTANT_CONSTRUCTOR ||
+           kind == ConstructorAccessKind.ERRONEOUS_REDIRECTING_FACTORY ||
+           kind == ConstructorAccessKind.INCOMPATIBLE;
   }
+
+  String toString() => 'ConstructorAccessSemantics($kind, $element, $type)';
 }
 
 /// Data structure used to classify the semantics of a redirecting factory

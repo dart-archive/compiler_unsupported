@@ -44,19 +44,15 @@ List<ParameterMirror> _parametersFromFunctionSignature(
     Dart2JsDeclarationMirror owner,
     FunctionSignature signature) {
   var parameters = <ParameterMirror>[];
-  Link<Element> link = signature.requiredParameters;
-  while (!link.isEmpty) {
+  signature.requiredParameters.forEach((FormalElement parameter) {
     parameters.add(new Dart2JsParameterMirror(
-        owner, link.head, isOptional: false, isNamed: false));
-    link = link.tail;
-  }
-  link = signature.optionalParameters;
+        owner, parameter, isOptional: false, isNamed: false));
+  });
   bool isNamed = signature.optionalParametersAreNamed;
-  while (!link.isEmpty) {
+  signature.optionalParameters.forEach((FormalElement parameter) {
     parameters.add(new Dart2JsParameterMirror(
-        owner, link.head, isOptional: true, isNamed: isNamed));
-    link = link.tail;
-  }
+        owner, parameter, isOptional: true, isNamed: isNamed));
+  });
   return parameters;
 }
 
@@ -224,7 +220,9 @@ abstract class Dart2JsElementMirror extends Dart2JsDeclarationMirror {
             mirrorSystem.compiler.commentMap[metadata.beginToken]);
         metadata.ensureResolved(mirrorSystem.compiler);
         _metadata.add(_convertConstantToInstanceMirror(
-            mirrorSystem, metadata.constant, metadata.constant.value));
+            mirrorSystem, metadata.constant,
+            mirrorSystem.compiler.constants.getConstantValue(
+                metadata.constant)));
       }
       _appendCommentTokens(mirrorSystem.compiler.commentMap[getBeginToken()]);
     }

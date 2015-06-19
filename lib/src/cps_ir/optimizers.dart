@@ -4,30 +4,17 @@
 
 library dart2js.cps_ir.optimizers;
 
-import '../constants/expressions.dart' show
-    ConstantExpression,
-    PrimitiveConstantExpression;
-import '../constants/values.dart';
-import '../dart_types.dart' as types;
-import '../dart2jslib.dart' as dart2js;
-import '../tree/tree.dart' show LiteralDartString;
-import '../util/util.dart';
 import 'cps_ir_nodes.dart';
-import '../types/types.dart' show TypeMask, TypesTask;
-import '../core_types.dart' show CoreTypes;
-import '../types/constants.dart' show computeTypeMask;
-import '../elements/elements.dart' show ClassElement, Element, Entity,
-    FieldElement, FunctionElement, ParameterElement;
-import '../dart2jslib.dart' show ClassWorld;
 
-part 'type_propagation.dart';
-part 'redundant_phi.dart';
-part 'shrinking_reductions.dart';
+export 'type_propagation.dart' show TypePropagator, TypeSystem,
+                                    UnitTypeSystem, TypeMaskSystem;
+export 'redundant_phi.dart' show RedundantPhiEliminator;
+export 'shrinking_reductions.dart' show ShrinkingReducer, ParentVisitor;
 
 /// An optimization pass over the CPS IR.
 abstract class Pass {
   /// Applies optimizations to root, rewriting it in the process.
-  void rewrite(RootNode root);
+  void rewrite(FunctionDefinition root);
 
   String get passName;
 }

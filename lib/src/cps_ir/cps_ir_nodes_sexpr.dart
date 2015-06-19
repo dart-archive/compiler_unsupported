@@ -54,66 +54,11 @@ class SExpressionStringifier extends Indentation implements Visitor<String> {
     String name = node.element.name;
     String thisParameter = formatThisParameter(node.thisParameter);
     String parameters = node.parameters.map(visit).join(' ');
-    String body = visit(node.body);
+    namer.setReturnContinuation(node.returnContinuation);
+    String body = indentBlock(() => visit(node.body));
     return '$indentation'
         '(FunctionDefinition $name $thisParameter ($parameters) return\n'
         '$body)';
-  }
-
-  String visitFieldDefinition(FieldDefinition node) {
-    String name = node.element.name;
-    if (node.body != null) {
-      String body = visit(node.body);
-      return '$indentation(FieldDefinition $name () return\n'
-             '$body)';
-    } else {
-      return '$indentation(FieldDefinition $name)';
-    }
-  }
-
-  String visitConstructorDefinition(ConstructorDefinition node) {
-    String name = node.element.name;
-    if (name != '') name = '$name ';
-    String thisParameter = formatThisParameter(node.thisParameter);
-    String parameters = node.parameters.map(visit).join(' ');
-    if (node.body != null) {
-      String initializers = indentBlock(() {
-        return indentBlock(() {
-          if (node.initializers.isEmpty) {
-            return '$indentation';
-          } else {
-            return node.initializers.map(visit).join('\n');
-          }
-        });
-      });
-      String body = visit(node.body);
-      return '$indentation'
-          '(ConstructorDefinition $name$thisParameter ($parameters) return'
-          ' (\n$initializers)\n$body)';
-    } else {
-      return '$indentation'
-          '(ConstructorDefinition $name$thisParameter ($parameters) return)';
-    }
-  }
-
-  String visitFieldInitializer(FieldInitializer node) {
-    String name = node.element.name;
-    String body = visit(node.body);
-    return '$indentation(FieldInitializer $name\n$body)';
-  }
-
-  String visitSuperInitializer(SuperInitializer node) {
-    String target = node.target.name;
-    String selector = node.selector.name;
-    String arguments =
-        indentBlock(() =>
-          indentBlock(() => node.arguments.map(visit).join('\n')));
-    return '$indentation(SuperInitializer $target $selector (\n$arguments)';
-  }
-
-  String visitBody(Body node) {
-    namer.setReturnContinuation(node.returnContinuation);
-    return indentBlock(() => visit(node.body));
   }
 
   String visitLetPrim(LetPrim node) {
@@ -238,7 +183,16 @@ class SExpressionStringifier extends Indentation implements Visitor<String> {
     String name = access(node.continuation);
     if (node.isRecursive) name = 'rec $name';
     String args = node.arguments.map(access).join(' ');
-    return '$indentation($InvokeContinuation $name ($args))';
+    return '$indentation(InvokeContinuation $name ($args))';
+  }
+
+  String visitThrow(Throw node) {
+    String value = access(node.value);
+    return '$indentation(Throw $value)';
+  }
+
+  String visitRethrow(Rethrow node) {
+    return '$indentation(Rethrow)';
   }
 
   String visitBranch(Branch node) {
@@ -249,13 +203,8 @@ class SExpressionStringifier extends Indentation implements Visitor<String> {
   }
 
   String visitConstant(Constant node) {
-    String value =
-        node.expression.value.accept(new ConstantStringifier(), null);
+    String value = node.value.accept(new ConstantStringifier(), null);
     return '(Constant $value)';
-  }
-
-  String visitReifyTypeVar(ReifyTypeVar node) {
-    return '$indentation(ReifyTypeVar ${node.typeVariable.name})';
   }
 
   String visitCreateFunction(CreateFunction node) {
@@ -281,10 +230,12 @@ class SExpressionStringifier extends Indentation implements Visitor<String> {
   }
 
   String visitTypeOperator(TypeOperator node) {
-    String receiver = access(node.receiver);
+    String value = access(node.value);
     String cont = access(node.continuation);
     String operator = node.isTypeTest ? 'is' : 'as';
-    return '$indentation(TypeOperator $operator $receiver ${node.type} $cont)';
+    String typeArguments = node.typeArguments.map(access).join(' ');
+    return '$indentation(TypeOperator $operator $value ${node.type} '
+           '($typeArguments) $cont)';
   }
 
   String visitLiteralList(LiteralList node) {
@@ -296,15 +247,6 @@ class SExpressionStringifier extends Indentation implements Visitor<String> {
     String keys = node.entries.map((e) => access(e.key)).join(' ');
     String values = node.entries.map((e) => access(e.value)).join(' ');
     return '(LiteralMap ($keys) ($values))';
-  }
-
-  String visitDeclareFunction(DeclareFunction node) {
-    String name = visit(node.variable);
-    String function = indentBlock(() => visit(node.definition));
-    String body = indentBlock(() => visit(node.body));
-    return '$indentation(DeclareFunction $name =\n'
-           '$function in\n'
-           '$body)';
   }
 
   String visitIsTrue(IsTrue node) {
@@ -324,6 +266,24 @@ class SExpressionStringifier extends Indentation implements Visitor<String> {
     String object = access(node.object);
     String field = node.field.name;
     return '(GetField $object $field)';
+  }
+
+  String visitGetStatic(GetStatic node) {
+    String element = node.element.name;
+    return '(GetStatic $element)';
+  }
+
+  String visitSetStatic(SetStatic node) {
+    String element = node.element.name;
+    String value = access(node.value);
+    String body = indentBlock(() => visit(node.body));
+    return '$indentation(SetStatic $element $value\n$body)';
+  }
+
+  String visitGetLazyStatic(GetLazyStatic node) {
+    String element = node.element.name;
+    String cont = access(node.continuation);
+    return '$indentation(GetLazyStatic $element $cont)';
   }
 
   String visitCreateBox(CreateBox node) {
@@ -355,10 +315,20 @@ class SExpressionStringifier extends Indentation implements Visitor<String> {
     return '(ReadTypeVariable ${access(node.target)}.${node.variable})';
   }
 
-  @override
   String visitTypeExpression(TypeExpression node) {
     String args = node.arguments.map(access).join(', ');
     return '(TypeExpression ${node.dartType.toString()} $args)';
+  }
+
+  String visitNonTailThrow(NonTailThrow node) {
+    String value = access(node.value);
+    return '(NonTailThrow $value)';
+  }
+
+  String visitCreateInvocationMirror(CreateInvocationMirror node) {
+    String selector = node.selector.name;
+    String args = node.arguments.map(access).join(', ');
+    return '(CreateInvocationMirror $selector $args)';
   }
 }
 
@@ -374,7 +344,7 @@ class ConstantStringifier extends ConstantValueVisitor<String, Null> {
   }
 
   String visitFunction(FunctionConstantValue constant, _) {
-    return _failWith(constant);
+    return '(Function "${constant.unparse()}")';
   }
 
   String visitNull(NullConstantValue constant, _) {
@@ -470,7 +440,7 @@ class _Namer {
   }
 
   String getName(Node node) {
-    assert(_names.containsKey(node));
+    if (!_names.containsKey(node)) return 'MISSING_NAME';
     return _names[node];
   }
 }

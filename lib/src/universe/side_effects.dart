@@ -28,7 +28,10 @@ class SideEffects {
     setDependsOnSomething();
   }
 
-  SideEffects.empty();
+  SideEffects.empty() {
+    clearAllDependencies();
+    clearAllSideEffects();
+  }
 
   bool operator==(other) => _flags == other._flags;
 
@@ -36,7 +39,7 @@ class SideEffects {
 
   bool _getFlag(int position) => (_flags & (1 << position)) != 0;
   void _setFlag(int position) { _flags |= (1 << position); }
-  bool _clearFlag(int position) { _flags &= ~(1 << position); }
+  void _clearFlag(int position) { _flags &= ~(1 << position); }
 
   int getChangesFlags() => _flags & ((1 << FLAG_CHANGES_COUNT) - 1);
   int getDependsOnFlags() {

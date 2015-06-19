@@ -6,11 +6,12 @@ library resolution;
 
 import 'dart:collection' show Queue;
 
+import '../compile_time_constants.dart';
 import '../constants/expressions.dart';
 import '../constants/values.dart';
 import '../dart_backend/dart_backend.dart' show DartBackend;
 import '../dart_types.dart';
-import '../dart2jslib.dart';
+import '../dart2jslib.dart' hide DynamicAccess;
 import '../tree/tree.dart';
 import '../scanner/scannerlib.dart';
 import '../elements/elements.dart';
@@ -34,6 +35,7 @@ import '../elements/modelx.dart' show
     LocalParameterElementX,
     LocalVariableElementX,
     MetadataAnnotationX,
+    MethodElementX,
     MixinApplicationElementX,
     ParameterElementX,
     ParameterMetadataAnnotation,
@@ -45,13 +47,25 @@ import '../elements/modelx.dart' show
 
 import '../ordered_typeset.dart' show OrderedTypeSet, OrderedTypeSetBuilder;
 import '../util/util.dart';
-import '../universe/universe.dart' show CallStructure;
+import '../universe/universe.dart' show CallStructure, SelectorKind;
 
+import 'access_semantics.dart';
 import 'class_members.dart' show MembersCreator;
 import 'enum_creator.dart';
+import 'operators.dart';
 import 'secret_tree_element.dart' show getTreeElement, setTreeElement;
+import 'send_structure.dart';
 
+part 'class_hierarchy.dart';
+part 'constructors.dart';
+part 'label_scope.dart';
 part 'members.dart';
 part 'registry.dart';
+part 'resolution_common.dart';
+part 'resolution_result.dart';
 part 'scope.dart';
 part 'signatures.dart';
+part 'tree_elements.dart';
+part 'typedefs.dart';
+part 'type_resolver.dart';
+part 'variables.dart';

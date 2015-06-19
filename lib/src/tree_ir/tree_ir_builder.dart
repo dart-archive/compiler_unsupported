@@ -82,7 +82,6 @@ class Builder implements cps_ir.Visitor<Node> {
   Variable phiTempVar;
 
   Variable addMutableVariable(cps_ir.MutableVariable irVariable) {
-    assert(irVariable.host == currentElement);
     assert(!mutable2variable.containsKey(irVariable));
     Variable variable = new Variable(currentElement, irVariable.hint);
     mutable2variable[irVariable] = variable;
@@ -90,7 +89,7 @@ class Builder implements cps_ir.Visitor<Node> {
   }
 
   Variable getMutableVariable(cps_ir.MutableVariable mutableVariable) {
-    if (mutableVariable.host != currentElement) {
+    if (!mutable2variable.containsKey(mutableVariable)) {
       return parent.getMutableVariable(mutableVariable)..isCaptured = true;
     }
     return mutable2variable[mutableVariable];
@@ -120,40 +119,12 @@ class Builder implements cps_ir.Visitor<Node> {
     return new VariableUse(getVariable(reference.definition));
   }
 
-  RootNode build(cps_ir.RootNode node) {
-    // TODO(asgerf): Don't have build AND buildXXX as public API.
-    if (node is cps_ir.FieldDefinition) {
-      return buildField(node);
-    } else if (node is cps_ir.ConstructorDefinition) {
-      return buildConstructor(node);
-    } else {
-      assert(dart2js.invariant(
-          CURRENT_ELEMENT_SPANNABLE,
-          node is cps_ir.FunctionDefinition,
-          message: 'expected FunctionDefinition or FieldDefinition, '
-            ' found $node'));
-      return buildFunction(node);
-    }
-  }
-
-  FieldDefinition buildField(cps_ir.FieldDefinition node) {
-    Statement body;
-    if (!node.isEmpty) {
-      currentElement = node.element;
-      returnContinuation = node.body.returnContinuation;
-
-      phiTempVar = new Variable(node.element, null);
-
-      body = visit(node.body);
-    }
-    return new FieldDefinition(node.element, body);
-  }
-
   Variable addFunctionParameter(cps_ir.Definition variable) {
     if (variable is cps_ir.Parameter) {
       return getVariable(variable);
     } else {
-      return addMutableVariable(variable as cps_ir.MutableVariable);
+      return addMutableVariable(variable as cps_ir.MutableVariable)
+              ..isCaptured = true;
     }
   }
 
@@ -167,34 +138,10 @@ class Builder implements cps_ir.Visitor<Node> {
     }
     List<Variable> parameters =
         node.parameters.map(addFunctionParameter).toList();
-    Statement body;
-    if (!node.isEmpty) {
-      returnContinuation = node.body.returnContinuation;
-      phiTempVar = new Variable(node.element, null);
-      body = visit(node.body);
-    }
-
-    return new FunctionDefinition(node.element, parameters,
-        body, node.localConstants, node.defaultParameterValues);
-  }
-
-  ConstructorDefinition buildConstructor(cps_ir.ConstructorDefinition node) {
-    currentElement = node.element;
-    thisParameter = node.thisParameter;
-    List<Variable> parameters =
-        node.parameters.map(addFunctionParameter).toList();
-    List<Initializer> initializers;
-    Statement body;
-    if (!node.isEmpty) {
-      initializers = node.initializers.map(visit).toList();
-      returnContinuation = node.body.returnContinuation;
-
-      phiTempVar = new Variable(node.element, null);
-      body = visit(node.body);
-    }
-
-    return new ConstructorDefinition(node.element, parameters,
-        body, initializers, node.localConstants, node.defaultParameterValues);
+    returnContinuation = node.returnContinuation;
+    phiTempVar = new Variable(node.element, null);
+    Statement body = visit(node.body);
+    return new FunctionDefinition(node.element, parameters, body);
   }
 
   /// Returns a list of variables corresponding to the arguments to a method
@@ -214,15 +161,13 @@ class Builder implements cps_ir.Visitor<Node> {
       cps_ir.Parameter parameter,
       Expression argument,
       Statement buildRest()) {
-    Statement assignment;
+    Expression expr;
     if (parameter.hasAtLeastOneUse) {
-      Variable variable = getVariable(parameter);
-      assignment = new Assign(variable, argument, null);
+      expr = new Assign(getVariable(parameter), argument);
     } else {
-      assignment = new ExpressionStatement(argument, null);
+      expr = argument;
     }
-    assignment.next = buildRest();
-    return assignment;
+    return new ExpressionStatement(expr, buildRest());
   }
 
   /// Simultaneously assigns each argument to the corresponding parameter,
@@ -264,9 +209,9 @@ class Builder implements cps_ir.Visitor<Node> {
     Statement first, current;
     void addAssignment(Variable dst, Expression src) {
       if (first == null) {
-        first = current = new Assign(dst, src, null);
+        first = current = Assign.makeStatement(dst, src);
       } else {
-        current = current.next = new Assign(dst, src, null);
+        current = current.next = Assign.makeStatement(dst, src);
       }
     }
 
@@ -330,31 +275,14 @@ class Builder implements cps_ir.Visitor<Node> {
   visitCreateInstance(cps_ir.CreateInstance node) => unexpectedNode(node);
   visitGetField(cps_ir.GetField node) => unexpectedNode(node);
   visitCreateBox(cps_ir.CreateBox node) => unexpectedNode(node);
+  visitCreateInvocationMirror(cps_ir.CreateInvocationMirror node) {
+    return unexpectedNode(node);
+  }
 
   // Executable definitions are not visited directly.  They have 'build'
   // functions as entry points.
-  visitFieldDefinition(cps_ir.FieldDefinition node) {
-    return unexpectedNode(node);
-  }
   visitFunctionDefinition(cps_ir.FunctionDefinition node) {
     return unexpectedNode(node);
-  }
-  visitConstructorDefinition(cps_ir.ConstructorDefinition node) {
-    return unexpectedNode(node);
-  }
-
-  Initializer visitFieldInitializer(cps_ir.FieldInitializer node) {
-    returnContinuation = node.body.returnContinuation;
-    return new FieldInitializer(node.element, visit(node.body.body));
-  }
-
-  Initializer visitSuperInitializer(cps_ir.SuperInitializer node) {
-    List<Statement> arguments =
-        node.arguments.map((cps_ir.Body argument) {
-      returnContinuation = argument.returnContinuation;
-      return visit(argument.body);
-    }).toList();
-    return new SuperInitializer(node.target, node.selector, arguments);
   }
 
   Statement visitLetPrim(cps_ir.LetPrim node) {
@@ -363,20 +291,8 @@ class Builder implements cps_ir.Visitor<Node> {
     // Don't translate unused primitives.
     if (variable == null) return visit(node.body);
 
-    Node definition = visit(node.primitive);
-
-    // visitPrimitive returns a Statement without successor if it cannot occur
-    // in expression context (currently only the case for FunctionDeclarations).
-    if (definition is Statement) {
-      definition.next = visit(node.body);
-      return definition;
-    } else {
-      return new Assign(variable, definition, visit(node.body));
-    }
-  }
-
-  Statement visitBody(cps_ir.Body node) {
-    return visit(node.body);
+    Expression value = visit(node.primitive);
+    return Assign.makeStatement(variable, value, visit(node.body));
   }
 
   Statement visitLetCont(cps_ir.LetCont node) {
@@ -434,9 +350,10 @@ class Builder implements cps_ir.Visitor<Node> {
   }
 
   Statement visitInvokeMethod(cps_ir.InvokeMethod node) {
-    Expression invoke = new InvokeMethod(getVariableUse(node.receiver),
-                                         node.selector,
-                                         translateArguments(node.arguments));
+    InvokeMethod invoke = new InvokeMethod(getVariableUse(node.receiver),
+                                           node.selector,
+                                           translateArguments(node.arguments));
+    invoke.receiverIsNotNull = node.receiverIsNotNull;
     return continueWithExpression(node.continuation, invoke);
   }
 
@@ -452,6 +369,19 @@ class Builder implements cps_ir.Visitor<Node> {
     List<Expression> arguments = translateArguments(node.arguments);
     Expression concat = new ConcatenateStrings(arguments);
     return continueWithExpression(node.continuation, concat);
+  }
+
+  Statement visitThrow(cps_ir.Throw node) {
+    Expression value = getVariableUse(node.value);
+    return new Throw(value);
+  }
+
+  Statement visitRethrow(cps_ir.Rethrow node) {
+    return new Rethrow();
+  }
+
+  Expression visitNonTailThrow(cps_ir.NonTailThrow node) {
+    unexpectedNode(node);
   }
 
   Statement continueWithExpression(cps_ir.Reference continuation,
@@ -472,10 +402,7 @@ class Builder implements cps_ir.Visitor<Node> {
     Variable variable = addMutableVariable(node.variable);
     Expression value = getVariableUse(node.value);
     Statement body = visit(node.body);
-    // If the variable was captured by an inner function in the body, this
-    // must be declared here so we assign to a fresh copy of the variable.
-    bool needsDeclaration = variable.isCaptured;
-    return new Assign(variable, value, body, isDeclaration: needsDeclaration);
+    return Assign.makeStatement(variable, value, body);
   }
 
   Expression visitGetMutableVariable(cps_ir.GetMutableVariable node) {
@@ -485,19 +412,15 @@ class Builder implements cps_ir.Visitor<Node> {
   Statement visitSetMutableVariable(cps_ir.SetMutableVariable node) {
     Variable variable = getMutableVariable(node.variable.definition);
     Expression value = getVariableUse(node.value);
-    return new Assign(variable, value, visit(node.body));
-  }
-
-  Statement visitDeclareFunction(cps_ir.DeclareFunction node) {
-    Variable variable = addMutableVariable(node.variable);
-    FunctionDefinition function = makeSubFunction(node.definition);
-    return new FunctionDeclaration(variable, function, visit(node.body));
+    return Assign.makeStatement(variable, value, visit(node.body));
   }
 
   Statement visitTypeOperator(cps_ir.TypeOperator node) {
-    Expression receiver = getVariableUse(node.receiver);
+    Expression value = getVariableUse(node.value);
+    List<Expression> typeArgs = translateArguments(node.typeArguments);
     Expression concat =
-        new TypeOperator(receiver, node.type, isTypeTest: node.isTypeTest);
+        new TypeOperator(value, node.type, typeArgs,
+                         isTypeTest: node.isTypeTest);
     return continueWithExpression(node.continuation, concat);
   }
 
@@ -568,11 +491,7 @@ class Builder implements cps_ir.Visitor<Node> {
   }
 
   Expression visitConstant(cps_ir.Constant node) {
-    return new Constant(node.expression);
-  }
-
-  Expression visitReifyTypeVar(cps_ir.ReifyTypeVar node) {
-    return new ReifyTypeVar(node.typeVariable);
+    return new Constant(node.expression, node.value);
   }
 
   Expression visitLiteralList(cps_ir.LiteralList node) {
@@ -596,17 +515,11 @@ class Builder implements cps_ir.Visitor<Node> {
     return createInnerBuilder().buildFunction(function);
   }
 
-  Node visitCreateFunction(cps_ir.CreateFunction node) {
+  Expression visitCreateFunction(cps_ir.CreateFunction node) {
     FunctionDefinition def = makeSubFunction(node.definition);
     FunctionType type = node.definition.element.type;
     bool hasReturnType = !type.returnType.treatAsDynamic;
-    if (hasReturnType) {
-      // This function cannot occur in expression context.
-      // The successor will be filled in by visitLetPrim.
-      return new FunctionDeclaration(getVariable(node), def, null);
-    } else {
-      return new FunctionExpression(def);
-    }
+    return new FunctionExpression(def);
   }
 
   visitParameter(cps_ir.Parameter node) {
@@ -644,6 +557,25 @@ class Builder implements cps_ir.Visitor<Node> {
     return new TypeExpression(
         node.dartType,
         node.arguments.map(getVariableUse).toList());
+  }
+
+  Expression visitGetStatic(cps_ir.GetStatic node) {
+    return new GetStatic(node.element, node.sourceInformation);
+  }
+
+  Statement visitGetLazyStatic(cps_ir.GetLazyStatic node) {
+    // In the tree IR, GetStatic handles lazy fields because tree
+    // expressions are allowed to have side effects.
+    GetStatic value = new GetStatic(node.element, node.sourceInformation);
+    return continueWithExpression(node.continuation, value);
+  }
+
+  Statement visitSetStatic(cps_ir.SetStatic node) {
+    SetStatic setStatic = new SetStatic(
+        node.element,
+        getVariableUse(node.value),
+        node.sourceInformation);
+    return new ExpressionStatement(setStatic, visit(node.body));
   }
 }
 

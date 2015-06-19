@@ -4,6 +4,11 @@
 
 library dart2js.new_js_emitter.emitter;
 
+import 'package:compiler_unsupported/_internal/compiler/js_lib/shared/embedded_names.dart' show
+    JsBuiltin,
+    METADATA,
+    TYPES;
+
 import '../program_builder.dart' show ProgramBuilder;
 import '../model.dart';
 import 'model_emitter.dart';
@@ -21,10 +26,15 @@ import '../js_emitter.dart' show
 import '../js_emitter.dart' as emitterTask show
     Emitter;
 
+import '../../util/util.dart' show
+    NO_LOCATION_SPANNABLE;
+
 class Emitter implements emitterTask.Emitter {
   final Compiler _compiler;
   final Namer namer;
   final ModelEmitter _emitter;
+
+  JavaScriptBackend get _backend => _compiler.backend;
 
   Emitter(Compiler compiler, Namer namer, NativeEmitter nativeEmitter)
       : this._compiler = compiler,
@@ -66,12 +76,12 @@ class Emitter implements emitterTask.Emitter {
   }
 
   js.PropertyAccess _globalPropertyAccess(Element element) {
-     String name = namer.globalPropertyName(element);
-     js.PropertyAccess pa = new js.PropertyAccess.field(
-         new js.VariableUse(namer.globalObjectFor(element)),
-         name);
-     return pa;
-   }
+    String name = namer.globalPropertyName(element);
+    js.PropertyAccess pa = new js.PropertyAccess.field(
+        new js.VariableUse(namer.globalObjectFor(element)),
+        name);
+    return pa;
+  }
 
   @override
   js.Expression isolateLazyInitializerAccess(FieldElement element) {
@@ -122,5 +132,69 @@ class Emitter implements emitterTask.Emitter {
   }
 
   @override
-  void invalidateCaches() {}
+  js.Template templateForBuiltin(JsBuiltin builtin) {
+    String typeNameProperty = ModelEmitter.typeNameProperty;
+
+    switch (builtin) {
+      case JsBuiltin.dartObjectConstructor:
+        return js.js.expressionTemplateYielding(
+            typeAccess(_compiler.objectClass));
+
+      case JsBuiltin.isCheckPropertyToJsConstructorName:
+        int isPrefixLength = namer.operatorIsPrefix.length;
+        return js.js.expressionTemplateFor('#.substring($isPrefixLength)');
+
+      case JsBuiltin.isFunctionType:
+        return _backend.rti.representationGenerator.templateForIsFunctionType;
+
+      case JsBuiltin.rawRtiToJsConstructorName:
+        return js.js.expressionTemplateFor("#.$typeNameProperty");
+
+      case JsBuiltin.rawRuntimeType:
+        return js.js.expressionTemplateFor("#.constructor");
+
+      case JsBuiltin.createFunctionTypeRti:
+        return _backend.rti.representationGenerator
+            .templateForCreateFunctionType;
+
+      case JsBuiltin.isSubtype:
+        // TODO(floitsch): move this closer to where is-check properties are
+        // built.
+        String isPrefix = namer.operatorIsPrefix;
+        return js.js.expressionTemplateFor("('$isPrefix' + #) in #.prototype");
+
+      case JsBuiltin.isFunctionTypeRti:
+        String functionClassName =
+            _backend.namer.runtimeTypeName(_compiler.functionClass);
+        return js.js.expressionTemplateFor(
+            '#.$typeNameProperty === "$functionClassName"');
+
+      case JsBuiltin.isNullTypeRti:
+        String nullClassName =
+            _backend.namer.runtimeTypeName(_compiler.nullClass);
+        return js.js.expressionTemplateFor(
+            '#.$typeNameProperty === "$nullClassName"');
+
+      case JsBuiltin.isDartObjectTypeRti:
+        String dartObjectClassName =
+            _backend.namer.runtimeTypeName(_compiler.objectClass);
+        return js.js.expressionTemplateFor(
+            '#.$typeNameProperty === "$dartObjectClassName"');
+
+      case JsBuiltin.getMetadata:
+        return _emitter.templateForReadMetadata;
+
+      case JsBuiltin.getType:
+        return _emitter.templateForReadType;
+
+      default:
+        _compiler.internalError(NO_LOCATION_SPANNABLE,
+                                "Unhandled Builtin: $builtin");
+        return null;
+    }
+  }
+
+  @override
+  void invalidateCaches() {
+  }
 }

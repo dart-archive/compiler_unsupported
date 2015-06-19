@@ -4,9 +4,12 @@
 
 library inferrer_visitor;
 
+import '../constants/constant_system.dart';
+import '../constants/expressions.dart';
 import '../dart2jslib.dart' hide Selector, TypedSelector;
 import '../dart_types.dart';
 import '../elements/elements.dart';
+import '../resolution/operators.dart';
 import '../tree/tree.dart';
 import '../universe/universe.dart';
 import '../util/util.dart';
@@ -112,8 +115,12 @@ abstract class TypeSystem<T> {
   /**
    * Returns a new receiver type for this [selector] applied to
    * [receiverType].
+   *
+   * The option [isConditional] is true when [selector] was seen in a
+   * conditional send (e.g.  `a?.selector`), in which case the returned type may
+   * be null.
    */
-  T refineReceiver(Selector selector, T receiverType);
+  T refineReceiver(Selector selector, T receiverType, bool isConditional);
 
   /**
    * Returns the internal inferrer representation for [mask].
@@ -438,6 +445,13 @@ class LocalsHandler<T> {
     }
     updateLocal() {
       T currentType = locals[local];
+
+      SendSet send = node != null ? node.asSendSet() : null;
+      if (send != null && send.isIfNullAssignment && currentType != null) {
+        // If-null assignments may return either the new or the original value.
+        type = types.addPhiInput(
+            local, types.allocatePhi(locals.block, local, currentType), type);
+      }
       locals[local] = type;
       if (currentType != type) {
         inferrer.recordLocalUpdate(local, type);
@@ -703,17 +717,9 @@ abstract class InferrerVisitor
     locals = new LocalsHandler<T>(inferrer, types, compiler, node, fieldScope);
   }
 
-  T visitSendSet(SendSet node);
+  T handleSendSet(SendSet node);
 
-  T visitSuperSend(Send node);
-
-  T visitStaticSend(Send node);
-
-  T visitGetterSend(Send node);
-
-  T visitClosureSend(Send node);
-
-  T visitDynamicSend(Send node);
+  T handleDynamicInvoke(Send node);
 
   T visitAsyncForIn(AsyncForIn node);
 
@@ -723,21 +729,19 @@ abstract class InferrerVisitor
 
   T visitFunctionExpression(FunctionExpression node);
 
-  T visitAssertSend(Send node) {
+  @override
+  T visitAssert(Send node, Node expression, _) {
     if (!compiler.enableUserAssertions) {
       return types.nullType;
     }
-    // TODO(johnniwinther): Don't handle assert like a regular static call since
-    // it break the selector name check.
-    return visitStaticSend(node);
+    return handleAssert(node, expression);
   }
+
+  /// Handle an enabled assertion of [expression].
+  T handleAssert(Send node, Node expression);
 
   T visitNode(Node node) {
     return node.visitChildren(this);
-  }
-
-  T visitNewExpression(NewExpression node) {
-    return node.send.accept(this);
   }
 
   T visit(Node node) {
@@ -809,8 +813,76 @@ abstract class InferrerVisitor
     return types.dynamicType;
   }
 
-  T visitTypeLiteralSend(Send node) {
+  T handleTypeLiteralGet() {
     return types.typeType;
+  }
+
+  T handleTypeLiteralInvoke(NodeList arguments) {
+    return types.dynamicType;
+  }
+
+  T visitClassTypeLiteralGet(
+      Send node,
+      ConstantExpression constant,
+      _) {
+    return handleTypeLiteralGet();
+  }
+
+  T visitClassTypeLiteralInvoke(
+      Send node,
+      ConstantExpression constant,
+      NodeList arguments,
+      CallStructure callStructure,
+      _) {
+    return handleTypeLiteralInvoke(arguments);
+  }
+
+  T visitTypedefTypeLiteralGet(
+      Send node,
+      ConstantExpression constant,
+      _) {
+    return handleTypeLiteralGet();
+  }
+
+  T visitTypedefTypeLiteralInvoke(
+      Send node,
+      ConstantExpression constant,
+      NodeList arguments,
+      CallStructure callStructure,
+      _) {
+    return handleTypeLiteralInvoke(arguments);
+  }
+
+  T visitTypeVariableTypeLiteralGet(
+      Send node,
+      TypeVariableElement element,
+      _) {
+    return handleTypeLiteralGet();
+  }
+
+  T visitTypeVariableTypeLiteralInvoke(
+      Send node,
+      TypeVariableElement element,
+      NodeList arguments,
+      CallStructure callStructure,
+      _) {
+    return handleTypeLiteralInvoke(arguments);
+  }
+
+  T visitDynamicTypeLiteralGet(
+      Send node,
+      ConstantExpression constant,
+      _) {
+    return handleTypeLiteralGet();
+  }
+
+  T visitDynamicTypeLiteralInvoke(
+      Send node,
+      ConstantExpression constant,
+      NodeList arguments,
+      CallStructure callStructure,
+      _) {
+    return handleTypeLiteralInvoke(arguments);
   }
 
   bool isThisOrSuper(Node node) => node.isThis() || node.isSuper();
@@ -911,87 +983,150 @@ abstract class InferrerVisitor
     }
   }
 
-  T visitOperatorSend(Send node) {
-    Operator op = node.selector;
-    if ("[]" == op.source) {
-      return visitDynamicSend(node);
-    } else if ("&&" == op.source) {
-      conditionIsSimple = false;
-      bool oldAccumulateIsChecks = accumulateIsChecks;
-      List<Send> oldIsChecks = isChecks;
-      if (!accumulateIsChecks) {
-        accumulateIsChecks = true;
-        isChecks = <Send>[];
-      }
-      visit(node.receiver);
-      LocalsHandler<T> saved = locals;
-      locals = new LocalsHandler<T>.from(locals, node);
-      updateIsChecks(isChecks, usePositive: true);
-      LocalsHandler<T> narrowed;
-      if (oldAccumulateIsChecks) {
-        narrowed = new LocalsHandler<T>.topLevelCopyOf(locals);
-      } else {
-        accumulateIsChecks = false;
-        isChecks = oldIsChecks;
-      }
-      visit(node.arguments.head);
-      if (oldAccumulateIsChecks) {
+  @override
+  T visitIndex(Send node, Node receiver, Node index, _) {
+    return handleDynamicInvoke(node);
+  }
 
-        bool invalidatedInRightHandSide (Send test) {
-          Element receiver = elements[test.receiver];
-          if (receiver is LocalElement) {
-            return narrowed.locals[receiver] != locals.locals[receiver];
-          }
-          return false;
-        }
+  @override
+  T visitDynamicPropertyInvoke(
+      Send node,
+      Node receiver,
+      NodeList arguments,
+      Selector selector,
+      _) {
+    return handleDynamicInvoke(node);
+  }
 
-        isChecks.removeWhere(invalidatedInRightHandSide);
-      }
-      saved.mergeDiamondFlow(locals, null);
-      locals = saved;
-      return types.boolType;
-    } else if ("||" == op.source) {
-      conditionIsSimple = false;
-      List<Send> tests = <Send>[];
-      bool isSimple = handleCondition(node.receiver, tests);
-      LocalsHandler<T> saved = locals;
-      locals = new LocalsHandler<T>.from(locals, node);
-      if (isSimple) updateIsChecks(tests, usePositive: false);
-      bool oldAccumulateIsChecks = accumulateIsChecks;
-      accumulateIsChecks = false;
-      visit(node.arguments.head);
-      accumulateIsChecks = oldAccumulateIsChecks;
-      saved.mergeDiamondFlow(locals, null);
-      locals = saved;
-      return types.boolType;
-    } else if ("!" == op.source) {
-      bool oldAccumulateIsChecks = accumulateIsChecks;
-      accumulateIsChecks = false;
-      node.visitChildren(this);
-      accumulateIsChecks = oldAccumulateIsChecks;
-      return types.boolType;
-    } else if ("is" == op.source) {
-      potentiallyAddIsCheck(node);
-      node.visitChildren(this);
-      return types.boolType;
-    } else if ("as" == op.source) {
-      T receiverType = visit(node.receiver);
-      DartType type = elements.getType(node.arguments.head);
-      return types.narrowType(receiverType, type);
-    } else if (node.argumentsNode is Prefix) {
-      // Unary operator.
-      return visitDynamicSend(node);
-    } else if ('===' == op.source
-               || '!==' == op.source) {
-      node.visitChildren(this);
-      return types.boolType;
-    } else if ('!=' == op.source) {
-      visitDynamicSend(node);
-      return types.boolType;
-    } else {
-      // Binary operator.
-      return visitDynamicSend(node);
+  @override
+  T visitIfNotNullDynamicPropertyInvoke(
+      Send node,
+      Node receiver,
+      NodeList arguments,
+      Selector selector,
+      _) {
+    return handleDynamicInvoke(node);
+  }
+
+  @override
+  T visitThisPropertyInvoke(
+      Send node,
+      NodeList arguments,
+      Selector selector,
+      _) {
+    return handleDynamicInvoke(node);
+  }
+
+  @override
+  T visitIfNull(Send node, Node left, Node right, _) {
+    T firstType = visit(left);
+    T secondType = visit(right);
+    return types.allocateDiamondPhi(firstType, secondType);
+  }
+
+  @override
+  T visitLogicalAnd(Send node, Node left, Node right, _) {
+    conditionIsSimple = false;
+    bool oldAccumulateIsChecks = accumulateIsChecks;
+    List<Send> oldIsChecks = isChecks;
+    if (!accumulateIsChecks) {
+      accumulateIsChecks = true;
+      isChecks = <Send>[];
     }
+    visit(left);
+    LocalsHandler<T> saved = locals;
+    locals = new LocalsHandler<T>.from(locals, node);
+    updateIsChecks(isChecks, usePositive: true);
+    LocalsHandler<T> narrowed;
+    if (oldAccumulateIsChecks) {
+      narrowed = new LocalsHandler<T>.topLevelCopyOf(locals);
+    } else {
+      accumulateIsChecks = false;
+      isChecks = oldIsChecks;
+    }
+    visit(right);
+    if (oldAccumulateIsChecks) {
+
+      bool invalidatedInRightHandSide (Send test) {
+        Element receiver = elements[test.receiver];
+        if (receiver is LocalElement) {
+          return narrowed.locals[receiver] != locals.locals[receiver];
+        }
+        return false;
+      }
+
+      isChecks.removeWhere(invalidatedInRightHandSide);
+    }
+    saved.mergeDiamondFlow(locals, null);
+    locals = saved;
+    return types.boolType;
+  }
+
+  @override
+  T visitLogicalOr(Send node, Node left, Node right, _) {
+    conditionIsSimple = false;
+    List<Send> tests = <Send>[];
+    bool isSimple = handleCondition(left, tests);
+    LocalsHandler<T> saved = locals;
+    locals = new LocalsHandler<T>.from(locals, node);
+    if (isSimple) updateIsChecks(tests, usePositive: false);
+    bool oldAccumulateIsChecks = accumulateIsChecks;
+    accumulateIsChecks = false;
+    visit(right);
+    accumulateIsChecks = oldAccumulateIsChecks;
+    saved.mergeDiamondFlow(locals, null);
+    locals = saved;
+    return types.boolType;
+  }
+
+  @override
+  T visitNot(Send node, Node expression, _) {
+    bool oldAccumulateIsChecks = accumulateIsChecks;
+    accumulateIsChecks = false;
+    visit(expression);
+    accumulateIsChecks = oldAccumulateIsChecks;
+    return types.boolType;
+  }
+
+  @override
+  T visitIs(Send node, Node expression, DartType type, _) {
+    potentiallyAddIsCheck(node);
+    visit(expression);
+    return types.boolType;
+  }
+
+  @override
+  T visitIsNot(Send node, Node expression, DartType type, _) {
+    potentiallyAddIsCheck(node);
+    visit(expression);
+    return types.boolType;
+  }
+
+  @override
+  T visitAs(Send node, Node expression, DartType type, _) {
+    T receiverType = visit(expression);
+    return types.narrowType(receiverType, type);
+  }
+
+  @override
+  T visitUnary(Send node, UnaryOperator operator, Node expression, _) {
+    return handleDynamicInvoke(node);
+  }
+
+  @override
+  T visitNotEquals(Send node, Node left, Node right, _) {
+    handleDynamicInvoke(node);
+    return types.boolType;
+  }
+
+  @override
+  T visitEquals(Send node, Node left, Node right, _) {
+    return handleDynamicInvoke(node);
+  }
+
+  @override
+  T visitBinary(Send node, Node left, BinaryOperator operator, Node right, _) {
+    return handleDynamicInvoke(node);
   }
 
   // Because some nodes just visit their children, we may end up
@@ -1233,7 +1368,7 @@ abstract class InferrerVisitor
     return null;
   }
 
-  void internalError(Spannable node, String reason) {
+  internalError(Spannable node, String reason) {
     compiler.internalError(node, reason);
   }
 

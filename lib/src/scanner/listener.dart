@@ -695,7 +695,6 @@ class Listener {
                    [Map arguments = const {}]) {
     String message = messageKind.message(arguments, true).toString();
     Token token;
-    Node node;
     if (spannable is Token) {
       token = spannable;
     } else if (spannable is Node) {
@@ -716,7 +715,6 @@ class Listener {
       reportError(
           token, MessageKind.BAD_INPUT_CHARACTER, {'characterHex': hex});
     } else if (token is UnterminatedToken) {
-      String start = token.start;
       MessageKind kind;
       var arguments = const {};
       switch (token.start) {
@@ -748,6 +746,9 @@ class Listener {
           break;
       }
       reportError(token, kind, arguments);
+    } else if (token is UnsupportedNullAwareToken) {
+      reportError(token, MessageKind.NULL_AWARE_OPERATORS_DISABLED,
+          {'operator' : token.operator});
     } else if (token is UnmatchedToken) {
       String begin = token.begin.value;
       String end = closeBraceFor(begin);
@@ -786,7 +787,7 @@ typedef int IdGenerator();
 class ElementListener extends Listener {
   final IdGenerator idGenerator;
   final DiagnosticListener listener;
-  final CompilationUnitElement compilationUnitElement;
+  final CompilationUnitElementX compilationUnitElement;
   final StringValidator stringValidator;
   Link<StringQuoting> interpolationScope;
 
@@ -1011,17 +1012,9 @@ class ElementListener extends Listener {
     Identifier name = popNode();
     TypeAnnotation type = popNode();
     Modifiers modifiers = popNode();
-    ElementKind kind;
-    if (getOrSet == null) {
-      kind = ElementKind.FUNCTION;
-    } else if (identical(getOrSet.stringValue, 'get')) {
-      kind = ElementKind.GETTER;
-    } else if (identical(getOrSet.stringValue, 'set')) {
-      kind = ElementKind.SETTER;
-    }
     PartialFunctionElement element = new PartialFunctionElement(
-        name.source, beginToken, getOrSet, endToken, kind, modifiers,
-        compilationUnitElement, false);
+        name.source, beginToken, getOrSet, endToken,
+        modifiers, compilationUnitElement);
     element.hasParseError = hasParseError;
     pushElement(element);
   }
@@ -1327,7 +1320,7 @@ class ElementListener extends Listener {
     compilationUnitElement.addMember(element, listener);
   }
 
-  Link<MetadataAnnotation> popMetadata(Element element) {
+  Link<MetadataAnnotation> popMetadata(ElementX element) {
     var result = const Link<MetadataAnnotation>();
     for (Link link = metadata; !link.isEmpty; link = link.tail) {
       element.addMetadata(link.head);
@@ -1346,7 +1339,9 @@ class ElementListener extends Listener {
     if (!allowLibraryTags()) {
       recoverableError(tag, 'Library tags not allowed here.');
     }
-    compilationUnitElement.implementationLibrary.addTag(tag, listener);
+    LibraryElementX implementationLibrary =
+        compilationUnitElement.implementationLibrary;
+    implementationLibrary.addTag(tag, listener);
   }
 
   void pushNode(Node node) {
@@ -1563,17 +1558,10 @@ class NodeListener extends ElementListener {
     Identifier name = popNode();
     TypeAnnotation type = popNode();
     Modifiers modifiers = popNode();
-    ElementKind kind;
-    if (getOrSet == null) {
-      kind = ElementKind.FUNCTION;
-    } else if (identical(getOrSet.stringValue, 'get')) {
-      kind = ElementKind.GETTER;
-    } else if (identical(getOrSet.stringValue, 'set')) {
-      kind = ElementKind.SETTER;
-    }
-    pushElement(new PartialFunctionElement(name.source, beginToken, getOrSet,
-                                           endToken, kind, modifiers,
-                                           compilationUnitElement, false));
+    PartialFunctionElement element = new PartialFunctionElement(
+        name.source, beginToken, getOrSet, endToken,
+        modifiers, compilationUnitElement);
+    pushElement(element);
   }
 
   void endFormalParameter(Token thisKeyword) {
@@ -1583,7 +1571,7 @@ class NodeListener extends ElementListener {
       if (name.asSend() == null) {
         name = new Send(thisIdentifier, name);
       } else {
-        name = name.asSend().copyWithReceiver(thisIdentifier);
+        name = name.asSend().copyWithReceiver(thisIdentifier, false);
       }
     }
     TypeAnnotation type = popNode();
@@ -1713,7 +1701,9 @@ class NodeListener extends ElementListener {
     Node argument = popNode();
     Node receiver = popNode();
     String tokenString = token.stringValue;
-    if (identical(tokenString, '.') || identical(tokenString, '..')) {
+    if (identical(tokenString, '.') ||
+        identical(tokenString, '..') ||
+        identical(tokenString, '?.')) {
       Send argumentSend = argument.asSend();
       if (argumentSend == null) {
         // TODO(ahe): The parser should diagnose this problem, not
@@ -1723,7 +1713,8 @@ class NodeListener extends ElementListener {
       }
       if (argumentSend.receiver != null) internalError(node: argument);
       if (argument is SendSet) internalError(node: argument);
-      pushNode(argument.asSend().copyWithReceiver(receiver));
+      pushNode(argument.asSend().copyWithReceiver(receiver,
+            identical(tokenString, '?.')));
     } else {
       NodeList arguments = new NodeList.singleton(argument);
       pushNode(new Send(receiver, new Operator(token), arguments));
@@ -1770,7 +1761,8 @@ class NodeListener extends ElementListener {
       arguments = new NodeList.singleton(arg);
     }
     Operator op = new Operator(token);
-    pushNode(new SendSet(send.receiver, send.selector, op, arguments));
+    pushNode(new SendSet(send.receiver, send.selector, op, arguments,
+        send.isConditional));
   }
 
   void reportNotAssignable(Node node) {
@@ -1937,9 +1929,11 @@ class NodeListener extends ElementListener {
     Operator op = new Operator(token);
 
     if (isPrefix) {
-      pushNode(new SendSet.prefix(send.receiver, send.selector, op, argument));
+      pushNode(new SendSet.prefix(send.receiver, send.selector, op, argument,
+          send.isConditional));
     } else {
-      pushNode(new SendSet.postfix(send.receiver, send.selector, op, argument));
+      pushNode(new SendSet.postfix(send.receiver, send.selector, op, argument,
+          send.isConditional));
     }
   }
 
@@ -2282,7 +2276,7 @@ abstract class PartialElement implements DeclarationSite {
   DeclarationSite get declarationSite => this;
 }
 
-abstract class PartialFunctionMixin implements FunctionElement {
+abstract class PartialFunctionMixin implements BaseFunctionElementX {
   FunctionExpression cachedNode;
   Modifiers get modifiers;
   Token beginToken;
@@ -2336,18 +2330,48 @@ abstract class PartialFunctionMixin implements FunctionElement {
   DeclarationSite get declarationSite;
 }
 
-class PartialFunctionElement extends FunctionElementX
-    with PartialElement, PartialFunctionMixin {
-  PartialFunctionElement(String name,
-                         Token beginToken,
-                         Token getOrSet,
-                         Token endToken,
-                         ElementKind kind,
-                         Modifiers modifiers,
-                         Element enclosing,
-                         bool hasNoBody)
-      : super(name, kind, modifiers, enclosing, hasNoBody) {
-    init(beginToken, getOrSet, endToken);
+abstract class PartialFunctionElement
+    implements PartialElement, PartialFunctionMixin {
+
+  factory PartialFunctionElement(
+      String name,
+      Token beginToken,
+      Token getOrSet,
+      Token endToken,
+      Modifiers modifiers,
+      Element enclosingElement,
+      {bool hasBody: true}) {
+    if (getOrSet == null) {
+      return new PartialMethodElement(
+          name, beginToken, endToken, modifiers,
+          enclosingElement, hasBody: hasBody);
+    } else if (identical(getOrSet.stringValue, 'get')) {
+      return new PartialGetterElement(
+          name, beginToken, getOrSet, endToken, modifiers,
+          enclosingElement, hasBody: hasBody);
+    } else {
+      assert(identical(getOrSet.stringValue, 'set'));
+      return new PartialSetterElement(
+          name, beginToken, getOrSet, endToken, modifiers,
+          enclosingElement, hasBody: hasBody);
+    }
+  }
+
+  PartialFunctionElement copyWithEnclosing(Element enclosing);
+}
+
+
+class PartialMethodElement extends MethodElementX
+    with PartialElement, PartialFunctionMixin
+    implements PartialFunctionElement {
+  PartialMethodElement(String name,
+                       Token beginToken,
+                       Token endToken,
+                       Modifiers modifiers,
+                       Element enclosing,
+                       {bool hasBody: true})
+      : super(name, ElementKind.FUNCTION, modifiers, enclosing, hasBody) {
+    init(beginToken, null, endToken);
   }
 
   void reuseElement() {
@@ -2355,10 +2379,67 @@ class PartialFunctionElement extends FunctionElementX
     reusePartialFunctionMixin();
   }
 
-  PartialFunctionElement copyWithEnclosing(Element enclosing) {
-    return new PartialFunctionElement(
-        name, beginToken, getOrSet, endToken, kind, modifiers, enclosing,
-        hasNoBody);
+  PartialMethodElement copyWithEnclosing(Element enclosing) {
+    return new PartialMethodElement(
+        name, beginToken, endToken, modifiers, enclosing, hasBody: hasBody);
+  }
+}
+
+class PartialGetterElement extends GetterElementX
+    with PartialElement, PartialFunctionMixin
+    implements GetterElement, PartialFunctionElement  {
+  PartialGetterElement(String name,
+                       Token beginToken,
+                       Token getToken,
+                       Token endToken,
+                       Modifiers modifiers,
+                       Element enclosing,
+                       {bool hasBody: true})
+      : super(name, modifiers, enclosing, hasBody) {
+    init(beginToken, getToken, endToken);
+  }
+
+  @override
+  SetterElement get setter => abstractField.setter;
+
+  void reuseElement() {
+    super.reuseElement();
+    reusePartialFunctionMixin();
+  }
+
+  PartialGetterElement copyWithEnclosing(Element enclosing) {
+    return new PartialGetterElement(
+        name, beginToken, getOrSet, endToken, modifiers, enclosing,
+        hasBody: hasBody);
+  }
+}
+
+class PartialSetterElement extends SetterElementX
+    with PartialElement, PartialFunctionMixin
+    implements SetterElement, PartialFunctionElement {
+  PartialSetterElement(String name,
+                       Token beginToken,
+                       Token setToken,
+                       Token endToken,
+                       Modifiers modifiers,
+                       Element enclosing,
+                       {bool hasBody: true})
+      : super(name, modifiers, enclosing, hasBody) {
+    init(beginToken, setToken, endToken);
+  }
+
+  @override
+  GetterElement get getter => abstractField.getter;
+
+  void reuseElement() {
+    super.reuseElement();
+    reusePartialFunctionMixin();
+  }
+
+  PartialSetterElement copyWithEnclosing(Element enclosing) {
+    return new PartialSetterElement(
+        name, beginToken, getOrSet, endToken, modifiers, enclosing,
+        hasBody: hasBody);
   }
 }
 
@@ -2506,7 +2587,7 @@ class PartialMetadataAnnotation extends MetadataAnnotationX
 
 Node parse(
     DiagnosticListener diagnosticListener,
-    Element element,
+    ElementX element,
     PartialElement partial,
     doParse(Parser parser)) {
   CompilationUnitElement unit = element.compilationUnit;

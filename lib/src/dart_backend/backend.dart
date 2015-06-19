@@ -129,75 +129,7 @@ class DartBackend extends Backend {
     world.registerInvocation(new Selector.call("compareTo", null, 1));
   }
 
-  void codegen(CodegenWorkItem work) { }
-
-  static bool checkTreeIntegrity(tree_ir.RootNode node) {
-    new CheckTreeIntegrity().check(node);
-    return true; // So this can be used from assert().
-  }
-
-  static bool checkCpsIntegrity(cps_ir.RootNode node) {
-    new CheckCpsIntegrity().check(node);
-    return true; // So this can be used from assert().
-  }
-
-  /// Create an [ElementAst] from the CPS IR.
-  static ElementAst createElementAst(
-       ElementAstCreationContext context,
-       Element element,
-       cps_ir.RootNode cpsRoot) {
-    context.traceCompilation(element.name);
-    context.traceGraph('CPS builder', cpsRoot);
-    assert(checkCpsIntegrity(cpsRoot));
-
-    // Transformations on the CPS IR.
-    void applyCpsPass(cps_opt.Pass pass) {
-      pass.rewrite(cpsRoot);
-      context.traceGraph(pass.passName, cpsRoot);
-      assert(checkCpsIntegrity(cpsRoot));
-    }
-
-    // TODO(karlklose): enable type propagation for dart2dart when constant
-    // types are correctly marked as instantiated (Issue 21880).
-    TypePropagator typePropagator = new TypePropagator(
-        context.dartTypes,
-        context.constantSystem,
-        new UnitTypeSystem(),
-        context.internalError);
-    applyCpsPass(typePropagator);
-    applyCpsPass(new RedundantPhiEliminator());
-    applyCpsPass(new ShrinkingReducer());
-
-    tree_builder.Builder builder =
-        new tree_builder.Builder(context.internalError);
-    tree_ir.RootNode treeRoot = builder.build(cpsRoot);
-    assert(treeRoot != null);
-    context.traceGraph('Tree builder', treeRoot);
-    assert(checkTreeIntegrity(treeRoot));
-
-    // Transformations on the Tree IR.
-    void applyTreePass(tree_opt.Pass pass) {
-      pass.rewrite(treeRoot);
-      context.traceGraph(pass.passName, treeRoot);
-      assert(checkTreeIntegrity(treeRoot));
-    }
-
-    applyTreePass(new StatementRewriter());
-    applyTreePass(new VariableMerger());
-    applyTreePass(new LoopRewriter());
-    applyTreePass(new LogicalRewriter());
-
-    // Backend-specific transformations.
-    new backend_ast_emitter.UnshadowParameters().unshadow(treeRoot);
-    context.traceGraph('Unshadow parameters', treeRoot);
-
-    TreeElementMapping treeElements = new TreeElementMapping(element);
-    backend_ast.RootNode backendAst =
-        backend_ast_emitter.emit(treeRoot);
-    Node frontend_ast = backend2frontend.emit(treeElements, backendAst);
-    return new ElementAst(frontend_ast, treeElements);
-
-  }
+  WorldImpact codegen(CodegenWorkItem work) => const WorldImpact();
 
   /**
    * Tells whether we should output given element. Corelib classes like
@@ -216,13 +148,8 @@ class DartBackend extends Backend {
         new _ElementAstCreationContext(compiler, constantSystem);
 
     ElementAst computeElementAst(AstElement element) {
-      if (!compiler.irBuilder.hasIr(element)) {
-        return new ElementAst(element.resolvedAst.node,
-                              element.resolvedAst.elements);
-      } else {
-        cps_ir.RootNode irNode = compiler.irBuilder.getIr(element);
-        return createElementAst(context, element, irNode);
-      }
+      return new ElementAst(element.resolvedAst.node,
+                            element.resolvedAst.elements);
     }
 
     // TODO(johnniwinther): Remove the need for this method.
@@ -497,18 +424,41 @@ class DartConstantTask extends ConstantCompilerTask
 
   String get name => 'ConstantHandler';
 
+  @override
+  ConstantSystem get constantSystem => constantCompiler.constantSystem;
+
+  @override
+  ConstantValue getConstantValue(ConstantExpression expression) {
+    return constantCompiler.getConstantValue(expression);
+  }
+
+  @override
+  ConstantValue getConstantValueForVariable(VariableElement element) {
+    return constantCompiler.getConstantValueForVariable(element);
+  }
+
+  @override
   ConstantExpression getConstantForVariable(VariableElement element) {
     return constantCompiler.getConstantForVariable(element);
   }
 
+  @override
   ConstantExpression getConstantForNode(Node node, TreeElements elements) {
     return constantCompiler.getConstantForNode(node, elements);
   }
 
-  ConstantExpression getConstantForMetadata(MetadataAnnotation metadata) {
-    return metadata.constant;
+  @override
+  ConstantValue getConstantValueForNode(Node node, TreeElements elements) {
+    return getConstantValue(
+        constantCompiler.getConstantForNode(node, elements));
   }
 
+  @override
+  ConstantValue getConstantValueForMetadata(MetadataAnnotation metadata) {
+    return getConstantValue(metadata.constant);
+  }
+
+  @override
   ConstantExpression compileConstant(VariableElement element) {
     return measure(() {
       return constantCompiler.compileConstant(element);
@@ -521,18 +471,33 @@ class DartConstantTask extends ConstantCompilerTask
     });
   }
 
-  ConstantExpression compileNode(Node node, TreeElements elements) {
+  @override
+  ConstantExpression compileNode(
+      Node node,
+      TreeElements elements,
+      {bool enforceConst: true}) {
     return measure(() {
-      return constantCompiler.compileNodeWithDefinitions(node, elements);
+      return constantCompiler.compileNodeWithDefinitions(node, elements,
+          isConst: enforceConst);
     });
   }
 
-  ConstantExpression compileMetadata(MetadataAnnotation metadata,
-                           Node node,
-                           TreeElements elements) {
+  @override
+  ConstantExpression compileMetadata(
+      MetadataAnnotation metadata,
+      Node node,
+      TreeElements elements) {
     return measure(() {
       return constantCompiler.compileMetadata(metadata, node, elements);
     });
+  }
+
+  // TODO(johnniwinther): Remove this when values are computed from the
+  // expressions.
+  @override
+  void copyConstantValues(DartConstantTask task) {
+    constantCompiler.constantValueMap.addAll(
+        task.constantCompiler.constantValueMap);
   }
 }
 
@@ -540,9 +505,6 @@ abstract class ElementAstCreationContext {
   DartTypes get dartTypes;
   ConstantSystem get constantSystem;
   InternalErrorFunction get internalError;
-
-  void traceCompilation(String name);
-  void traceGraph(String title, var irObject);
 }
 
 class _ElementAstCreationContext implements ElementAstCreationContext {
@@ -550,14 +512,6 @@ class _ElementAstCreationContext implements ElementAstCreationContext {
   final ConstantSystem constantSystem;
 
   _ElementAstCreationContext(this.compiler, this.constantSystem);
-
-  void traceCompilation(String name) {
-    compiler.tracer.traceCompilation(name, null);
-  }
-
-  void traceGraph(String title, var irObject) {
-    compiler.tracer.traceGraph(title, irObject);
-  }
 
   DartTypes get dartTypes => compiler.types;
 

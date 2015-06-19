@@ -6,31 +6,33 @@ import 'package:grinder/grinder.dart';
 
 import 'dart:io';
 
-final Directory dartDir = joinDir(new Directory('trunk'), ['dart']);
-
-// TODO: we need to include the sdk sources as well
-
-// TODO: we'll have to encode the sources as compressed, base64'd text for cli apps
-
-// TODO: we don't want the clients who don't need the large dartium files to
-// pay the price for them
-
-// TODO: we don't want web clients to get the code bloat associated with source
-// encoded resources
+final Directory trunk = new Directory('trunk');
 
 main(List<String> args) => grind(args);
 
 @Task()
-void build() {
-  if (!dartDir.existsSync()) {
-    log('trunk/ dir not found.');
-    log('Please run ./tool/co.sh and ./tool/up.sh.');
-    fail('trunk/ dir not found');
-  }
+build() {
+  // The sdk repo version to download.
+  final String sdkTag = '1.11.0-dev.5.4';
+
+  trunk.createSync();
+
+  // Download the file.
+  ProcessResult result = Process.runSync('wget',
+      ['https://github.com/dart-lang/sdk/archive/${sdkTag}.zip']);
+  if (result.exitCode != 0) fail('Error executing wget: ${result.stderr}');
+
+  // Uncompress it.
+  String fileName = '${sdkTag}.zip';
+  result = Process.runSync('unzip', [fileName, '-d', 'trunk']);
+  if (result.exitCode != 0) fail('Error executing unzip: ${result.stderr}');
+
+  // Find the trunk path - trunk_/sdk-1.11.0-dev.5.4.
+  Directory dartDir = joinDir(trunk, ['sdk-${sdkTag}']);
 
   // Get the version from the repo.
-  ProcessResult result = Process.runSync('tools/print_version.py', [],
-      workingDirectory: 'trunk/dart');
+  result = Process.runSync('tools/print_version.py', [],
+      workingDirectory: dartDir.path);
   if (result.exitCode != 0) {
     fail('Error executing tools/print_version.py: ${result.stderr}');
   }
@@ -41,7 +43,7 @@ void build() {
   String version = versionLong;
   if (version.contains('-')) version = version.substring(0, version.indexOf('-'));
   if (version.contains('+')) version = version.substring(0, version.indexOf('+'));
-  File versionDest = joinFile(LIB_DIR, ['version.dart']);
+  File versionDest = joinFile(libDir, ['version.dart']);
   _writeDart(versionDest, '''
 final String version = '${version}';
 final String versionLong = '${versionLong}';
@@ -51,18 +53,18 @@ final String versionLong = '${versionLong}';
   Directory sourceDir = joinDir(dartDir, ['sdk', 'lib', '_internal']);
   Directory pkgDir = joinDir(dartDir, ['pkg']);
 
-  copyFile(joinFile(pkgDir, ['compiler', 'lib', 'compiler.dart']), LIB_DIR);
-  copyFile(joinFile(sourceDir, ['libraries.dart']), LIB_DIR);
-  copyDirectory(joinDir(sourceDir, ['compiler']),
-      joinDir(LIB_DIR, ['_internal', 'compiler']));
-  copyDirectory(joinDir(pkgDir, ['compiler', 'lib', 'src']),
-      joinDir(LIB_DIR, ['src']));
+  copy(joinFile(pkgDir, ['compiler', 'lib', 'compiler.dart']), libDir);
+  copy(joinFile(sourceDir, ['libraries.dart']), libDir);
+  copy(joinDir(sourceDir, ['compiler']),
+      joinDir(libDir, ['_internal', 'compiler']));
+  copy(joinDir(pkgDir, ['compiler', 'lib', 'src']),
+      joinDir(libDir, ['src']));
 
   // Copy js_ast into lib/src/js_ast
-  copyDirectory(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(LIB_DIR, ['src', 'js_ast']));
+  copy(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(libDir, ['src', 'js_ast']));
 
   // Copy sdk sources.
-  _copySdk(joinDir(dartDir, ['sdk']), joinDir(LIB_DIR, ['sdk']));
+  _copySdk(joinDir(dartDir, ['sdk']), joinDir(libDir, ['sdk']));
 
   // Adjust sources.
   List replacements = [
@@ -82,7 +84,7 @@ final String versionLong = '${versionLong}';
 
   int modifiedCount = 0;
 
-  joinDir(LIB_DIR, ['src']).listSync(recursive: true).forEach((entity) {
+  joinDir(libDir, ['src']).listSync(recursive: true).forEach((entity) {
     if (entity is File && entity.path.endsWith('.dart')) {
       String text = entity.readAsStringSync();
       String newText = text;
@@ -103,17 +105,27 @@ final String versionLong = '${versionLong}';
   // Update pubspec version and add an entry to the changelog.
   _updateVersion(versionLong);
   _updateChangelog(versionLong);
+}
 
+@Task()
+analyze() {
+  Analyzer.analyze([
+      'tool/grind.dart',
+      'lib/sdk.dart',
+      'lib/version.dart',
+      'example/compiler.dart'
+  ]);
 }
 
 @Task('Validate that the library looks good')
-void validate() => Tests.runCliTests();
+@Depends(analyze)
+validate() => new TestRunner().test();
 
 @Task('Delete files copied from the dart2js sources')
-void clean() {
-  deleteEntity(joinDir(LIB_DIR, ['sdk']));
-  deleteEntity(joinDir(LIB_DIR, ['src']));
-  deleteEntity(joinDir(LIB_DIR, ['_internal']));
+clean() {
+  delete(joinDir(libDir, ['sdk']));
+  delete(joinDir(libDir, ['src']));
+  delete(joinDir(libDir, ['_internal']));
 }
 
 void _copySdk(Directory srcDir, Directory destDir) {
@@ -139,13 +151,13 @@ void _copySdk(Directory srcDir, Directory destDir) {
 
   log('Copied ${count} sdk files.');
 
-  deleteEntity(joinDir(destDir, ['_internal', 'pub']));
-  deleteEntity(joinDir(destDir, ['_internal', 'pub_generated']));
+  delete(joinDir(destDir, ['_internal', 'pub']));
+  delete(joinDir(destDir, ['_internal', 'pub_generated']));
 }
 
 void _writeDart(File file, String text) {
   String contents = '''
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 

@@ -4,20 +4,20 @@
 
 library closureToClassMapper;
 
-import "elements/elements.dart";
-import "dart2jslib.dart";
-import "dart_types.dart";
-import "js_backend/js_backend.dart" show JavaScriptBackend;
-import "scanner/scannerlib.dart" show Token;
-import "tree/tree.dart";
-import "util/util.dart";
-import "elements/modelx.dart"
+import 'constants/expressions.dart';
+import 'dart2jslib.dart';
+import 'dart_types.dart';
+import 'elements/elements.dart';
+import 'elements/modelx.dart'
     show BaseFunctionElementX,
          ClassElementX,
          ElementX,
          LocalFunctionElementX;
-import "elements/visitor.dart" show ElementVisitor;
-
+import 'elements/visitor.dart' show ElementVisitor;
+import 'js_backend/js_backend.dart' show JavaScriptBackend;
+import 'scanner/scannerlib.dart' show Token;
+import 'tree/tree.dart';
+import 'util/util.dart';
 import 'universe/universe.dart' show
     Universe;
 
@@ -143,12 +143,17 @@ class ClosureFieldElement extends ElementX
 
   String toString() => "ClosureFieldElement($name)";
 
-  accept(ElementVisitor visitor) => visitor.visitClosureFieldElement(this);
+  accept(ElementVisitor visitor, arg) {
+    return visitor.visitClosureFieldElement(this, arg);
+  }
 
   Element get analyzableElement => closureClass.methodElement.analyzableElement;
 
   @override
   List<FunctionElement> get nestedClosures => const <FunctionElement>[];
+
+  @override
+  ConstantExpression get constant => null;
 }
 
 // TODO(ahe): These classes continuously cause problems.  We need to find
@@ -214,7 +219,9 @@ class ClosureClassElement extends ClassElementX {
 
   get enclosingElement => methodElement;
 
-  accept(ElementVisitor visitor) => visitor.visitClosureClassElement(this);
+  accept(ElementVisitor visitor, arg) {
+    return visitor.visitClosureClassElement(this, arg);
+  }
 }
 
 /// A local variable that contains the box object holding the [BoxFieldElement]
@@ -242,7 +249,9 @@ class BoxFieldElement extends ElementX
 
   final VariableElement variableElement;
 
-  accept(ElementVisitor visitor) => visitor.visitBoxFieldElement(this);
+  accept(ElementVisitor visitor, arg) {
+    return visitor.visitBoxFieldElement(this, arg);
+  }
 
   @override
   bool get hasNode => false;
@@ -270,6 +279,9 @@ class BoxFieldElement extends ElementX
   ResolvedAst get resolvedAst {
     throw new UnsupportedError("BoxFieldElement.resolvedAst");
   }
+
+  @override
+  ConstantExpression get constant => null;
 }
 
 /// A local variable used encode the direct (uncaptured) references to [this].
@@ -292,7 +304,7 @@ class SynthesizedCallMethodElementX extends BaseFunctionElementX
                                 LocalFunctionElementX other,
                                 ClosureClassElement enclosing)
       : expression = other,
-        super(name, other.kind, other.modifiers, enclosing, false) {
+        super(name, other.kind, other.modifiers, enclosing) {
     asyncMarker = other.asyncMarker;
     functionSignatureCache = other.functionSignature;
   }
@@ -729,7 +741,8 @@ class ClosureTranslator extends Visitor {
     } else {
       Element element = elements[node];
       if (element != null && element.isTypeVariable) {
-        if (outermostElement.isConstructor) {
+        if (outermostElement.isConstructor ||
+            outermostElement.isField) {
           TypeVariableElement typeVariable = element;
           useTypeVariableAsLocal(typeVariable.type);
         } else {
@@ -1067,6 +1080,17 @@ class ClosureTranslator extends Visitor {
     inTryStatement = true;
     node.visitChildren(this);
     inTryStatement = oldInTryStatement;
+  }
+
+  visitCatchBlock(CatchBlock node) {
+    if (node.type != null) {
+      // The "on T" clause may contain type variables.
+      analyzeType(elements.getType(node.type));
+    }
+    if (node.formals != null) {
+      node.formals.visitChildren(this);
+    }
+    node.block.accept(this);
   }
 
   visitAsyncForIn(AsyncForIn node) {

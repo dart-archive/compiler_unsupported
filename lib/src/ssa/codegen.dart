@@ -7,10 +7,13 @@ part of ssa;
 class SsaCodeGeneratorTask extends CompilerTask {
 
   final JavaScriptBackend backend;
+  final SourceInformationFactory sourceInformationFactory;
 
-  SsaCodeGeneratorTask(JavaScriptBackend backend)
+  SsaCodeGeneratorTask(JavaScriptBackend backend,
+                       this.sourceInformationFactory)
       : this.backend = backend,
         super(backend.compiler);
+
   String get name => 'SSA code generator';
   NativeEmitter get nativeEmitter => backend.emitter.nativeEmitter;
 
@@ -31,8 +34,9 @@ class SsaCodeGeneratorTask extends CompilerTask {
             ? const js.AsyncModifier.syncStar()
             : const js.AsyncModifier.sync());
 
-    return attachPosition(
-        new js.Fun(parameters, body, asyncModifier: asyncModifier), element);
+    return new js.Fun(parameters, body, asyncModifier: asyncModifier)
+        .withSourceInformation(sourceInformationFactory.forContext(element)
+            .buildDeclaration(element));
   }
 
   js.Expression generateCode(CodegenWorkItem work, HGraph graph) {
@@ -46,10 +50,13 @@ class SsaCodeGeneratorTask extends CompilerTask {
   js.Expression generateLazyInitializer(work, graph) {
     return measure(() {
       compiler.tracer.traceGraph("codegen", graph);
+      SourceInformation sourceInformation =
+          sourceInformationFactory.forContext(work.element)
+              .buildDeclaration(work.element);
       SsaCodeGenerator codegen = new SsaCodeGenerator(backend, work);
       codegen.visitGraph(graph);
-      return new js.Fun(codegen.parameters,
-          attachPosition(codegen.body, work.element));
+      return new js.Fun(codegen.parameters, codegen.body)
+          .withSourceInformation(sourceInformation);
     });
   }
 
@@ -135,7 +142,8 @@ class SsaCodeGenerator implements HVisitor, HBlockInformationVisitor {
   // if branches.
   SubGraph subGraph;
 
-  SsaCodeGenerator(this.backend, CodegenWorkItem work)
+  SsaCodeGenerator(this.backend, CodegenWorkItem work,
+                   {SourceInformation sourceInformation})
     : this.work = work,
       declaredLocals = new Set<String>(),
       collectedVariableDeclarations = new Set<String>(),
@@ -1276,7 +1284,10 @@ class SsaCodeGenerator implements HVisitor, HBlockInformationVisitor {
   visitShiftRight(HShiftRight node) => visitBitInvokeBinary(node, '>>>');
 
   visitTruncatingDivide(HTruncatingDivide node) {
-    assert(node.left.isUInt31(compiler));
+    assert(node.isUInt31(compiler));
+    // TODO(karlklose): Enable this assertion again when type propagation is
+    // fixed. Issue 23555.
+//    assert(node.left.isUInt32(compiler));
     assert(node.right.isPositiveInteger(compiler));
     use(node.left);
     js.Expression jsLeft = pop();
@@ -1624,16 +1635,42 @@ class SsaCodeGenerator implements HVisitor, HBlockInformationVisitor {
     Element element = node.element;
     List<DartType> instantiatedTypes = node.instantiatedTypes;
 
-    registry.registerStaticInvocation(element);
-
     if (instantiatedTypes != null && !instantiatedTypes.isEmpty) {
       instantiatedTypes.forEach((type) {
         registry.registerInstantiatedType(type);
       });
     }
 
-    push(backend.emitter.staticFunctionAccess(node.element));
-    push(new js.Call(pop(), visitArguments(node.inputs, start: 0)), node);
+    List<js.Expression> arguments = visitArguments(node.inputs, start: 0);
+
+    if (element == backend.getCheckConcurrentModificationError()) {
+      // Manually inline the [checkConcurrentModificationError] function.  This
+      // function is only called from a for-loop update.  Ideally we would just
+      // generate the conditionalcontrol flow in the builder but it adds basic
+      // blocks in the loop update that interfere with other optimizations and
+      // confuses loop recognition.
+
+      assert(arguments.length == 2);
+      Element throwFunction = backend.getThrowConcurrentModificationError();
+      registry.registerStaticInvocation(throwFunction);
+
+      // Calling using `(0, #)(#)` instead of `#(#)` separates the property load
+      // of the static function access from the call.  For some reason this
+      // helps V8 see that the call never happens so V8 makes the call a
+      // deoptimization. This removes the call from the optimized loop, making
+      // more optimizations available to the loop.  This form is 50% faster on
+      // some small loop, almost as fast as loops with no concurrent
+      // modification check.
+      push(js.js('# || (0, #)(#)',[
+          arguments[0],
+          backend.emitter.staticFunctionAccess(throwFunction),
+          arguments[1]]));
+    } else {
+      registry.registerStaticInvocation(element);
+      push(backend.emitter.staticFunctionAccess(element));
+      push(new js.Call(pop(), arguments), node);
+    }
+
   }
 
   visitInvokeSuper(HInvokeSuper node) {
@@ -1782,6 +1819,12 @@ class SsaCodeGenerator implements HVisitor, HBlockInformationVisitor {
     List<js.Expression> arguments = visitArguments(node.inputs, start: 0);
     push(new js.New(jsClassReference, arguments), node);
     registerForeignTypes(node);
+    // We also use ForeignNew to instantiate closure classes that belong to
+    // function expressions. We have to register their use here, as otherwise
+    // code for them might not be emitted.
+    if (node.element.isClosure) {
+      registry.registerInstantiatedClass(node.element);
+    }
     if (node.instantiatedTypes == null) {
       return;
     }
@@ -2290,6 +2333,13 @@ class SsaCodeGenerator implements HVisitor, HBlockInformationVisitor {
         checkExtendableArray(input);
       } else {
         checkFixedArray(input);
+      }
+      return;
+    } else if (element == backend.jsUnmodifiableArrayClass) {
+      if (negative) {
+        checkMutableArray(input);
+      } else {
+        checkImmutableArray(input);
       }
       return;
     }

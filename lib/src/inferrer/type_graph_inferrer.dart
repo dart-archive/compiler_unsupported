@@ -27,6 +27,8 @@ import '../native/native.dart' as native;
 import '../tree/tree.dart' as ast
     show DartString,
          Node,
+         Send,
+         SendSet,
          TryStatement;
 import '../types/types.dart'
     show ContainerTypeMask,
@@ -248,9 +250,17 @@ class TypeInformationSystem extends TypeSystem<TypeInformation> {
     return info.type != selector.mask;
   }
 
-  TypeInformation refineReceiver(Selector selector, TypeInformation receiver) {
+  TypeInformation refineReceiver(Selector selector, TypeInformation receiver,
+      bool isConditional) {
     if (receiver.type.isExact) return receiver;
     TypeMask otherType = compiler.world.allFunctions.receiverType(selector);
+    // Conditional sends (a?.b) can still narrow the possible types of `a`,
+    // however, we still need to consider that `a` may be null.
+    if (isConditional) {
+      // Note: we don't check that receiver.type.isNullable here because this is
+      // called during the graph construction.
+      otherType = otherType.nullable();
+    }
     // If this is refining to nullable subtype of `Object` just return
     // the receiver. We know the narrowing is useless.
     if (otherType.isNullable && otherType.containsAll(classWorld)) {
@@ -802,10 +812,9 @@ class TypeGraphInferrerEngine
           if (type is! ListTypeInformation && type is! MapTypeInformation) {
             // For non-container types, the constant handler does
             // constant folding that could give more precise results.
-            ConstantExpression constant = compiler.backend.constants
-                .getConstantForVariable(element);
-            if (constant != null) {
-              ConstantValue value = constant.value;
+            ConstantValue value = compiler.backend.constants
+                .getConstantValueForVariable(element);
+            if (value != null) {
               if (value.isFunction) {
                 FunctionConstantValue functionConstant = value;
                 type = types.allocateClosure(node, functionConstant.element);

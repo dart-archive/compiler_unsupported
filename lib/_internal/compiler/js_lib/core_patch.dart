@@ -13,8 +13,10 @@ import 'dart:_js_helper' show patch,
                               jsonEncodeNative,
                               JSSyntaxRegExp,
                               Primitives,
+                              ConstantMap,
                               stringJoinUnchecked,
-                              objectHashCode;
+                              objectHashCode,
+                              Closure;
 
 import 'dart:_native_typed_data' show NativeUint8List;
 
@@ -40,7 +42,7 @@ class Object {
 
 
   @patch
-  String toString() => Primitives.objectToString(this);
+  String toString() => Primitives.objectToHumanReadableString(this);
 
   @patch
   dynamic noSuchMethod(Invocation invocation) {
@@ -150,7 +152,9 @@ class double {
 class Error {
   @patch
   static String _objectToString(Object object) {
-    return Primitives.objectToString(object);
+    // Closures all have useful and safe toString methods.
+    if (object is Closure) return object.toString();
+    return Primitives.objectToHumanReadableString(object);
   }
 
   @patch
@@ -279,8 +283,19 @@ class List<E> {
     if (growable) return list;
     return makeListFixedLength(list);
   }
+
+  @patch
+  factory List.unmodifiable(Iterable elements) {
+    List result = new List<E>.from(elements, growable: false);
+    return makeFixedListUnmodifiable(result);
+  }
 }
 
+@patch
+class Map<K, V> {
+  @patch
+  factory Map.unmodifiable(Map other) = ConstantMap<K, V>.from;
+}
 
 @patch
 class String {
@@ -310,7 +325,7 @@ class String {
 
   static String _stringFromJSArray(List list, int start, int endOrNull) {
     int len = list.length;
-    int end = _checkBounds(len, start, endOrNull);
+    int end = RangeError.checkValidRange(start, endOrNull, len);
     if (start > 0 || end < len) {
       list = list.sublist(start, end);
     }
@@ -320,20 +335,8 @@ class String {
   static String _stringFromUint8List(
       NativeUint8List charCodes, int start, int endOrNull) {
     int len = charCodes.length;
-    int end = _checkBounds(len, start, endOrNull);
+    int end = RangeError.checkValidRange(start, endOrNull, len);
     return Primitives.stringFromNativeUint8List(charCodes, start, end);
-  }
-
-  static int _checkBounds(int len, int start, int end) {
-    if (start < 0 || start > len) {
-      throw new RangeError.range(start, 0, len);
-    }
-    if (end == null) {
-      end = len;
-    } else if (end < start || end > len) {
-      throw new RangeError.range(end, start, len);
-    }
-    return end;
   }
 
   static String _stringFromIterable(Iterable<int> charCodes,
@@ -409,8 +412,14 @@ class StringBuffer {
     _writeString(new String.fromCharCode(charCode));
   }
 
-  void _writeString(str) {
-    _contents = Primitives.stringConcatUnchecked(_contents, str);
+  @patch
+  void writeAll(Iterable objects, [String separator = ""]) {
+    _contents = _writeAll(_contents, objects, separator);
+  }
+
+  @patch
+  void writeln([Object obj = ""]) {
+    _writeString('$obj\n');
   }
 
   @patch
@@ -420,6 +429,31 @@ class StringBuffer {
 
   @patch
   String toString() => Primitives.flattenString(_contents);
+
+  void _writeString(str) {
+    _contents = Primitives.stringConcatUnchecked(_contents, str);
+  }
+
+  static String _writeAll(String string, Iterable objects, String separator) {
+    Iterator iterator = objects.iterator;
+    if (!iterator.moveNext()) return string;
+    if (separator.isEmpty) {
+      do {
+        string = _writeOne(string, iterator.current);
+      } while (iterator.moveNext());
+    } else {
+      string = _writeOne(string, iterator.current);
+      while (iterator.moveNext()) {
+        string = _writeOne(string, separator);
+        string = _writeOne(string, iterator.current);
+      }
+    }
+    return string;
+  }
+
+  static String _writeOne(String string, Object obj) {
+    return Primitives.stringConcatUnchecked(string, '$obj');
+  }
 }
 
 @patch
@@ -427,45 +461,37 @@ class NoSuchMethodError {
   @patch
   String toString() {
     StringBuffer sb = new StringBuffer();
-    int i = 0;
+    String comma = '';
     if (_arguments != null) {
-      for (; i < _arguments.length; i++) {
-        if (i > 0) {
-          sb.write(", ");
-        }
-        sb.write(Error.safeToString(_arguments[i]));
+      for (var argument in _arguments) {
+        sb.write(comma);
+        sb.write(Error.safeToString(argument));
+        comma = ', ';
       }
     }
     if (_namedArguments != null) {
       _namedArguments.forEach((Symbol key, var value) {
-        if (i > 0) {
-          sb.write(", ");
-        }
+        sb.write(comma);
         sb.write(_symbolToString(key));
         sb.write(": ");
         sb.write(Error.safeToString(value));
-        i++;
+        comma = ', ';
       });
     }
+    String memberName = _symbolToString(_memberName);
+    String receiverText = Error.safeToString(_receiver);
+    String actualParameters = '$sb';
     if (_existingArgumentNames == null) {
-      return "NoSuchMethodError : method not found: '$_memberName'\n"
-          "Receiver: ${Error.safeToString(_receiver)}\n"
-          "Arguments: [$sb]";
+      return "NoSuchMethodError: method not found: '$memberName'\n"
+          "Receiver: ${receiverText}\n"
+          "Arguments: [$actualParameters]";
     } else {
-      String actualParameters = sb.toString();
-      sb = new StringBuffer();
-      for (int i = 0; i < _existingArgumentNames.length; i++) {
-        if (i > 0) {
-          sb.write(", ");
-        }
-        sb.write(_existingArgumentNames[i]);
-      }
-      String formalParameters = sb.toString();
+      String formalParameters = _existingArgumentNames.join(', ');
       return "NoSuchMethodError: incorrect number of arguments passed to "
-          "method named '$_memberName'\n"
-          "Receiver: ${Error.safeToString(_receiver)}\n"
-          "Tried calling: $_memberName($actualParameters)\n"
-          "Found: $_memberName($formalParameters)";
+          "method named '$memberName'\n"
+          "Receiver: ${receiverText}\n"
+          "Tried calling: $memberName($actualParameters)\n"
+          "Found: $memberName($formalParameters)";
     }
   }
 }

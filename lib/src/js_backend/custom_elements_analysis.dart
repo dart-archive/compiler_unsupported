@@ -178,8 +178,7 @@ class CustomElementsAnalysisJoin {
 
   TypeConstantValue makeTypeConstant(ClassElement element) {
     DartType elementType = element.rawType;
-    DartType constantType = backend.typeImplementation.rawType;
-    return new TypeConstantValue(elementType, constantType);
+    return backend.constantSystem.createType(compiler, elementType);
   }
 
   List<Element> computeEscapingConstructors(ClassElement classElement) {
@@ -193,6 +192,7 @@ class CustomElementsAnalysisJoin {
       if (member.isGenerativeConstructor) {
         // Ignore constructors that cannot be called with zero arguments.
         FunctionElement constructor = member;
+        constructor.computeSignature(compiler);
         FunctionSignature parameters = constructor.functionSignature;
         if (parameters.requiredParameterCount == 0) {
           result.add(member);
