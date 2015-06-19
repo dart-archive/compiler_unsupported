@@ -12,4 +12,4 @@ environment:
 dev_dependencies:
   grinder: ^0.7.0
   path: any
-  unittest: any
+  test: ^0.12.0

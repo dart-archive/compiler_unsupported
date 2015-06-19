@@ -12,7 +12,7 @@ dartanalyzer --fatal-warnings \
   example/compiler.dart \
   lib/libraries.dart \
   lib/version.dart \
-  test/all.dart \
+  test/all_test.dart \
   tool/grind.dart
 
 # Run the tests.
