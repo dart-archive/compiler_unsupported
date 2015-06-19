@@ -19,15 +19,16 @@ build() {
 
   // Download the file.
   ProcessResult result = Process.runSync('wget',
-      ['https://github.com/dart-lang/sdk/archive/${sdkTag}.zip']);
+      ['https://github.com/dart-lang/sdk/archive/${sdkTag}.zip'],
+      workingDirectory: 'trunk');
   if (result.exitCode != 0) fail('Error executing wget: ${result.stderr}');
 
   // Uncompress it.
-  String fileName = '${sdkTag}.zip';
+  String fileName = '$trunk/{sdkTag}.zip';
   result = Process.runSync('unzip', [fileName, '-d', 'trunk']);
   if (result.exitCode != 0) fail('Error executing unzip: ${result.stderr}');
 
-  // Find the trunk path - trunk_/sdk-1.11.0-dev.5.4.
+  // Find the trunk path - trunk/sdk-1.11.0-dev.5.4.
   Directory dartDir = joinDir(trunk, ['sdk-${sdkTag}']);
 
   // Get the version from the repo.
