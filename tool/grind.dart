@@ -13,7 +13,7 @@ main(List<String> args) => grind(args);
 @Task()
 build() {
   // The sdk repo version to download.
-  final String sdkTag = '1.11.0-dev.5.4';
+  final String sdkTag = '1.11.0-dev.5.7';
 
   trunk.createSync();
 
@@ -24,7 +24,7 @@ build() {
   if (result.exitCode != 0) fail('Error executing wget: ${result.stderr}');
 
   // Uncompress it.
-  String fileName = '$trunk/{sdkTag}.zip';
+  String fileName = 'trunk/${sdkTag}.zip';
   result = Process.runSync('unzip', [fileName, '-d', 'trunk']);
   if (result.exitCode != 0) fail('Error executing unzip: ${result.stderr}');
 
