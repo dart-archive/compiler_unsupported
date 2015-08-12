@@ -13,7 +13,7 @@ main(List<String> args) => grind(args);
 @Task()
 build() {
   // The sdk repo version to download.
-  final String sdkTag = '1.11.1';
+  final String sdkTag = '1.12.0-dev.5.2';
 
   trunk.createSync();
 
@@ -25,7 +25,7 @@ build() {
 
   // Uncompress it.
   String fileName = 'trunk/${sdkTag}.zip';
-  result = Process.runSync('unzip', [fileName, '-d', 'trunk']);
+  result = Process.runSync('unzip', ['-o', fileName, '-d', 'trunk']);
   if (result.exitCode != 0) fail('Error executing unzip: ${result.stderr}');
 
   // Find the trunk path - trunk/sdk-1.11.0-dev.5.4.
@@ -55,14 +55,14 @@ final String versionLong = '${versionLong}';
   Directory pkgDir = joinDir(dartDir, ['pkg']);
 
   copy(joinFile(pkgDir, ['compiler', 'lib', 'compiler.dart']), libDir);
-  copy(joinFile(sourceDir, ['libraries.dart']), libDir);
-  copy(joinDir(sourceDir, ['compiler']),
-      joinDir(libDir, ['_internal', 'compiler']));
-  copy(joinDir(pkgDir, ['compiler', 'lib', 'src']),
-      joinDir(libDir, ['src']));
+  copy(joinFile(pkgDir, ['compiler', 'lib', 'compiler_new.dart']), libDir);
+  copy(joinDir(pkgDir, ['compiler', 'lib', 'src']), joinDir(libDir, ['src']));
+  copy(joinFile(sourceDir, ['sdk_library_metadata', 'lib', 'libraries.dart']), libDir);
 
-  // Copy js_ast into lib/src/js_ast
-  copy(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(libDir, ['src', 'js_ast']));
+  // packages
+  copy(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(libDir, ['_internal', 'js_ast']));
+  copy(joinDir(dartDir, ['sdk', 'lib', '_internal', 'js_runtime', 'lib']), joinDir(libDir, ['_internal', 'js_runtime']));
+  copy(joinDir(dartDir, ['sdk', 'lib', '_internal', 'sdk_library_metadata', 'lib']), joinDir(libDir, ['_internal', 'sdk_library_metadata']));
 
   // Copy sdk sources.
   _copySdk(joinDir(dartDir, ['sdk']), joinDir(libDir, ['sdk']));
@@ -70,20 +70,24 @@ final String versionLong = '${versionLong}';
   // Adjust sources.
   List replacements = [
       [
-        r'package:_internal/libraries.dart',
+        r'package:sdk_library_metadata/libraries.dart',
         r'package:compiler_unsupported/libraries.dart'
       ],
       [
-        r'package:_internal/',
-        r'package:compiler_unsupported/_internal/'
+        r'package:js_runtime/',
+        r'package:compiler_unsupported/_internal/js_runtime/'
       ],
       [
-        r'package:js_ast/js_ast.dart',
-        r'package:compiler_unsupported/src/js_ast/js_ast.dart'
+        r'package:js_ast/',
+        r'package:compiler_unsupported/_internal/js_ast/'
       ]
   ];
 
   int modifiedCount = 0;
+  Map<String, int> counts = {};
+  for (List replacement in replacements) {
+    counts[replacement[0]] = 0;
+  }
 
   joinDir(libDir, ['src']).listSync(recursive: true).forEach((entity) {
     if (entity is File && entity.path.endsWith('.dart')) {
@@ -91,6 +95,9 @@ final String versionLong = '${versionLong}';
       String newText = text;
 
       for (List replacement in replacements) {
+        if (newText.contains(replacement[0])) {
+          counts[replacement[0]] = counts[replacement[0]] + 1;
+        }
         newText = newText.replaceAll(replacement[0], replacement[1]);
       }
 
@@ -102,6 +109,7 @@ final String versionLong = '${versionLong}';
   });
 
   log('Updated ${modifiedCount} package references.');
+  counts.keys.forEach((s) => log('  [${s}]: ${counts[s]}'));
 
   // Update pubspec version and add an entry to the changelog.
   _updateVersion(versionLong);

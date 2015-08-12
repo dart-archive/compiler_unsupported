@@ -311,11 +311,13 @@ Future<api.CompilationResult> compile(List<String> argv) {
         '--output-type=dart|--output-type=dart-multi|--output-type=js',
         setOutputType),
     new OptionHandler('--use-cps-ir', passThrough),
+    new OptionHandler('--no-frequency-based-minification', passThrough),
     new OptionHandler('--verbose', setVerbose),
     new OptionHandler('--version', (_) => wantVersion = true),
     new OptionHandler('--library-root=.+', setLibraryRoot),
     new OptionHandler('--out=.+|-o.*', setOutput, multipleArguments: true),
     new OptionHandler('--allow-mock-compilation', passThrough),
+    new OptionHandler('--fast-startup', passThrough),
     new OptionHandler('--minify|-m', implyCompilation),
     new OptionHandler('--preserve-uris', passThrough),
     new OptionHandler('--force-strip=.*', setStrip),
@@ -358,7 +360,12 @@ Future<api.CompilationResult> compile(List<String> argv) {
           "Async-await is supported by default.",
           api.Diagnostic.HINT);
     }),
-    new OptionHandler('--enable-null-aware-operators', passThrough),
+    new OptionHandler('--enable-null-aware-operators',  (_) {
+      diagnosticHandler.info(
+          "Option '--enable-null-aware-operators' is no longer needed. "
+          "Null aware operators are supported by default.",
+          api.Diagnostic.HINT);
+    }),
     new OptionHandler('--enable-enum', (_) {
       diagnosticHandler.info(
           "Option '--enable-enum' is no longer needed. "
@@ -367,6 +374,7 @@ Future<api.CompilationResult> compile(List<String> argv) {
     }),
     new OptionHandler('--allow-native-extensions', setAllowNativeExtensions),
     new OptionHandler('--generate-code-with-compile-time-errors', passThrough),
+    new OptionHandler('--test-mode', passThrough),
 
     // The following three options must come last.
     new OptionHandler('-D.+=.*', addInEnvironment),
@@ -495,8 +503,8 @@ void writeString(Uri uri, String text) {
 
 void fail(String message) {
   if (diagnosticHandler != null) {
-    diagnosticHandler.diagnosticHandler(
-        null, -1, -1, message, api.Diagnostic.ERROR);
+    diagnosticHandler.report(
+        null, null, -1, -1, message, api.Diagnostic.ERROR);
   } else {
     print('Error: $message');
   }
@@ -647,6 +655,10 @@ be removed in a future version:
 
   --use-cps-ir
     Experimental.  Use the new CPS based backend for code generation.
+
+  --no-frequency-based-minification
+    Experimental.  Disabled the new frequency based minifying namer and use the
+    old namer instead.
 '''.trim());
 }
 
