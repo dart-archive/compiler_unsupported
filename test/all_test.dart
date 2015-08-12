@@ -55,6 +55,14 @@ void main() {
       });
     });
 
+    test('helloworld html null aware', () {
+      return compiler.compile(sampleCodeNullAware).then((CompilationResults results) {
+        expect(results.success, true);
+        expect(results.hasOutput, true);
+        expect(results.getOutput(), isNotEmpty);
+      });
+    });
+
     test('handles errors', () {
       return compiler.compile(hasErrors).then((CompilationResults results) {
         expect(results.success, false);
@@ -94,6 +102,24 @@ main() async {
   querySelector('#foo').text = 'bar';
   var foo = await HttpRequest.getString('http://www.google.com');
   print(foo);
+}
+""";
+
+final String sampleCodeNullAware = r"""
+main() {
+  Dog fido = new Dog('Fido');
+  Dog rex = null;
+
+  fido?.bark();
+  rex?.bark();
+}
+
+class Dog {
+  final String name;
+
+  Dog(this.name);
+
+  void bark() => print('[${name}] bark!');
 }
 """;
 
