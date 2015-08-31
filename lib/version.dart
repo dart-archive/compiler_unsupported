@@ -3,4 +3,4 @@
 // BSD-style license that can be found in the LICENSE file.
 
 final String version = '1.12.0';
-final String versionLong = '1.12.0-dev.5.2';
+final String versionLong = '1.12.0';
