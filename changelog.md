@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.12.1 (2015-09-14)
+- upgraded to SDK 1.12.1
+
 ## 1.12.0-dev.5.2 (2015-08-11)
 - upgraded to SDK 1.12.0-dev.5.2
 
