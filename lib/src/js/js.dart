@@ -7,15 +7,24 @@ library js;
 import 'package:compiler_unsupported/_internal/js_ast/js_ast.dart';
 export 'package:compiler_unsupported/_internal/js_ast/js_ast.dart';
 
-import '../io/code_output.dart' show CodeOutput, CodeBuffer;
-import '../js_emitter/js_emitter.dart' show USE_LAZY_EMITTER;
-import '../dart2jslib.dart' as leg;
-import '../util/util.dart' show NO_LOCATION_SPANNABLE, Indentation, Tagging;
-import '../dump_info.dart' show DumpInfoTask;
+import '../compiler.dart' show
+    Compiler;
+import '../diagnostics/diagnostic_listener.dart' show
+    DiagnosticReporter;
+import '../diagnostics/spannable.dart' show
+    NO_LOCATION_SPANNABLE;
+import '../dump_info.dart' show
+    DumpInfoTask;
+import '../io/code_output.dart' show
+    CodeBuffer,
+    CodeOutput;
+import '../js_emitter/js_emitter.dart' show
+    USE_LAZY_EMITTER;
+
 import 'js_source_mapping.dart';
 
 CodeBuffer prettyPrint(Node node,
-                       leg.Compiler compiler,
+                       Compiler compiler,
                        {DumpInfoTask monitor,
                         bool allowVariableMinification: true,
                         Renamer renamerForNames:
@@ -33,7 +42,7 @@ CodeBuffer prettyPrint(Node node,
           new SourceLocationsMapper(outBuffer));
   Dart2JSJavaScriptPrintingContext context =
       new Dart2JSJavaScriptPrintingContext(
-          compiler, monitor, outBuffer, sourceInformationProcessor);
+          compiler.reporter, monitor, outBuffer, sourceInformationProcessor);
   Printer printer = new Printer(options, context);
   printer.visit(node);
   sourceInformationProcessor.process(node);
@@ -41,20 +50,20 @@ CodeBuffer prettyPrint(Node node,
 }
 
 class Dart2JSJavaScriptPrintingContext implements JavaScriptPrintingContext {
-  final leg.Compiler compiler;
+  final DiagnosticReporter reporter;
   final DumpInfoTask monitor;
   final CodeBuffer outBuffer;
   final CodePositionListener codePositionListener;
 
   Dart2JSJavaScriptPrintingContext(
-      this.compiler,
+      this.reporter,
       this.monitor,
       this.outBuffer,
       this.codePositionListener);
 
   @override
   void error(String message) {
-    compiler.internalError(NO_LOCATION_SPANNABLE, message);
+    reporter.internalError(NO_LOCATION_SPANNABLE, message);
   }
 
   @override
@@ -122,7 +131,7 @@ class UnparsedNode extends DeferredString
                    implements AstContainer {
   @override
   final Node tree;
-  final leg.Compiler _compiler;
+  final Compiler _compiler;
   final bool _protectForEval;
   LiteralString _cachedLiteral;
 

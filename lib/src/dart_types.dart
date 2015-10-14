@@ -6,15 +6,27 @@ library dart_types;
 
 import 'dart:math' show min;
 
+import 'common/resolution.dart' show
+    Resolution;
+import 'compiler.dart' show
+    Compiler;
 import 'core_types.dart';
-import 'dart2jslib.dart' show Compiler, invariant, Script, Message;
-import 'elements/modelx.dart'
-    show LibraryElementX,
-         TypeDeclarationElementX,
-         TypedefElementX;
+import 'diagnostics/diagnostic_listener.dart' show
+    DiagnosticReporter;
+import 'diagnostics/invariant.dart' show
+    invariant;
+import 'diagnostics/spannable.dart' show
+    CURRENT_ELEMENT_SPANNABLE,
+    NO_LOCATION_SPANNABLE;
+import 'elements/modelx.dart' show
+    LibraryElementX,
+    TypeDeclarationElementX,
+    TypedefElementX;
 import 'elements/elements.dart';
-import 'ordered_typeset.dart' show OrderedTypeSet;
-import 'util/util.dart' show CURRENT_ELEMENT_SPANNABLE, equalElements;
+import 'ordered_typeset.dart' show
+    OrderedTypeSet;
+import 'util/util.dart' show
+    equalElements;
 
 enum TypeKind {
   FUNCTION,
@@ -74,7 +86,7 @@ abstract class DartType {
    * function type [: (B) -> A :] and the unaliased type of
    * [: Func<int,String> :] is the function type [: (String) -> int :].
    */
-  DartType unalias(Compiler compiler);
+  DartType unalias(Resolution resolution);
 
   /**
    * If this type is malformed or a generic type created with the wrong number
@@ -207,7 +219,7 @@ class TypeVariableType extends DartType {
     return this;
   }
 
-  DartType unalias(Compiler compiler) => this;
+  DartType unalias(Resolution resolution) => this;
 
   TypeVariableType get typeVariableOccurrence => this;
 
@@ -241,7 +253,7 @@ class StatementType extends DartType {
 
   DartType subst(List<DartType> arguments, List<DartType> parameters) => this;
 
-  DartType unalias(Compiler compiler) => this;
+  DartType unalias(Resolution resolution) => this;
 
   accept(DartTypeVisitor visitor, var argument) {
     return visitor.visitStatementType(this, argument);
@@ -262,7 +274,7 @@ class VoidType extends DartType {
     return this;
   }
 
-  DartType unalias(Compiler compiler) => this;
+  DartType unalias(Resolution resolution) => this;
 
   accept(DartTypeVisitor visitor, var argument) {
     return visitor.visitVoidType(this, argument);
@@ -312,7 +324,7 @@ class MalformedType extends DartType {
   // Malformed types are treated as dynamic.
   bool get treatAsDynamic => true;
 
-  DartType unalias(Compiler compiler) => this;
+  DartType unalias(Resolution resolution) => this;
 
   accept(DartTypeVisitor visitor, var argument) {
     return visitor.visitMalformedType(this, argument);
@@ -479,7 +491,7 @@ class InterfaceType extends GenericType {
     return null;
   }
 
-  DartType unalias(Compiler compiler) => this;
+  DartType unalias(Resolution resolution) => this;
 
   MemberSignature lookupInterfaceMember(Name name) {
     MemberSignature member = element.lookupInterfaceMember(name);
@@ -605,8 +617,6 @@ class FunctionType extends DartType {
     assert(namedParameters.length == namedParameterTypes.length);
   }
 
-
-
   TypeKind get kind => TypeKind.FUNCTION;
 
   DartType getNamedParameterType(String name) {
@@ -650,7 +660,7 @@ class FunctionType extends DartType {
     return this;
   }
 
-  DartType unalias(Compiler compiler) => this;
+  DartType unalias(Resolution resolution) => this;
 
   TypeVariableType get typeVariableOccurrence {
     TypeVariableType typeVariableType = returnType.typeVariableOccurrence;
@@ -726,11 +736,7 @@ class FunctionType extends DartType {
 
   String get name => 'Function';
 
-  int computeArity() {
-    int arity = 0;
-    parameterTypes.forEach((_) { arity++; });
-    return arity;
-  }
+  int computeArity() => parameterTypes.length;
 
   int get hashCode {
     int hash = 3 * returnType.hashCode;
@@ -779,10 +785,10 @@ class TypedefType extends GenericType {
     return new TypedefType(element, newTypeArguments);
   }
 
-  DartType unalias(Compiler compiler) {
-    element.ensureResolved(compiler);
-    element.checkCyclicReference(compiler);
-    DartType definition = element.alias.unalias(compiler);
+  DartType unalias(Resolution resolution) {
+    element.ensureResolved(resolution);
+    element.checkCyclicReference(resolution);
+    DartType definition = element.alias.unalias(resolution);
     return definition.substByContext(this);
   }
 
@@ -807,7 +813,7 @@ class ResolvedTypedefType extends TypedefType {
         message: 'Alias must be non-null on $element.'));
   }
 
-  FunctionType unalias(Compiler compiler) => alias;
+  FunctionType unalias(Resolution resolution) => alias;
 }
 
 /**
@@ -824,7 +830,7 @@ class DynamicType extends DartType {
 
   TypeKind get kind => TypeKind.DYNAMIC;
 
-  DartType unalias(Compiler compiler) => this;
+  DartType unalias(Resolution resolution) => this;
 
   DartType subst(List<DartType> arguments, List<DartType> parameters) => this;
 
@@ -945,6 +951,7 @@ abstract class AbstractTypeRelation
     extends BaseDartTypeVisitor<bool, DartType> {
   final Compiler compiler;
   CoreTypes get coreTypes => compiler.coreTypes;
+  Resolution get resolution => compiler.resolution;
 
   AbstractTypeRelation(this.compiler);
 
@@ -973,7 +980,7 @@ abstract class AbstractTypeRelation
 
     // TODO(johnniwinther): Currently needed since literal types like int,
     // double, bool etc. might not have been resolved yet.
-    t.element.ensureResolved(compiler);
+    t.element.ensureResolved(resolution);
 
     bool checkTypeArguments(InterfaceType instance, InterfaceType other) {
       List<DartType> tTypeArgs = instance.typeArguments;
@@ -1138,8 +1145,8 @@ class MoreSpecificVisitor extends AbstractTypeRelation {
     if (s == coreTypes.objectType) {
       return true;
     }
-    t = t.unalias(compiler);
-    s = s.unalias(compiler);
+    t = t.unalias(resolution);
+    s = s.unalias(resolution);
 
     return t.accept(this, s);
   }
@@ -1237,6 +1244,10 @@ class Types implements DartTypes {
   final PotentialSubtypeVisitor potentialSubtypeVisitor;
 
   CoreTypes get coreTypes => compiler.coreTypes;
+
+  DiagnosticReporter get reporter => compiler.reporter;
+
+  Resolution get resolution => compiler.resolution;
 
   Types(Compiler compiler)
       : this.compiler = compiler,
@@ -1537,7 +1548,7 @@ class Types implements DartTypes {
       }
     }
 
-    compiler.internalError(CURRENT_ELEMENT_SPANNABLE,
+    reporter.internalError(CURRENT_ELEMENT_SPANNABLE,
         'No least upper bound computed for $a and $b.');
     return null;
   }
@@ -1638,8 +1649,8 @@ class Types implements DartTypes {
       return computeLeastUpperBoundTypeVariableTypes(a, b);
     }
 
-    a = a.unalias(compiler);
-    b = b.unalias(compiler);
+    a = a.unalias(resolution);
+    b = b.unalias(resolution);
 
     if (a.treatAsDynamic || b.treatAsDynamic) return const DynamicType();
     if (a.isVoid || b.isVoid) return const VoidType();
@@ -1659,6 +1670,88 @@ class Types implements DartTypes {
       return computeLeastUpperBoundInterfaces(a, b);
     }
     return const DynamicType();
+  }
+
+  /// Computes the unaliased type of the first non type variable bound of
+  /// [type].
+  ///
+  /// This is used to normalize malformed types, type variables and typedef
+  /// before use in typechecking.
+  ///
+  /// Malformed types are normalized to `dynamic`. Typedefs are normalized to
+  /// their alias, or `dynamic` if cyclic. Type variables are normalized to the
+  /// normalized type of their bound, or `Object` if cyclic.
+  ///
+  /// For instance for these types:
+  ///
+  ///     class Foo<T extends Bar, S extends T, U extends Baz> {}
+  ///     class Bar<X extends Y, Y extends X> {}
+  ///     typedef Baz();
+  ///
+  /// the unaliased bounds types are:
+  ///
+  ///     unaliasedBound(Foo) = Foo
+  ///     unaliasedBound(Bar) = Bar
+  ///     unaliasedBound(Unresolved) = `dynamic`
+  ///     unaliasedBound(Baz) = ()->dynamic
+  ///     unaliasedBound(T) = Bar
+  ///     unaliasedBound(S) = unaliasedBound(T) = Bar
+  ///     unaliasedBound(U) = unaliasedBound(Baz) = ()->dynamic
+  ///     unaliasedBound(X) = unaliasedBound(Y) = `Object`
+  ///
+  static DartType computeUnaliasedBound(Compiler compiler, DartType type) {
+    DartType originalType = type;
+    while (type.isTypeVariable) {
+      TypeVariableType variable = type;
+      type = variable.element.bound;
+      if (type == originalType) {
+        type = compiler.objectClass.rawType;
+      }
+    }
+    if (type.isMalformed) {
+      return const DynamicType();
+    }
+    return type.unalias(compiler.resolution);
+  }
+
+  /// Computes the interface type of [type], which is the type that defines
+  /// the property of [type].
+  ///
+  /// For an interface type it is the type itself, for a type variable it is the
+  /// interface type of the bound, for function types and typedefs it is the
+  /// `Function` type. For other types, like `dynamic`, `void` and malformed
+  /// types, there is no interface type and `null` is returned.
+  ///
+  /// For instance for these types:
+  ///
+  ///     class Foo<T extends Bar, S extends T, U extends Baz> {}
+  ///     class Bar {}
+  ///     typedef Baz();
+  ///
+  /// the interface types are:
+  ///
+  ///     interfaceType(Foo) = Foo
+  ///     interfaceType(Bar) = Bar
+  ///     interfaceType(Baz) = interfaceType(()->dynamic) = Function
+  ///     interfaceType(T) = interfaceType(Bar) = Bar
+  ///     interfaceType(S) = interfaceType(T) = interfaceType(Bar) = Bar
+  ///     interfaceType(U) = interfaceType(Baz)
+  ///                      = intefaceType(()->dynamic) = Function
+  ///
+  /// When typechecking `o.foo` the interface type of the static type of `o` is
+  /// used to lookup the existence and type of `foo`.
+  ///
+  static InterfaceType computeInterfaceType(Compiler compiler, DartType type) {
+    type = computeUnaliasedBound(compiler, type);
+    if (type.treatAsDynamic) {
+      return null;
+    }
+    if (type.isFunctionType) {
+      type = compiler.functionClass.rawType;
+    }
+    assert(invariant(NO_LOCATION_SPANNABLE, type.isInterfaceType,
+        message: "unexpected type kind ${type.kind}."));
+    return type;
   }
 }
 

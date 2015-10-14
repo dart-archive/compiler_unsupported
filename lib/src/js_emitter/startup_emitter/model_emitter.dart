@@ -9,7 +9,10 @@ import 'dart:convert' show JsonEncoder;
 import '../../common.dart';
 
 import '../../constants/values.dart' show ConstantValue, FunctionConstantValue;
-import '../../dart2jslib.dart' show Compiler;
+import '../../compiler.dart' show Compiler;
+import '../../diagnostics/messages.dart' show
+    MessageKind;
+
 import '../../elements/elements.dart' show ClassElement, FunctionElement;
 import '../../hash/sha1.dart' show Hasher;
 
@@ -28,14 +31,17 @@ import '../../js_backend/js_backend.dart' show
     Namer,
     ConstantEmitter;
 
-import '../../util/util.dart' show
+import '../../diagnostics/diagnostic_listener.dart' show
+    DiagnosticReporter;
+
+import '../../diagnostics/spannable.dart' show
     NO_LOCATION_SPANNABLE;
 
 import '../../util/uri_extras.dart' show
     relativize;
 
 import '../headers.dart';
-import '../js_emitter.dart' show AstContainer, NativeEmitter;
+import '../js_emitter.dart' show NativeEmitter;
 
 import 'package:compiler_unsupported/_internal/js_runtime/shared/embedded_names.dart' show
     CLASS_FIELDS_EXTRACTOR,
@@ -96,6 +102,8 @@ class ModelEmitter {
         compiler, namer, this.generateConstantReference,
         constantListGenerator);
   }
+
+  DiagnosticReporter get reporter => compiler.reporter;
 
   js.Expression constantListGenerator(js.Expression array) {
     // TODO(floitsch): remove hard-coded name.
@@ -164,7 +172,7 @@ class ModelEmitter {
   int emitProgram(Program program) {
     MainFragment mainFragment = program.fragments.first;
     List<DeferredFragment> deferredFragments =
-        new List<DeferredFragment>.from(program.fragments.skip(1));
+        new List<DeferredFragment>.from(program.deferredFragments);
 
     FragmentEmitter fragmentEmitter =
         new FragmentEmitter(compiler, namer, backend, constantEmitter, this);
@@ -208,13 +216,14 @@ class ModelEmitter {
 
     if (backend.requiresPreamble &&
         !backend.htmlLibraryIsLoaded) {
-      compiler.reportHint(NO_LOCATION_SPANNABLE, MessageKind.PREAMBLE);
+      reporter.reportHintMessage(
+          NO_LOCATION_SPANNABLE, MessageKind.PREAMBLE);
     }
 
     if (compiler.deferredMapUri != null) {
       writeDeferredMap();
     }
-    
+
     // Return the total program size.
     return outputBuffers.values.fold(0, (a, b) => a + b.length);
   }

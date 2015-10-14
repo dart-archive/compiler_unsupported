@@ -1,109 +1,40 @@
-// Copyright (c) 2011, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of scanner;
+library dart2js.parser.member_listener;
 
-class ClassElementParser extends PartialParser {
-  ClassElementParser(Listener listener) : super(listener);
+import '../diagnostics/diagnostic_listener.dart' show
+    DiagnosticReporter;
+import '../diagnostics/messages.dart' show
+    MessageKind;
+import '../elements/elements.dart' show
+    Element,
+    ElementKind,
+    Elements,
+    MetadataAnnotation;
+import '../elements/modelx.dart' show
+    ClassElementX,
+    ElementX,
+    FieldElementX,
+    VariableList;
+import '../tokens/token.dart' show
+    Token;
+import '../tree/tree.dart';
+import '../util/util.dart' show
+    Link;
 
-  Token parseClassBody(Token token) => fullParseClassBody(token);
-}
-
-class PartialClassElement extends ClassElementX with PartialElement {
-  ClassNode cachedNode;
-
-  PartialClassElement(String name,
-                      Token beginToken,
-                      Token endToken,
-                      Element enclosing,
-                      int id)
-      : super(name, enclosing, id, STATE_NOT_STARTED) {
-    this.beginToken = beginToken;
-    this.endToken = endToken;
-  }
-
-  void set supertypeLoadState(int state) {
-    assert(state == STATE_NOT_STARTED || state == supertypeLoadState + 1);
-    assert(state <= STATE_DONE);
-    super.supertypeLoadState = state;
-  }
-
-  void set resolutionState(int state) {
-    assert(state == STATE_NOT_STARTED || state == resolutionState + 1);
-    assert(state <= STATE_DONE);
-    super.resolutionState = state;
-  }
-
-  bool get hasNode => cachedNode != null;
-
-  ClassNode get node {
-    assert(invariant(this, cachedNode != null,
-        message: "Node has not been computed for $this."));
-    return cachedNode;
-  }
-
-  ClassNode parseNode(Compiler compiler) {
-    if (cachedNode != null) return cachedNode;
-    compiler.withCurrentElement(this, () {
-      compiler.parser.measure(() {
-        MemberListener listener = new MemberListener(compiler, this);
-        Parser parser = new ClassElementParser(listener);
-        try {
-          Token token = parser.parseTopLevelDeclaration(beginToken);
-          assert(identical(token, endToken.next));
-          cachedNode = listener.popNode();
-          assert(
-              invariant(
-                  beginToken, listener.nodes.isEmpty,
-                  message: "Non-empty listener stack: ${listener.nodes}"));
-        } on ParserError {
-          // TODO(ahe): Often, a ParserError is thrown while parsing the class
-          // body. This means that the stack actually contains most of the
-          // information synthesized below. Consider rewriting the parser so
-          // endClassDeclaration is called before parsing the class body.
-          Identifier name = new Identifier(findMyName(beginToken));
-          NodeList typeParameters = null;
-          Node supertype = null;
-          NodeList interfaces = listener.makeNodeList(0, null, null, ",");
-          Token extendsKeyword = null;
-          NodeList body = listener.makeNodeList(0, beginToken, endToken, null);
-          cachedNode = new ClassNode(
-              Modifiers.EMPTY, name, typeParameters, supertype, interfaces,
-              beginToken, extendsKeyword, body, endToken);
-          hasParseError = true;
-        }
-      });
-      compiler.patchParser.measure(() {
-        if (isPatched) {
-          // TODO(lrn): Perhaps extract functionality so it doesn't
-          // need compiler.
-          compiler.patchParser.parsePatchClassNode(patch);
-        }
-      });
-    });
-    return cachedNode;
-  }
-
-  Token get position => beginToken;
-
-  // TODO(johnniwinther): Ensure that modifiers are always available.
-  Modifiers get modifiers =>
-      cachedNode != null ? cachedNode.modifiers : Modifiers.EMPTY;
-
-  accept(ElementVisitor visitor, arg) {
-    return visitor.visitClassElement(this, arg);
-  }
-
-  PartialClassElement copyWithEnclosing(CompilationUnitElement enclosing) {
-    return new PartialClassElement(name, beginToken, endToken, enclosing, id);
-  }
-}
+import 'partial_elements.dart' show
+    PartialConstructorElement,
+    PartialFunctionElement,
+    PartialMetadataAnnotation;
+import 'node_listener.dart' show
+    NodeListener;
 
 class MemberListener extends NodeListener {
   final ClassElementX enclosingClass;
 
-  MemberListener(DiagnosticListener listener,
+  MemberListener(DiagnosticReporter listener,
                  ClassElementX enclosingElement)
       : this.enclosingClass = enclosingElement,
         super(listener, enclosingElement.compilationUnit);
@@ -141,9 +72,10 @@ class MemberListener extends NodeListener {
       return Elements.constructOperatorName(operator.source, isUnary);
     } else {
       if (receiver == null || receiver.source != enclosingClass.name) {
-        listener.reportError(send.receiver,
-                                 MessageKind.INVALID_CONSTRUCTOR_NAME,
-                                 {'name': enclosingClass.name});
+        reporter.reportErrorMessage(
+            send.receiver,
+            MessageKind.INVALID_CONSTRUCTOR_NAME,
+            {'name': enclosingClass.name});
       }
       return selector.source;
     }
@@ -181,9 +113,10 @@ class MemberListener extends NodeListener {
     Identifier singleIdentifierName = method.name.asIdentifier();
     if (singleIdentifierName != null && singleIdentifierName.source == name) {
       if (name != enclosingClass.name) {
-        listener.reportError(singleIdentifierName,
-                                 MessageKind.INVALID_UNNAMED_CONSTRUCTOR_NAME,
-                                 {'name': enclosingClass.name});
+        reporter.reportErrorMessage(
+            singleIdentifierName,
+            MessageKind.INVALID_UNNAMED_CONSTRUCTOR_NAME,
+            {'name': enclosingClass.name});
       }
     }
     Element memberElement = new PartialConstructorElement(
@@ -222,15 +155,12 @@ class MemberListener extends NodeListener {
   }
 
   void addMetadata(ElementX memberElement) {
-    for (Link link = metadata; !link.isEmpty; link = link.tail) {
-      memberElement.addMetadata(link.head);
-    }
-    metadata = const Link<MetadataAnnotation>();
+    memberElement.metadata = metadata.toList();
   }
 
   void addMember(ElementX memberElement) {
     addMetadata(memberElement);
-    enclosingClass.addMember(memberElement, listener);
+    enclosingClass.addMember(memberElement, reporter);
   }
 
   void endMetadata(Token beginToken, Token periodBeforeName, Token endToken) {

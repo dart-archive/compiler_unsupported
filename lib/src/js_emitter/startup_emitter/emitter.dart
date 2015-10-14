@@ -18,8 +18,8 @@ import '../../elements/elements.dart' show FieldElement;
 import '../../js/js.dart' as js;
 
 import '../../js_backend/js_backend.dart' show
-JavaScriptBackend,
-Namer;
+    JavaScriptBackend,
+    Namer;
 
 import '../js_emitter.dart' show
     NativeEmitter;
@@ -27,7 +27,10 @@ import '../js_emitter.dart' show
 import '../js_emitter.dart' as emitterTask show
     Emitter;
 
-import '../../util/util.dart' show
+import '../../diagnostics/diagnostic_listener.dart' show
+    DiagnosticReporter;
+
+import '../../diagnostics/spannable.dart' show
     NO_LOCATION_SPANNABLE;
 
 class Emitter implements emitterTask.Emitter {
@@ -43,6 +46,8 @@ class Emitter implements emitterTask.Emitter {
         this.namer = namer,
         _emitter = new ModelEmitter(
             compiler, namer, nativeEmitter, shouldGenerateSourceMap);
+
+  DiagnosticReporter get reporter => _compiler.reporter;
 
   @override
   String get patchVersion => "startup";
@@ -184,7 +189,7 @@ class Emitter implements emitterTask.Emitter {
         return js.js.expressionTemplateFor("$functionAccess(#)");
 
       default:
-        _compiler.internalError(NO_LOCATION_SPANNABLE,
+        reporter.internalError(NO_LOCATION_SPANNABLE,
             "Unhandled Builtin: $builtin");
         return null;
     }

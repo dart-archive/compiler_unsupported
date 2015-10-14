@@ -4,21 +4,21 @@
 
 library dart2js.common;
 
+
+export 'common/names.dart' show
+    Names;
+
+export 'common/tasks.dart' show
+    CompilerTask;
+
+export 'compiler.dart' show
+    Compiler;
+
 export 'constants/values.dart' show
     ConstantValue,
     InterceptorConstantValue,
     NullConstantValue,
     TypeConstantValue;
-
-export 'dart2jslib.dart' show
-    CallStructure,
-    CompilerTask,
-    Compiler,
-    ConstantEnvironment,
-    MessageKind,
-    Selector,
-    TreeElements,
-    invariant;
 
 export 'dart_types.dart' show
     DartType,
@@ -27,9 +27,14 @@ export 'dart_types.dart' show
     TypeVariableType,
     Types;
 
+export 'diagnostics/invariant.dart' show
+    invariant;
+
+export 'diagnostics/spannable.dart' show
+    SpannableAssertionFailure;
+
 export 'elements/elements.dart' show
     ClassElement,
-    ClosureFieldElement,
     CompilationUnitElement,
     Element,
     Elements,
@@ -47,9 +52,11 @@ export 'tree/tree.dart' show
 export 'types/types.dart' show
     TypeMask;
 
-export 'universe/universe.dart' show
-    SelectorKind;
+export 'universe/call_structure.dart' show
+    CallStructure;
+
+export 'universe/selector.dart' show
+    Selector;
 
 export 'util/util.dart' show
-    Link,
-    SpannableAssertionFailure;
+    Link;
