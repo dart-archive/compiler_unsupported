@@ -29,7 +29,7 @@ void main(List<String> args) {
     print('Please set the DART_SDK environment variable or pass --dart-sdk '
         '<path> into this script.');
   } else {
-    DartSdk sdk = new DartSdkPath(sdkDir.path);
+    DartSdk sdk = new DartSdkPath(sdkDir.path); // new DartSdkIO();
     print('Using SDK at ${sdk.location}; version ${sdk.version}.');
     print('');
 
