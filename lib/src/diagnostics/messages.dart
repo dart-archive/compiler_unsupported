@@ -63,8 +63,14 @@
 
 library dart2js.messages;
 
-import 'dart2jslib.dart';
-import 'scanner/scannerlib.dart';
+import '../tokens/token.dart' show
+    ErrorToken,
+    Token;
+
+import 'invariant.dart' show
+    invariant;
+import 'spannable.dart' show
+    CURRENT_ELEMENT_SPANNABLE;
 
 const DONT_KNOW_HOW_TO_FIX = "Computer says no!";
 
@@ -82,6 +88,7 @@ enum MessageKind {
   AMBIGUOUS_LOCATION,
   AMBIGUOUS_REEXPORT,
   ASSERT_IS_GIVEN_NAMED_ARGUMENTS,
+  ASSIGNING_FINAL_FIELD_IN_SUPER,
   ASSIGNING_METHOD,
   ASSIGNING_METHOD_IN_SUPER,
   ASSIGNING_TYPE,
@@ -159,6 +166,7 @@ enum MessageKind {
   DEFERRED_TYPE_ANNOTATION,
   DEPRECATED_TYPEDEF_MIXIN_SYNTAX,
   DIRECTLY_THROWING_NSM,
+  DISALLOWED_LIBRARY_IMPORT,
   DUPLICATE_DEFINITION,
   DUPLICATE_EXPORT,
   DUPLICATE_EXPORT_CONT,
@@ -176,10 +184,13 @@ enum MessageKind {
   DUPLICATED_RESOURCE,
   EMPTY_CATCH_DECLARATION,
   EMPTY_ENUM_DECLARATION,
+  EMPTY_HIDE,
   EQUAL_MAP_ENTRY_KEY,
+  EMPTY_SHOW,
   EXISTING_DEFINITION,
   EXISTING_LABEL,
   EXPECTED_IDENTIFIER_NOT_RESERVED_WORD,
+  EXPERIMENTAL_ASSERT_MESSAGE,
   EXPONENT_MISSING,
   EXPORT_BEFORE_PARTS,
   EXTERNAL_WITH_BODY,
@@ -190,6 +201,7 @@ enum MessageKind {
   FACTORY_REDIRECTION_IN_NON_FACTORY,
   FINAL_FUNCTION_TYPE_PARAMETER,
   FINAL_WITHOUT_INITIALIZER,
+  FORIN_NOT_ASSIGNABLE,
   FORMAL_DECLARED_CONST,
   FORMAL_DECLARED_STATIC,
   FUNCTION_TYPE_FORMAL_WITH_DEFAULT,
@@ -265,6 +277,7 @@ enum MessageKind {
   INVALID_USE_OF_SUPER,
   LIBRARY_NAME_MISMATCH,
   LIBRARY_NOT_FOUND,
+  LIBRARY_NOT_SUPPORTED,
   LIBRARY_TAG_MUST_BE_FIRST,
   MAIN_NOT_A_FUNCTION,
   MAIN_WITH_EXTRA_PARAMETER,
@@ -302,6 +315,7 @@ enum MessageKind {
   NATIVE_NOT_SUPPORTED,
   NO_BREAK_TARGET,
   NO_CATCH_NOR_FINALLY,
+  NO_COMMON_SUBTYPES,
   NO_CONTINUE_TARGET,
   NO_INSTANCE_AVAILABLE,
   NO_MATCHING_CONSTRUCTOR,
@@ -414,6 +428,7 @@ enum MessageKind {
   UNIMPLEMENTED_SETTER,
   UNIMPLEMENTED_SETTER_ONE,
   UNMATCHED_TOKEN,
+  UNRECOGNIZED_VERSION_OF_LOOKUP_MAP,
   UNSUPPORTED_BANG_EQ_EQ,
   UNSUPPORTED_EQ_EQ_EQ,
   UNSUPPORTED_LITERAL_SYMBOL,
@@ -483,6 +498,11 @@ class MessageTemplate {
       MessageKind.NOT_ASSIGNABLE:
         const MessageTemplate(MessageKind.NOT_ASSIGNABLE,
           "'#{fromType}' is not assignable to '#{toType}'."),
+
+      MessageKind.FORIN_NOT_ASSIGNABLE:
+        const MessageTemplate(MessageKind.FORIN_NOT_ASSIGNABLE,
+          "The element type '#{currentType}' of '#{expressionType}' "
+          "is not assignable to '#{elementType}'."),
 
       MessageKind.VOID_EXPRESSION:
         const MessageTemplate(MessageKind.VOID_EXPRESSION,
@@ -805,7 +825,7 @@ main() {
       MessageKind.DUPLICATE_EXPORT:
         const MessageTemplate(MessageKind.DUPLICATE_EXPORT,
           "Duplicate export of '#{name}'.",
-          howToFix: "Trying adding 'hide #{name}' to one of the exports.",
+          howToFix: "Try adding 'hide #{name}' to one of the exports.",
           examples: const [const {
 'main.dart': """
 export 'decl1.dart';
@@ -822,6 +842,40 @@ main() {}""",
       MessageKind.DUPLICATE_EXPORT_DECL:
         const MessageTemplate(MessageKind.DUPLICATE_EXPORT_DECL,
           "The exported '#{name}' from export #{uriString} is defined here."),
+
+      MessageKind.EMPTY_HIDE:
+        const MessageTemplate(MessageKind.EMPTY_HIDE,
+            "Library '#{uri}' doesn't export a '#{name}' declaration.",
+      howToFix: "Try removing '#{name}' the 'hide' clause.",
+      examples: const [
+        const {
+            'main.dart': """
+import 'dart:core' hide Foo;
+
+main() {}"""},
+        const {
+'main.dart': """
+export 'dart:core' hide Foo;
+
+main() {}"""},
+]),
+
+      MessageKind.EMPTY_SHOW:
+        const MessageTemplate(MessageKind.EMPTY_SHOW,
+            "Library '#{uri}' doesn't export a '#{name}' declaration.",
+      howToFix: "Try removing '#{name}' from the 'show' clause.",
+      examples: const [
+        const {
+            'main.dart': """
+import 'dart:core' show Foo;
+
+main() {}"""},
+        const {
+'main.dart': """
+export 'dart:core' show Foo;
+
+main() {}"""},
+]),
 
       MessageKind.NOT_A_TYPE:
         const MessageTemplate(MessageKind.NOT_A_TYPE,
@@ -1764,6 +1818,11 @@ main() => new C();"""]),
         const MessageTemplate(MessageKind.CANNOT_RESOLVE_SETTER,
           "Cannot resolve setter."),
 
+      MessageKind.ASSIGNING_FINAL_FIELD_IN_SUPER:
+        const MessageTemplate(MessageKind.ASSIGNING_FINAL_FIELD_IN_SUPER,
+          "Cannot assign a value to final field '#{name}' "
+          "in superclass '#{superclassName}'."),
+
       MessageKind.ASSIGNING_METHOD:
         const MessageTemplate(MessageKind.ASSIGNING_METHOD,
           "Cannot assign a value to a method."),
@@ -2074,6 +2133,20 @@ main() => A.A = 1;
       MessageKind.LIBRARY_NOT_FOUND:
         const MessageTemplate(MessageKind.LIBRARY_NOT_FOUND,
           "Library not found '#{resolvedUri}'."),
+
+      MessageKind.LIBRARY_NOT_SUPPORTED:
+        const MessageTemplate(MessageKind.LIBRARY_NOT_SUPPORTED,
+          "Library not supported '#{resolvedUri}'.",
+          howToFix: "Try removing the dependency or enabling support using "
+                    "the '--categories' option.",
+          examples: const [/*
+              """
+              import 'dart:io';
+              main() {}
+              """
+          */]),
+          // TODO(johnniwinther): Enable example when message_kind_test.dart
+          // supports library loader callbacks.
 
       MessageKind.UNSUPPORTED_EQ_EQ_EQ:
         const MessageTemplate(MessageKind.UNSUPPORTED_EQ_EQ_EQ,
@@ -2881,6 +2954,10 @@ Please include the following information:
           howToFix:
             "Try replacing '#{shownType}' with '#{shownTypeSuggestion}'."),
 
+      MessageKind.NO_COMMON_SUBTYPES:
+        const MessageTemplate(MessageKind.NO_COMMON_SUBTYPES,
+           "Types '#{left}' and '#{right}' have no common subtypes."),
+
       MessageKind.HIDDEN_WARNINGS_HINTS:
         const MessageTemplate(MessageKind.HIDDEN_WARNINGS_HINTS,
           "#{warnings} warning(s) and #{hints} hint(s) suppressed in #{uri}."),
@@ -3229,6 +3306,19 @@ main() => foo();
   // Patch errors end.
   //////////////////////////////////////////////////////////////////////////////
 
+      MessageKind.EXPERIMENTAL_ASSERT_MESSAGE:
+        const MessageTemplate(MessageKind.EXPERIMENTAL_ASSERT_MESSAGE,
+          "Experimental language feature 'assertion with message'"
+          " is not supported.",
+          howToFix:
+            "Use option '--assert-message' to use assertions with messages.",
+          examples: const [r'''
+main() {
+  int n = -7;
+  assert(n > 0, 'must be positive: $n');
+}
+''']),
+
       MessageKind.IMPORT_EXPERIMENTAL_MIRRORS:
         const MessageTemplate(MessageKind.IMPORT_EXPERIMENTAL_MIRRORS, r'''
 
@@ -3250,11 +3340,23 @@ $IMPORT_EXPERIMENTAL_MIRRORS_PADDING#{importChain}
 ****************************************************************
 '''),
 
+      MessageKind.DISALLOWED_LIBRARY_IMPORT:
+        const MessageTemplate(MessageKind.DISALLOWED_LIBRARY_IMPORT, '''
+Your app imports the unsupported library '#{uri}' via:
+''''''
+$DISALLOWED_LIBRARY_IMPORT_PADDING#{importChain}
+
+Use the --categories option to support import of '#{uri}'.
+'''),
 
       MessageKind.MIRRORS_LIBRARY_NOT_SUPPORT_BY_BACKEND:
         const MessageTemplate(
           MessageKind.MIRRORS_LIBRARY_NOT_SUPPORT_BY_BACKEND,
-          "dart:mirrors library is not supported when using this backend."),
+          """
+dart:mirrors library is not supported when using this backend.
+
+Your app imports dart:mirrors via:""""""
+$MIRRORS_NOT_SUPPORTED_BY_BACKEND_PADDING#{importChain}"""),
 
       MessageKind.CALL_NOT_SUPPORTED_ON_NATIVE_CLASS:
         const MessageTemplate(MessageKind.CALL_NOT_SUPPORTED_ON_NATIVE_CLASS,
@@ -3283,10 +3385,24 @@ $IMPORT_EXPERIMENTAL_MIRRORS_PADDING#{importChain}
           "more code and prevents the compiler from doing some optimizations.",
           howToFix: "Consider removing this 'noSuchMethod' implementation."),
 
+      MessageKind.UNRECOGNIZED_VERSION_OF_LOOKUP_MAP:
+        const MessageTemplate(MessageKind.UNRECOGNIZED_VERSION_OF_LOOKUP_MAP,
+          "Unsupported version of package:lookup_map.",
+          howToFix: DONT_KNOW_HOW_TO_FIX),
 
   }; // End of TEMPLATES.
 
+  /// Padding used before and between import chains in the message for
+  /// [MessageKind.IMPORT_EXPERIMENTAL_MIRRORS].
   static const String IMPORT_EXPERIMENTAL_MIRRORS_PADDING = '\n*   ';
+
+  /// Padding used before and between import chains in the message for
+  /// [MessageKind.MIRRORS_LIBRARY_NOT_SUPPORT_BY_BACKEND].
+  static const String MIRRORS_NOT_SUPPORTED_BY_BACKEND_PADDING = '\n   ';
+
+  /// Padding used before and between import chains in the message for
+  /// [MessageKind.DISALLOWED_LIBRARY_IMPORT].
+  static const String DISALLOWED_LIBRARY_IMPORT_PADDING = '\n  ';
 
   toString() => template;
 

@@ -2,7 +2,28 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-part of resolution;
+library dart2js.resolution.tree_elements;
+
+import '../constants/expressions.dart';
+import '../dart_types.dart';
+import '../diagnostics/invariant.dart' show
+    invariant;
+import '../diagnostics/spannable.dart' show
+    Spannable;
+import '../elements/elements.dart';
+import '../types/types.dart' show
+    TypeMask;
+import '../tree/tree.dart';
+import '../util/util.dart';
+import '../universe/call_structure.dart' show
+    CallStructure;
+import '../universe/selector.dart' show
+    Selector;
+import '../universe/universe.dart' show
+    UniverseSelector;
+
+import 'secret_tree_element.dart' show getTreeElement, setTreeElement;
+import 'send_structure.dart';
 
 abstract class TreeElements {
   AnalyzableElement get analyzedElement;
@@ -23,6 +44,7 @@ abstract class TreeElements {
   Iterable<Element> get otherDependencies;
 
   Element operator[](Node node);
+  Map<Node, DartType> get typesCache;
 
   SendStructure getSendStructure(Send send);
 
@@ -51,7 +73,6 @@ abstract class TreeElements {
   void setCurrentTypeMask(ForIn node, TypeMask mask);
   void setConstant(Node node, ConstantExpression constant);
   ConstantExpression getConstant(Node node);
-  bool isAssert(Send send);
 
   /// Returns the [FunctionElement] defined by [node].
   FunctionElement getFunctionDefinition(FunctionExpression node);
@@ -102,6 +123,9 @@ abstract class TreeElements {
 
   /// Returns the label that [node] targets.
   LabelDefinition getTargetLabel(GotoStatement node);
+
+  /// `true` if the [analyzedElement]'s source code contains a [TryStatement].
+  bool get containsTryStatement;
 }
 
 class TreeElementMapping extends TreeElements {
@@ -109,6 +133,7 @@ class TreeElementMapping extends TreeElements {
   Map<Spannable, Selector> _selectors;
   Map<Spannable, TypeMask> _typeMasks;
   Map<Node, DartType> _types;
+  Map<Node, DartType> typesCache = <Node, DartType>{};
   Setlet<Node> _superUses;
   Setlet<Element> _otherDependencies;
   Map<Node, ConstantExpression> _constants;
@@ -117,9 +142,9 @@ class TreeElementMapping extends TreeElements {
   Map<VariableElement, List<Node>> _potentiallyMutatedInClosure;
   Map<Node, Map<VariableElement, List<Node>>> _accessedByClosureIn;
   Setlet<Element> _elements;
-  Setlet<Send> _asserts;
   Maplet<Send, SendStructure> _sendStructureMap;
   Setlet<DartType> _requiredTypes;
+  bool containsTryStatement = false;
 
   /// Map from nodes to the targets they define.
   Map<Node, JumpTarget> _definedTargets;
@@ -388,17 +413,6 @@ class TreeElementMapping extends TreeElements {
     }
   }
 
-  void setAssert(Send node) {
-    if (_asserts == null) {
-      _asserts = new Setlet<Send>();
-    }
-    _asserts.add(node);
-  }
-
-  bool isAssert(Send node) {
-    return _asserts != null && _asserts.contains(node);
-  }
-
   FunctionElement getFunctionDefinition(FunctionExpression node) {
     return this[node];
   }
@@ -531,28 +545,5 @@ class TreeElementMapping extends TreeElements {
 
   TypeMask getCurrentTypeMask(ForIn node) {
     return _getTypeMask(node.inToken);
-  }
-}
-
-TreeElements _ensureTreeElements(AnalyzableElementX element) {
-  if (element._treeElements == null) {
-    element._treeElements = new TreeElementMapping(element);
-  }
-  return element._treeElements;
-}
-
-abstract class AnalyzableElementX implements AnalyzableElement {
-  TreeElements _treeElements;
-
-  bool get hasTreeElements => _treeElements != null;
-
-  TreeElements get treeElements {
-    assert(invariant(this, _treeElements !=null,
-        message: "TreeElements have not been computed for $this."));
-    return _treeElements;
-  }
-
-  void reuseElement() {
-    _treeElements = null;
   }
 }

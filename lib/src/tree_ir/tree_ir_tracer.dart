@@ -127,7 +127,7 @@ class BlockCollector extends StatementVisitor {
     visitStatement(node.body);
   }
 
-  visitWhileCondition(WhileCondition node) {
+  visitFor(For node) {
     Block whileBlock = new Block();
     _addGotoStatement(whileBlock);
 
@@ -176,6 +176,11 @@ class BlockCollector extends StatementVisitor {
   }
 
   visitForeignStatement(ForeignStatement node) {
+    _addStatement(node);
+  }
+
+  @override
+  visitYield(Yield node) {
     _addStatement(node);
   }
 }
@@ -297,11 +302,13 @@ class TreeTracer extends TracerUtil with StatementVisitor {
     printStatement(null, "while true do");
   }
 
-  visitWhileCondition(WhileCondition node) {
+  visitFor(For node) {
     String bodyTarget = collector.substatements[node.body].name;
     String nextTarget = collector.substatements[node.next].name;
+    String updates = node.updates.map(expr).join(', ');
     printStatement(null, "while ${expr(node.condition)}");
     printStatement(null, "do $bodyTarget");
+    printStatement(null, "updates ($updates)");
     printStatement(null, "then $nextTarget" );
   }
 
@@ -333,6 +340,11 @@ class TreeTracer extends TracerUtil with StatementVisitor {
   @override
   visitForeignStatement(ForeignStatement node) {
     printStatement(null, 'foreign ${node.codeTemplate.source}');
+  }
+
+  @override
+  visitYield(Yield node) {
+    printStatement(null, 'yield ${expr(node.input)}');
   }
 }
 
@@ -496,7 +508,6 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
     return 'CreateInstance $className($arguments)';
   }
 
-
   @override
   String visitReadTypeVariable(ReadTypeVariable node) {
     return 'Read ${node.variable.element} ${visitExpression(node.target)}';
@@ -536,6 +547,13 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
   }
 
   @override
+  String visitApplyBuiltinMethod(ApplyBuiltinMethod node) {
+    String receiver = visitExpression(node.receiver);
+    String args = node.arguments.map(visitExpression).join(', ');
+    return 'ApplyBuiltinMethod ${node.method} $receiver ($args)';
+  }
+
+  @override
   String visitGetLength(GetLength node) {
     String object = visitExpression(node.object);
     return 'GetLength($object)';
@@ -554,6 +572,18 @@ class SubexpressionVisitor extends ExpressionVisitor<String> {
     String index = visitExpression(node.index);
     String value = visitExpression(node.value);
     return 'SetIndex($object, $index, $value)';
+  }
+
+  @override
+  String visitAwait(Await node) {
+    String value = visitExpression(node.input);
+    return 'Await($value)';
+  }
+
+  @override
+  String visitYield(Yield node) {
+    String value = visitExpression(node.input);
+    return 'Yield($value)';
   }
 }
 

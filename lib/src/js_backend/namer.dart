@@ -457,17 +457,19 @@ class Namer {
 
   JavaScriptBackend get backend => compiler.backend;
 
+  DiagnosticReporter get reporter => compiler.reporter;
+
   String get deferredTypesName => 'deferredTypes';
   String get isolateName => 'Isolate';
   String get isolatePropertiesName => r'$isolateProperties';
-  jsAst.Name get noSuchMethodName => publicInstanceMethodNameByArity(
-      Compiler.NO_SUCH_METHOD, Compiler.NO_SUCH_METHOD_ARG_COUNT);
+  jsAst.Name get noSuchMethodName => invocationName(Selectors.noSuchMethod_);
+
   /**
    * Some closures must contain their name. The name is stored in
    * [STATIC_CLOSURE_NAME_NAME].
    */
   String get STATIC_CLOSURE_NAME_NAME => r'$name';
-  String get closureInvocationSelectorName => Compiler.CALL_OPERATOR_NAME;
+  String get closureInvocationSelectorName => Identifiers.call;
   bool get shouldMinify => false;
 
   /// Returns the string that is to be used as the result of a call to
@@ -513,11 +515,20 @@ class Namer {
       case JsGetName.FUNCTION_CLASS_TYPE_NAME:
         return runtimeTypeName(compiler.functionClass);
       default:
-        compiler.reportError(
-          node, MessageKind.GENERIC,
+        reporter.reportErrorMessage(
+          node,
+          MessageKind.GENERIC,
           {'text': 'Error: Namer has no name for "$name".'});
         return asName('BROKEN');
     }
+  }
+
+  /// Return a reference to the given [name].
+  ///
+  /// This is used to ensure that every use site of a name has a unique node so
+  /// that we can properly attribute source information.
+  jsAst.Name _newReference(jsAst.Name name) {
+    return new _NameReference(name);
   }
 
   /// Disambiguated name for [constant].
@@ -534,7 +545,7 @@ class Namer {
       result = getFreshName(NamingScope.constant, longName);
       constantNames[constant] = result;
     }
-    return result;
+    return _newReference(result);
   }
 
   /// Proposed name for [constant].
@@ -625,13 +636,6 @@ class Namer {
     return invocationName(new Selector.fromElement(method));
   }
 
-  /// Annotated name for a public method with the given [originalName]
-  /// and [arity] and no named parameters.
-  jsAst.Name publicInstanceMethodNameByArity(String originalName,
-                                             int arity) {
-    return invocationName(new Selector.call(originalName, null, arity));
-  }
-
   /// Returns the annotated name for a variant of `call`.
   /// The result has the form:
   ///
@@ -694,7 +698,7 @@ class Namer {
 
       case SelectorKind.CALL:
         List<String> suffix = callSuffixForStructure(selector.callStructure);
-        if (selector.name == Compiler.CALL_OPERATOR_NAME) {
+        if (selector.name == Identifiers.call) {
           // Derive the annotated name for this variant of 'call'.
           return deriveCallMethodName(suffix);
         }
@@ -703,7 +707,8 @@ class Namer {
         return disambiguatedName; // Methods other than call are not annotated.
 
       default:
-        compiler.internalError(compiler.currentElement,
+        reporter.internalError(
+            CURRENT_ELEMENT_SPANNABLE,
             'Unexpected selector kind: ${selector.kind}');
         return null;
     }
@@ -855,7 +860,7 @@ class Namer {
       newName = getFreshName(NamingScope.global, name);
       internalGlobals[name] = newName;
     }
-    return newName;
+    return _newReference(newName);
   }
 
   /// Returns the property name to use for a compiler-owner global variable,
@@ -902,7 +907,7 @@ class Namer {
       newName = getFreshName(NamingScope.global, proposedName);
       userGlobals[element] = newName;
     }
-    return newName;
+    return _newReference(newName);
   }
 
   /// Returns the disambiguated name for an instance method or field
@@ -943,7 +948,7 @@ class Namer {
                              sanitizeForAnnotations: true);
       userInstanceMembers[key] = newName;
     }
-    return newName;
+    return _newReference(newName);
   }
 
   /// Returns the disambiguated name for the instance member identified by
@@ -966,7 +971,7 @@ class Namer {
                              sanitizeForAnnotations: true);
       userInstanceMembers[key] = newName;
     }
-    return newName;
+    return _newReference(newName);
   }
 
   /// Forces the public instance member with [originalName] to have the given
@@ -1006,7 +1011,7 @@ class Namer {
                              sanitizeForNatives: mayClashNative);
       internalInstanceMembers[element] = newName;
     }
-    return newName;
+    return _newReference(newName);
   }
 
   /// Disambiguated name for the given operator.
@@ -1021,7 +1026,7 @@ class Namer {
       newName = getFreshName(NamingScope.instance, operatorIdentifier);
       userInstanceOperators[operatorIdentifier] = newName;
     }
-    return newName;
+    return _newReference(newName);
   }
 
   String _generateFreshStringForName(String proposedName,
@@ -1143,12 +1148,12 @@ class Namer {
       LibraryElement library = element;
       name = libraryLongNames[library];
       if (name != null) return name;
-      name = library.getLibraryOrScriptName();
+      name = library.libraryOrScriptName;
       if (name.contains('.')) {
         // For libraries that have a library tag, we use the last part
         // of the fully qualified name as their base name. For all other
         // libraries, we use the first part of their filename.
-        name = library.hasLibraryName()
+        name = library.hasLibraryName
             ? name.substring(name.lastIndexOf('.') + 1)
             : name.substring(0, name.indexOf('.'));
       }
@@ -1345,7 +1350,7 @@ class Namer {
       return 'P';
     }
     return userGlobalObjects[
-        library.getLibraryOrScriptName().hashCode % userGlobalObjects.length];
+        library.libraryOrScriptName.hashCode % userGlobalObjects.length];
   }
 
   jsAst.Name deriveLazyInitializerName(jsAst.Name name) {
@@ -1389,7 +1394,7 @@ class Namer {
 
   String get functionTypeTag => r'func';
 
-  String get functionTypeVoidReturnTag => r'void';
+  String get functionTypeVoidReturnTag => r'v';
 
   String get functionTypeReturnTypeTag => r'ret';
 
@@ -1579,6 +1584,8 @@ class ConstantNamingVisitor implements ConstantValueVisitor {
 
   ConstantNamingVisitor(this.compiler, this.hasher);
 
+  DiagnosticReporter get reporter => compiler.reporter;
+
   String getName(ConstantValue constant) {
     _visit(constant);
     if (root == null) return 'CONSTANT';
@@ -1709,11 +1716,17 @@ class ConstantNamingVisitor implements ConstantValueVisitor {
 
   @override
   void visitType(TypeConstantValue constant, [_]) {
+    // Generates something like 'Type_String_k8F', using the simple name of the
+    // type and a hash to disambiguate the same name in different libraries.
     addRoot('Type');
     DartType type = constant.representedType;
-    JavaScriptBackend backend = compiler.backend;
-    String name = backend.rti.getTypeRepresentationForTypeConstant(type);
+    String name = type.element?.name;
+    if (name == null) {  // e.g. DartType 'dynamic' has no element.
+      JavaScriptBackend backend = compiler.backend;
+      name = backend.rti.getTypeRepresentationForTypeConstant(type);
+    }
     addIdentifier(name);
+    add(getHashTag(constant, 3));
   }
 
   @override
@@ -1729,13 +1742,13 @@ class ConstantNamingVisitor implements ConstantValueVisitor {
         add('dummy_receiver');
         break;
       case SyntheticConstantKind.TYPEVARIABLE_REFERENCE:
-        add('type_variable_reference');
+        // Omit. These are opaque deferred indexes with nothing helpful to add.
         break;
       case SyntheticConstantKind.NAME:
         add('name');
         break;
       default:
-        compiler.internalError(compiler.currentElement,
+        reporter.internalError(CURRENT_ELEMENT_SPANNABLE,
                                "Unexpected SyntheticConstantValue");
     }
   }
@@ -1764,6 +1777,8 @@ class ConstantCanonicalHasher implements ConstantValueVisitor<int, Null> {
   final Map<ConstantValue, int> hashes = new Map<ConstantValue, int>();
 
   ConstantCanonicalHasher(this.compiler);
+
+  DiagnosticReporter get reporter => compiler.reporter;
 
   int getHash(ConstantValue constant) => _visit(constant);
 
@@ -1828,6 +1843,7 @@ class ConstantCanonicalHasher implements ConstantValueVisitor<int, Null> {
   int visitType(TypeConstantValue constant, [_]) {
     DartType type = constant.representedType;
     JavaScriptBackend backend = compiler.backend;
+    // This name includes the library name and type parameters.
     String name = backend.rti.getTypeRepresentationForTypeConstant(type);
     return _hashString(4, name);
   }
@@ -1839,15 +1855,19 @@ class ConstantCanonicalHasher implements ConstantValueVisitor<int, Null> {
   }
 
   @override
-  visitSynthetic(SyntheticConstantValue constant, [_]) {
+  int visitSynthetic(SyntheticConstantValue constant, [_]) {
     switch (constant.kind) {
       case SyntheticConstantKind.TYPEVARIABLE_REFERENCE:
-        return constant.payload.hashCode;
+        // These contain a deferred opaque index into metadata. There is nothing
+        // we can access that is stable between compiles.  Luckily, since they
+        // resolve to integer indexes, they're always part of a larger constant.
+        return 0;
       default:
-        compiler.internalError(NO_LOCATION_SPANNABLE,
-                               'SyntheticConstantValue should never be named and '
-                               'never be subconstant');
-        return null;
+        reporter.internalError(
+            NO_LOCATION_SPANNABLE,
+            'SyntheticConstantValue should never be named and '
+            'never be subconstant');
+        return 0;
     }
   }
 

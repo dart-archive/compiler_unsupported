@@ -4,11 +4,22 @@
 
 library ordered_typeset;
 
-import 'dart2jslib.dart' show Compiler, MessageKind, invariant;
+import 'compiler.dart' show
+    Compiler;
 import 'dart_types.dart';
-import 'elements/elements.dart' show ClassElement;
-import 'util/util.dart' show Link, LinkBuilder;
-import 'util/util_implementation.dart' show LinkEntry;
+import 'diagnostics/diagnostic_listener.dart' show
+    DiagnosticReporter;
+import 'diagnostics/invariant.dart' show
+    invariant;
+import 'diagnostics/messages.dart' show
+    MessageKind;
+import 'elements/elements.dart' show
+    ClassElement;
+import 'util/util.dart' show
+    Link,
+    LinkBuilder;
+import 'util/util_implementation.dart' show
+    LinkEntry;
 
 /**
  * An ordered set of the supertypes of a class. The supertypes of a class are
@@ -154,23 +165,26 @@ class OrderedTypeSetBuilder {
       if (type.element != compiler.objectClass) {
         allSupertypes.addLast(compiler.objectClass.rawType);
       }
-      _addAtDepth(compiler, type, maxDepth + 1);
+      DiagnosticReporter reporter = compiler.reporter;
+      _addAtDepth(reporter, type, maxDepth + 1);
     } else {
       if (type.element != compiler.objectClass) {
         allSupertypes.addLast(type);
       }
-      _addAtDepth(compiler, type, type.element.hierarchyDepth);
+      DiagnosticReporter reporter = compiler.reporter;
+      _addAtDepth(reporter, type, type.element.hierarchyDepth);
     }
   }
 
-  void _addAtDepth(Compiler compiler, InterfaceType type, int depth) {
+  void _addAtDepth(DiagnosticReporter reporter, InterfaceType type, int depth) {
     LinkEntry<DartType> prev = null;
     LinkEntry<DartType> link = map[depth];
     while (link != null) {
       DartType existingType = link.head;
       if (existingType == type) return;
       if (existingType.element == type.element) {
-        compiler.reportError(cls,
+        reporter.reportErrorMessage(
+            cls,
             MessageKind.MULTI_INHERITANCE,
             {'thisType': cls.thisType,
              'firstType': existingType,

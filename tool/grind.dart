@@ -13,7 +13,7 @@ main(List<String> args) => grind(args);
 @Task()
 build() {
   // The sdk repo version to download.
-  final String sdkTag = '1.12.1';
+  final String sdkTag = '1.13.0-dev.6.0';
 
   trunk.createSync();
 

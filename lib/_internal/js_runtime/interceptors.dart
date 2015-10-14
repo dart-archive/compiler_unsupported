@@ -12,7 +12,6 @@ import 'dart:collection';
 import 'dart:_internal' hide Symbol;
 import "dart:_internal" as _symbol_dev show Symbol;
 import 'dart:_js_helper' show allMatchesInStringUnchecked,
-                              Null,
                               JSSyntaxRegExp,
                               Primitives,
                               argumentErrorValue,
@@ -35,8 +34,8 @@ import 'dart:_js_helper' show allMatchesInStringUnchecked,
                               stringReplaceFirstUnchecked,
                               stringReplaceFirstMappedUnchecked,
                               stringReplaceRangeUnchecked,
+                              throwConcurrentModificationError,
                               lookupAndCacheInterceptor,
-                              lookupDispatchRecord,
                               StringMatch,
                               firstMatchAfter,
                               NoInline;
@@ -68,6 +67,7 @@ _symbolMapToStringMap(Map<Symbol, dynamic> map) {
  * to emit a call to an intercepted method, that is a method that is
  * defined in an interceptor class.
  */
+@NoInline()
 getInterceptor(object) {
   // This is a magic method: the compiler does specialization of it
   // depending on the uses of intercepted methods and instantiated

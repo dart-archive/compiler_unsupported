@@ -213,10 +213,10 @@ class RuntimeTypeGenerator {
     // [Function] and needs checks for all typedefs that are used in is-checks.
     if (checkedClasses.contains(compiler.functionClass) ||
         checkedFunctionTypes.isNotEmpty) {
-      Element call = cls.lookupLocalMember(Compiler.CALL_OPERATOR_NAME);
+      Element call = cls.lookupLocalMember(Identifiers.call);
       if (call == null) {
         // If [cls] is a closure, it has a synthetic call operator method.
-        call = cls.lookupBackendMember(Compiler.CALL_OPERATOR_NAME);
+        call = cls.lookupBackendMember(Identifiers.call);
       }
       if (call != null && call.isFunction) {
         FunctionElement callFunction = call;
@@ -228,7 +228,7 @@ class RuntimeTypeGenerator {
                                     generateSubstitution,
                                     generated);
         }
-        FunctionType callType = callFunction.computeType(compiler);
+        FunctionType callType = callFunction.computeType(compiler.resolution);
         generateFunctionTypeSignature(callFunction, callType);
       }
     }
