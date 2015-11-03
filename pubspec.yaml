@@ -1,5 +1,5 @@
 name: compiler_unsupported
-version: 1.13.0-dev.7.0
+version: 1.13.0-dev.7.6
 description: >
   This is an unsupported copy of the dart2js source. The API of this package
   can and will change in unpredictable and incompatible ways.
@@ -22,6 +22,6 @@ dependencies:
   # lookup_map:
 
 dev_dependencies:
-  grinder: ^0.7.0
+  grinder: ^0.8.0
   path: any
   test: ^0.12.0
