@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.13.0-dev.7.9 (2015-11-04)
+- upgraded to SDK 1.13.0-dev.7.9
+
 ## 1.13.0-dev.7.6 (2015-11-03)
 - upgraded to SDK 1.13.0-dev.7.6
 
