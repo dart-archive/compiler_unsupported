@@ -9,7 +9,7 @@ import 'dart:io';
 final Directory trunk = new Directory('trunk');
 
 // The sdk repo version to download.
-const String sdkTag = '1.13.2';
+const String sdkTag = '1.14.0';
 
 main(List<String> args) => grind(args);
 
@@ -60,24 +60,29 @@ final String versionLong = '${versionLong}';
   copy(joinFile(sourceDir, ['sdk_library_metadata', 'lib', 'libraries.dart']), libDir);
 
   // packages
-  copy(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(libDir, ['_internal', 'js_ast']));
   copy(joinDir(dartDir, ['sdk', 'lib', '_internal', 'js_runtime', 'lib']), joinDir(libDir, ['_internal', 'js_runtime']));
   copy(joinDir(dartDir, ['sdk', 'lib', '_internal', 'sdk_library_metadata', 'lib']), joinDir(libDir, ['_internal', 'sdk_library_metadata']));
+  copy(joinDir(pkgDir, ['dart_messages', 'lib']), joinDir(libDir, ['_internal', 'dart_messages']));
+  copy(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(libDir, ['_internal', 'js_ast']));
 
   // Copy sdk sources.
   _copySdk(joinDir(dartDir, ['sdk']), joinDir(libDir, ['sdk']));
 
+  // Copy platform files.
+  // TODO:
+
+
   // Adjust sources.
-  List replacements = [
-      [
+  List replacements = [[
         r'package:sdk_library_metadata/libraries.dart',
         r'package:compiler_unsupported/libraries.dart'
-      ],
-      [
+      ], [
         r'package:js_runtime/',
         r'package:compiler_unsupported/_internal/js_runtime/'
-      ],
-      [
+      ], [
+        r'package:dart_messages/',
+        r'package:compiler_unsupported/_internal/dart_messages/'
+      ], [
         r'package:js_ast/',
         r'package:compiler_unsupported/_internal/js_ast/'
       ]
@@ -146,7 +151,7 @@ void _copySdk(Directory srcDir, Directory destDir) {
   ZLibCodec zlib = new ZLibCodec(level: 9);
 
   srcDir.listSync(recursive: true, followLinks: false).forEach((entity) {
-    if (entity is File && entity.path.endsWith('.dart')) {
+    if (entity is File && (entity.path.endsWith('.dart') || entity.path.endsWith('.platform'))) {
       // Create the new path, remove the `lib/` section.
       String newPath = destPath + entity.path.substring(srcPath.length + 4) + '_';
       File f = new File(newPath);

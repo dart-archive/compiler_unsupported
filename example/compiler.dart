@@ -235,6 +235,6 @@ class _CompilerProvider {
       }
     }
 
-    return new Future.error('file not found');
+    return new Future.error('file not found: ${uri}');
   }
 }
