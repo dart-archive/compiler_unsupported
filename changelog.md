@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.14.2 (2016-03-21)
+- upgraded to SDK 1.14.2
+
 ## 1.14.1 (2016-03-21)
 - upgraded to SDK 1.14.1
 
