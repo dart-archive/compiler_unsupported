@@ -8,13 +8,13 @@ import 'dart:io';
 
 final Directory trunk = new Directory('trunk');
 
+// The sdk repo version to download.
+const String sdkTag = '1.13.2';
+
 main(List<String> args) => grind(args);
 
 @Task()
 build() {
-  // The sdk repo version to download.
-  final String sdkTag = '1.13.1';
-
   trunk.createSync();
 
   // Download the file.
