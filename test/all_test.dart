@@ -24,7 +24,7 @@ void main() {
   print('Using SDK at ${sdk.location}; version ${sdk.version}.');
   print('');
 
-  group('compiler', () {
+  group('compile', () {
     Compiler compiler;
 
     setUp(() {
