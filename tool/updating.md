@@ -5,7 +5,7 @@
 - update the `sdkTag` variable in tools/grind.dart
 - run `dart tool/grind.dart build`
 - run `dart tool/grind.dart validate`
-- run 'dart example/compiler.dart'
+- run `dart example/compiler.dart`
 
 ### Publishing
 

@@ -23,7 +23,6 @@ export 'sdk.dart';
  * file in the working directory
  */
 class DartSdkIO implements DartSdk {
-//  static final _pkgPath = 'packages/compiler_unsupported/sdk';
   static String _pkgPath;
 
   Map<String, String> _cache = {};
