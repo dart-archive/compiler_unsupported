@@ -1,4 +1,4 @@
-// Copyright (c) 2014, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -19,11 +19,12 @@ export 'sdk.dart';
 /**
  * This `DartSdk` implementation reads the SDK resources encoded into the
  * `compiler_unsupported` package as part of a build step. This does not rely
- * on being able to locate an SDK on disk. It _does_ need to have a populated
- * packages directory in the current working directory.
+ * on being able to locate an SDK on disk. It _does_ need to have a .packages
+ * file in the working directory
  */
 class DartSdkIO implements DartSdk {
-  static final _pkgPath = 'packages/compiler_unsupported/sdk';
+//  static final _pkgPath = 'packages/compiler_unsupported/sdk';
+  static String _pkgPath;
 
   Map<String, String> _cache = {};
   ZLibCodec _zlib = new ZLibCodec();
@@ -41,6 +42,19 @@ class DartSdkIO implements DartSdk {
 
     if (path.length < 4) return null;
 
+    if (_pkgPath == null) {
+      File packageFile = new File('.packages');
+
+      if (packageFile.existsSync()) {
+        List<String> lines = packageFile.readAsLinesSync();
+        String compilerLn =
+          lines.firstWhere((ln) => ln.startsWith("compiler_unsupported:"));
+        compilerLn =
+            compilerLn.substring("compiler_unsupported:".length) + 'sdk';
+        if (compilerLn.startsWith("file://")) compilerLn = compilerLn.substring(("file://").length);
+        _pkgPath = compilerLn;
+      }
+    }
     // Remove the `/lib` dir.
     var p = _pkgPath + path.substring(4) + '_';
 
