@@ -12,8 +12,9 @@ environment:
 
 dependencies:
   dart2js_info: ^0.2.0
-  package_config: ^0.1.1
+  package_config: ^1.0.0
   pub_semver: ^1.2.1
+  kernel: ^0.1.0
   # js:
   # js_ast:
   # js_runtime:
