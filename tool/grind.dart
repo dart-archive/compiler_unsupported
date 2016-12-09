@@ -9,7 +9,7 @@ import 'dart:io';
 final Directory trunk = new Directory('trunk');
 
 // The sdk repo version to download.
-const String sdkTag = '1.20.0';
+const String sdkTag = '1.21.0';
 
 main(List<String> args) => grind(args);
 
