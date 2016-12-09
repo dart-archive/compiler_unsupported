@@ -64,6 +64,7 @@ final String versionLong = '${versionLong}';
   copy(joinDir(dartDir, ['sdk', 'lib', '_internal', 'sdk_library_metadata', 'lib']), joinDir(libDir, ['_internal', 'sdk_library_metadata']));
   copy(joinDir(pkgDir, ['dart_messages', 'lib']), joinDir(libDir, ['_internal', 'dart_messages']));
   copy(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(libDir, ['_internal', 'js_ast']));
+  copy(joinDir(pkgDir, ['kernel', 'lib']), joinDir(libDir, ['_internal', 'kernel']));
 
   // Copy sdk sources.
   _copySdk(joinDir(dartDir, ['sdk']), joinDir(libDir, ['sdk']));
@@ -85,6 +86,9 @@ final String versionLong = '${versionLong}';
       ], [
         r'package:js_ast/',
         r'package:compiler_unsupported/_internal/js_ast/'
+      ], [
+        r'package:kernel/',
+        r'package:compiler_unsupported/_internal/kernel/'
       ]
   ];
 
