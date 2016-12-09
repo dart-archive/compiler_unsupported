@@ -2,7 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE.md file.
 
-import 'package:kernel/ast.dart' as ir;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart' as ir;
 
 import "../dart_types.dart" show DartType, InterfaceType;
 import "../elements/elements.dart"
@@ -272,7 +272,7 @@ abstract class UnresolvedVisitor {
       Send node, MethodElement getter, Element element, Node rhs, _) {
     var accessor = new ClassStaticAccessor(
         this, getter.name, possiblyErroneousFunctionToIr(getter), null);
-    return accessor.buildNullAwareAssignment(visitForValue(rhs),
+    return accessor.buildNullAwareAssignment(visitForValue(rhs), null,
         voidContext: isVoidContext);
   }
 
@@ -457,7 +457,7 @@ abstract class UnresolvedVisitor {
   ir.Expression visitUnresolvedSuperSetterSetIfNull(
       Send node, MethodElement getter, Element element, Node rhs, _) {
     return buildUnresolvedSuperPropertyAccessor('${node.selector}', getter)
-        .buildNullAwareAssignment(visitForValue(rhs));
+        .buildNullAwareAssignment(visitForValue(rhs), null);
   }
 
   ir.Expression visitUnresolvedSuperUnary(
@@ -533,26 +533,26 @@ abstract class UnresolvedVisitor {
       Send node, MethodElement getter, Element element, Node rhs, _) {
     var accessor = new TopLevelStaticAccessor(
         this, getter.name, possiblyErroneousFunctionToIr(getter), null);
-    return accessor.buildNullAwareAssignment(visitForValue(rhs),
+    return accessor.buildNullAwareAssignment(visitForValue(rhs), null,
         voidContext: isVoidContext);
   }
 
   ir.Expression visitUnresolvedSuperGetterIndexSetIfNull(Send node,
       Element element, MethodElement setter, Node index, Node rhs, _) {
     return buildUnresolvedSuperIndexAccessor(index, element)
-        .buildNullAwareAssignment(visitForValue(rhs));
+        .buildNullAwareAssignment(visitForValue(rhs), null);
   }
 
   ir.Expression visitUnresolvedSuperSetterIndexSetIfNull(Send node,
       MethodElement getter, Element element, Node index, Node rhs, _) {
     return buildUnresolvedSuperIndexAccessor(index, element)
-        .buildNullAwareAssignment(visitForValue(rhs));
+        .buildNullAwareAssignment(visitForValue(rhs), null);
   }
 
   ir.Expression visitUnresolvedSuperIndexSetIfNull(
       Send node, Element element, Node index, Node rhs, _) {
     return buildUnresolvedSuperIndexAccessor(index, element)
-        .buildNullAwareAssignment(visitForValue(rhs));
+        .buildNullAwareAssignment(visitForValue(rhs), null);
   }
 
   ir.Expression visitUnresolvedSuperSet(
