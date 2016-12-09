@@ -2,7 +2,7 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE.md file.
 
-import 'package:kernel/ast.dart' as ir;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart' as ir;
 
 import "../dart_types.dart" show DartType;
 import "../elements/elements.dart" show Element, ErroneousElement;

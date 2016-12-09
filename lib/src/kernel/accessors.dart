@@ -2,13 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE.md file.
 
-import 'package:kernel/ast.dart' as ir;
-import 'package:kernel/frontend/accessors.dart' as ir_accessors;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart' as ir;
+import 'package:compiler_unsupported/_internal/kernel/frontend/accessors.dart' as ir_accessors;
 
 import 'kernel.dart' show Kernel;
 import 'unresolved.dart' show UnresolvedVisitor;
 
-export 'package:kernel/frontend/accessors.dart' show Accessor;
+export 'package:compiler_unsupported/_internal/kernel/frontend/accessors.dart' show Accessor;
 
 class TopLevelStaticAccessor extends ir_accessors.StaticAccessor {
   final UnresolvedVisitor builder;
