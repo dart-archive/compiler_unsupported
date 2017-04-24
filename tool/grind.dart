@@ -9,7 +9,7 @@ import 'dart:io';
 final Directory trunk = new Directory('trunk');
 
 // The sdk repo version to download.
-const String sdkTag = '1.22.0';
+const String sdkTag = '1.23.0';
 
 main(List<String> args) => grind(args);
 
@@ -65,6 +65,8 @@ final String versionLong = '${versionLong}';
   copy(joinDir(pkgDir, ['dart_messages', 'lib']), joinDir(libDir, ['_internal', 'dart_messages']));
   copy(joinDir(pkgDir, ['js_ast', 'lib']), joinDir(libDir, ['_internal', 'js_ast']));
   copy(joinDir(pkgDir, ['kernel', 'lib']), joinDir(libDir, ['_internal', 'kernel']));
+  copy(joinDir(pkgDir, ['front_end', 'lib']), joinDir(libDir, ['_internal', 'front_end']));
+
 
   // Copy sdk sources.
   _copySdk(joinDir(dartDir, ['sdk']), joinDir(libDir, ['sdk']));
@@ -89,7 +91,10 @@ final String versionLong = '${versionLong}';
       ], [
         r'package:kernel/',
         r'package:compiler_unsupported/_internal/kernel/'
-      ]
+      ], [
+        r'package:front_end/',
+        r'package:compiler_unsupported/_internal/front_end/'
+      ],
   ];
 
   int modifiedCount = 0;
@@ -98,8 +103,21 @@ final String versionLong = '${versionLong}';
     counts[replacement[0]] = 0;
   }
 
-  joinDir(libDir, ['src']).listSync(recursive: true).forEach((entity) {
+  List<FileSystemEntity> fsesToProcess = [];
+  fsesToProcess..addAll(joinDir(libDir, ['src']).listSync(recursive: true))
+               ..addAll(joinDir(libDir, ['_internal']).listSync(recursive: true));
+
+
+  fsesToProcess.forEach((entity) {
+    print (entity.path);
+
+
     if (entity is File && entity.path.endsWith('.dart')) {
+      if (entity.path.endsWith('fasta_codes.dart')) {
+        print ("Jumping jack rabbit!");
+      }
+
+
       String text = entity.readAsStringSync();
       String newText = text;
 
