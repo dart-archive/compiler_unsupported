@@ -4,7 +4,7 @@
 
 library dart2js.diagnostics.source_span;
 
-import '../tokens/token.dart' show Token;
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart' show Token;
 import '../tree/tree.dart' show Node;
 import 'spannable.dart' show Spannable;
 
