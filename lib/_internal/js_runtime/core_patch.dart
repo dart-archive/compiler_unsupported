@@ -17,15 +17,12 @@ import 'dart:_js_helper'
         NoInline,
         objectHashCode,
         patch,
-        patch_full,
-        patch_lazy,
-        patch_startup,
         Primitives,
         stringJoinUnchecked,
         getTraceFromException,
         RuntimeError;
 
-import 'dart:_foreign_helper' show JS;
+import 'dart:_foreign_helper' show JS, JS_GET_FLAG;
 
 import 'dart:_native_typed_data' show NativeUint8List;
 
@@ -33,7 +30,7 @@ import 'dart:async' show StreamController;
 
 String _symbolToString(Symbol symbol) => _symbol_dev.Symbol.getName(symbol);
 
-_symbolMapToStringMap(Map<Symbol, dynamic> map) {
+Map<String, dynamic> _symbolMapToStringMap(Map<Symbol, dynamic> map) {
   if (map == null) return null;
   var result = new Map<String, dynamic>();
   map.forEach((Symbol key, value) {
@@ -76,34 +73,32 @@ class Null {
 // Patch for Function implementation.
 @patch
 class Function {
-  @patch_full
+  @patch
   static apply(Function function, List positionalArguments,
       [Map<Symbol, dynamic> namedArguments]) {
-    return Primitives.applyFunction(function, positionalArguments,
-        namedArguments == null ? null : _toMangledNames(namedArguments));
+    // The lazy and startup emitter use a different implementation. To keep the
+    // method small and inlinable, just select the method.
+    return JS_GET_FLAG("IS_FULL_EMITTER")
+        ? _apply1(function, positionalArguments, namedArguments)
+        : _apply2(function, positionalArguments, namedArguments);
   }
 
-  @patch_lazy
-  static apply(Function function, List positionalArguments,
-      [Map<Symbol, dynamic> namedArguments]) {
-    return Primitives.applyFunction2(function, positionalArguments,
+  static _apply1(function, positionalArguments, namedArguments) {
+    return Primitives.applyFunction(
+        function,
+        positionalArguments,
+        // Use this form so that if namedArguments is always null, we can
+        // tree-shake _symbolMapToStringMap.
         namedArguments == null ? null : _symbolMapToStringMap(namedArguments));
   }
 
-  @patch_startup
-  static apply(Function function, List positionalArguments,
-      [Map<Symbol, dynamic> namedArguments]) {
-    return Primitives.applyFunction2(function, positionalArguments,
+  static _apply2(function, positionalArguments, namedArguments) {
+    return Primitives.applyFunction2(
+        function,
+        positionalArguments,
+        // Use this form so that if namedArguments is always null, we can
+        // tree-shake _symbolMapToStringMap.
         namedArguments == null ? null : _symbolMapToStringMap(namedArguments));
-  }
-
-  static Map<String, dynamic> _toMangledNames(
-      Map<Symbol, dynamic> namedArguments) {
-    Map<String, dynamic> result = {};
-    namedArguments.forEach((symbol, value) {
-      result[_symbolToString(symbol)] = value;
-    });
-    return result;
   }
 }
 
@@ -173,12 +168,6 @@ class int {
   static int parse(String source, {int radix, int onError(String source)}) {
     return Primitives.parseInt(source, radix, onError);
   }
-
-  @patch
-  factory int.fromEnvironment(String name, {int defaultValue}) {
-    throw new UnsupportedError(
-        'int.fromEnvironment can only be used as a const constructor');
-  }
 }
 
 @patch
@@ -209,6 +198,9 @@ class Error {
 
 @patch
 class FallThroughError {
+  @patch
+  FallThroughError._create(String url, int line);
+
   @patch
   String toString() => super.toString();
 }
@@ -419,12 +411,6 @@ class String {
     return Primitives.stringFromCharCode(charCode);
   }
 
-  @patch
-  factory String.fromEnvironment(String name, {String defaultValue}) {
-    throw new UnsupportedError(
-        'String.fromEnvironment can only be used as a const constructor');
-  }
-
   static String _stringFromJSArray(List list, int start, int endOrNull) {
     int len = list.length;
     int end = RangeError.checkValidRange(start, endOrNull, len);
@@ -470,12 +456,6 @@ class String {
 
 @patch
 class bool {
-  @patch
-  factory bool.fromEnvironment(String name, {bool defaultValue: false}) {
-    throw new UnsupportedError(
-        'bool.fromEnvironment can only be used as a const constructor');
-  }
-
   @patch
   int get hashCode => super.hashCode;
 }
@@ -564,6 +544,11 @@ class StringBuffer {
 @patch
 class NoSuchMethodError {
   @patch
+  NoSuchMethodError.withInvocation(Object receiver, Invocation invocation) {
+    // UNIMPLEMENTED
+  }
+
+  @patch
   NoSuchMethodError(Object receiver, Symbol memberName,
       List positionalArguments, Map<Symbol, dynamic> namedArguments,
       [List existingArgumentNames = null])
@@ -611,6 +596,13 @@ class NoSuchMethodError {
   }
 }
 
+class _CompileTimeError extends Error {
+  final String _errorMsg;
+  // TODO(sigmund): consider calling `JS('', 'debugger')`.
+  _CompileTimeError(this._errorMsg);
+  String toString() => _errorMsg;
+}
+
 @patch
 class Uri {
   @patch
@@ -624,7 +616,13 @@ class Uri {
 @patch
 class _Uri {
   @patch
-  static bool get _isWindows => false;
+  static bool get _isWindows => _isWindowsCached;
+
+  static final bool _isWindowsCached = JS(
+      'bool',
+      'typeof process != "undefined" && '
+      'Object.prototype.toString.call(process) == "[object process]" && '
+      'process.platform == "win32"');
 
   // Matches a String that _uriEncodes to itself regardless of the kind of
   // component.  This corresponds to [_unreservedTable], i.e. characters that
@@ -761,4 +759,23 @@ _unresolvedTopLevelMethodError(receiver, memberName, positionalArguments,
   // TODO(sra): Generate customized message.
   return new NoSuchMethodError(
       receiver, memberName, positionalArguments, namedArguments);
+}
+
+/// Used by Fasta to report a runtime error when a final field with an
+/// initializer is also initialized in a generative constructor.
+///
+/// Note: in strong mode, this is a compile-time error and this class becomes
+/// obsolete.
+class _DuplicatedFieldInitializerError extends Error {
+  final String _name;
+
+  _DuplicatedFieldInitializerError(this._name);
+
+  toString() => "Error: field '$_name' is already initialized.";
+}
+
+@patch
+class _ConstantExpressionError {
+  @patch
+  _throw(error) => throw error;
 }

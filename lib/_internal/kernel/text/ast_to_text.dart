@@ -187,6 +187,13 @@ class Printer extends Visitor<Null> {
         showExternal = parent.showExternal,
         showOffsets = parent.showOffsets;
 
+  bool shouldHighlight(Node node) {
+    return false;
+  }
+
+  void startHighlight(Node node) {}
+  void endHighlight(Node node) {}
+
   String getLibraryName(Library node) {
     return node.name ?? syntheticNames.nameLibrary(node);
   }
@@ -208,6 +215,12 @@ class Printer extends Visitor<Null> {
     String name = getClassName(node);
     String library = getLibraryReference(node.enclosingLibrary);
     return '$library::$name';
+  }
+
+  String getTypedefReference(Typedef node) {
+    if (node == null) return '<No Typedef>';
+    String library = getLibraryReference(node.enclosingLibrary);
+    return '$library::${node.name}';
   }
 
   static final String emptyNameString = '•';
@@ -259,6 +272,7 @@ class Printer extends Visitor<Null> {
   }
 
   void writeLibraryFile(Library library) {
+    writeAnnotationList(library.annotations);
     writeWord('library');
     if (library.name != null) {
       writeWord(library.name);
@@ -276,11 +290,44 @@ class Printer extends Visitor<Null> {
         endLine('import "$importPath" as $prefix;');
       }
     }
-    for (var import in library.deferredImports) {
-      import.accept(this);
+
+    // TODO(scheglov): Do we want to print dependencies? dartbug.com/30224
+    if (library.additionalExports.isNotEmpty) {
+      write('additionalExports = (');
+      bool isFirst = true;
+      for (var reference in library.additionalExports) {
+        if (isFirst) {
+          isFirst = false;
+        } else {
+          write(', ');
+        }
+        var node = reference.node;
+        if (node is Class) {
+          Library nodeLibrary = node.enclosingLibrary;
+          String prefix = syntheticNames.nameLibraryPrefix(nodeLibrary);
+          write(prefix + '::' + node.name);
+        } else if (node is Field) {
+          Library nodeLibrary = node.enclosingLibrary;
+          String prefix = syntheticNames.nameLibraryPrefix(nodeLibrary);
+          write(prefix + '::' + node.name.name);
+        } else if (node is Procedure) {
+          Library nodeLibrary = node.enclosingLibrary;
+          String prefix = syntheticNames.nameLibraryPrefix(nodeLibrary);
+          write(prefix + '::' + node.name.name);
+        } else if (node is Typedef) {
+          Library nodeLibrary = node.enclosingLibrary;
+          String prefix = syntheticNames.nameLibraryPrefix(nodeLibrary);
+          write(prefix + '::' + node.name);
+        } else {
+          throw new UnimplementedError('${node.runtimeType}');
+        }
+      }
+      endLine(')');
     }
+
     endLine();
     var inner = new Printer._inner(this, imports);
+    library.typedefs.forEach(inner.writeNode);
     library.classes.forEach(inner.writeNode);
     library.fields.forEach(inner.writeNode);
     library.procedures.forEach(inner.writeNode);
@@ -300,6 +347,7 @@ class Printer extends Visitor<Null> {
         }
         writeWord('external');
       }
+      writeAnnotationList(library.annotations);
       writeWord('library');
       if (library.name != null) {
         writeWord(library.name);
@@ -313,6 +361,8 @@ class Printer extends Visitor<Null> {
       writeWord(prefix);
       endLine(' {');
       ++inner.indentation;
+      library.dependencies.forEach(inner.writeNode);
+      library.typedefs.forEach(inner.writeNode);
       library.classes.forEach(inner.writeNode);
       library.fields.forEach(inner.writeNode);
       library.procedures.forEach(inner.writeNode);
@@ -376,10 +426,20 @@ class Printer extends Visitor<Null> {
     if (node == null) {
       writeSymbol("<Null>");
     } else {
+      final highlight = shouldHighlight(node);
+      if (highlight) {
+        startHighlight(node);
+      }
+
       if (showOffsets && node is TreeNode) {
         writeWord("[${node.fileOffset}]");
       }
+
       node.accept(this);
+
+      if (highlight) {
+        endHighlight(node);
+      }
     }
   }
 
@@ -427,6 +487,15 @@ class Printer extends Visitor<Null> {
 
   visitVectorType(VectorType type) {
     writeWord('Vector');
+  }
+
+  visitTypedefType(TypedefType type) {
+    writeTypedefReference(type.typedefNode);
+    if (type.typeArguments.isNotEmpty) {
+      writeSymbol('<');
+      writeList(type.typeArguments, writeType);
+      writeSymbol('>');
+    }
   }
 
   void writeModifier(bool isThere, String name) {
@@ -590,7 +659,8 @@ class Printer extends Visitor<Null> {
     writeSymbol(')');
   }
 
-  void writeList(Iterable nodes, callback(x), {String separator: ','}) {
+  void writeList<T>(Iterable<T> nodes, void callback(T x),
+      {String separator: ','}) {
     bool first = true;
     for (var node in nodes) {
       if (first) {
@@ -610,12 +680,23 @@ class Printer extends Visitor<Null> {
     writeWord(getClassReference(classNode));
   }
 
+  void writeTypedefReference(Typedef typedefNode) {
+    writeWord(getTypedefReference(typedefNode));
+  }
+
   void writeLibraryReference(Library library) {
     writeWord(getLibraryReference(library));
   }
 
   void writeVariableReference(VariableDeclaration variable) {
+    final highlight = shouldHighlight(variable);
+    if (highlight) {
+      startHighlight(variable);
+    }
     writeWord(getVariableReference(variable));
+    if (highlight) {
+      endHighlight(variable);
+    }
   }
 
   void writeTypeParameterReference(TypeParameter node) {
@@ -623,6 +704,10 @@ class Printer extends Visitor<Null> {
   }
 
   void writeExpression(Expression node, [int minimumPrecedence]) {
+    final highlight = shouldHighlight(node);
+    if (highlight) {
+      startHighlight(node);
+    }
     if (showOffsets) writeWord("[${node.fileOffset}]");
     bool needsParenteses = false;
     if (minimumPrecedence != null && getPrecedence(node) < minimumPrecedence) {
@@ -632,6 +717,9 @@ class Printer extends Visitor<Null> {
     writeNode(node);
     if (needsParenteses) {
       writeSymbol(')');
+    }
+    if (highlight) {
+      endHighlight(node);
     }
   }
 
@@ -659,6 +747,11 @@ class Printer extends Visitor<Null> {
     writeAnnotationList(node.annotations);
     writeIndentation();
     writeModifier(node.isStatic, 'static');
+    writeModifier(node.isCovariant, 'covariant');
+    writeModifier(node.isGenericCovariantImpl, 'generic-covariant-impl');
+    writeModifier(
+        node.isGenericCovariantInterface, 'generic-covariant-interface');
+    writeModifier(node.isGenericContravariant, 'generic-contravariant');
     writeModifier(node.isFinal, 'final');
     writeModifier(node.isConst, 'const');
     // Only show implicit getter/setter modifiers in cases where they are
@@ -697,6 +790,8 @@ class Printer extends Visitor<Null> {
     writeModifier(node.isExternal, 'external');
     writeModifier(node.isStatic, 'static');
     writeModifier(node.isAbstract, 'abstract');
+    writeModifier(node.isForwardingStub, 'forwarding-stub');
+    writeModifier(node.isGenericContravariant, 'generic-contravariant');
     writeWord(procedureKindToString(node.kind));
     if ((node.enclosingClass == null &&
             node.enclosingLibrary.fileUri != node.fileUri) ||
@@ -712,6 +807,7 @@ class Printer extends Visitor<Null> {
     writeIndentation();
     writeModifier(node.isExternal, 'external');
     writeModifier(node.isConst, 'const');
+    writeModifier(node.isSyntheticDefault, 'default');
     writeWord('constructor');
     writeFunction(node.function,
         name: node.name, initializers: node.initializers);
@@ -749,6 +845,17 @@ class Printer extends Visitor<Null> {
     --indentation;
     writeIndentation();
     endLine('}');
+  }
+
+  visitTypedef(Typedef node) {
+    writeAnnotationList(node.annotations);
+    writeIndentation();
+    writeWord('typedef');
+    writeWord(node.name);
+    writeTypeParameterList(node.typeParameters);
+    writeSpaced('=');
+    writeNode(node.type);
+    endLine(';');
   }
 
   visitInvalidExpression(InvalidExpression node) {
@@ -803,7 +910,10 @@ class Printer extends Visitor<Null> {
 
   visitConditionalExpression(ConditionalExpression node) {
     writeExpression(node.condition, Precedence.LOGICAL_OR);
-    writeSpaced('?');
+    ensureSpace();
+    write('?');
+    writeStaticType(node.staticType);
+    writeSpace();
     writeExpression(node.then);
     writeSpaced(':');
     writeExpression(node.otherwise);
@@ -876,7 +986,7 @@ class Printer extends Visitor<Null> {
 
   visitAsExpression(AsExpression node) {
     writeExpression(node.operand, Precedence.BITWISE_OR);
-    writeSpaced('as');
+    writeSpaced(node.isTypeError ? 'as{TypeError}' : 'as');
     writeType(node.type);
   }
 
@@ -1021,11 +1131,32 @@ class Printer extends Visitor<Null> {
     writeSymbol(')');
   }
 
-  visitDeferredImport(DeferredImport node) {
-    write('import "');
-    write('${node.importedLibrary.importUri}');
-    write('" deferred as ');
-    write(node.name);
+  visitClosureCreation(ClosureCreation node) {
+    writeWord('MakeClosure');
+    writeSymbol('<');
+    writeNode(node.functionType);
+    if (node.typeArguments.length > 0) writeSymbol(', ');
+    writeList(node.typeArguments, writeType);
+    writeSymbol('>');
+    writeSymbol('(');
+    writeMemberReference(node.topLevelFunction);
+    writeComma();
+    writeExpression(node.contextVector);
+    writeSymbol(')');
+  }
+
+  visitLibraryDependency(LibraryDependency node) {
+    writeIndentation();
+    writeWord(node.isImport ? 'import' : 'export');
+    var uriString = '${node.targetLibrary.importUri}';
+    writeWord('"$uriString"');
+    if (node.isDeferred) {
+      writeWord('deferred');
+    }
+    if (node.name != null) {
+      writeWord('as');
+      writeWord(node.name);
+    }
     endLine(';');
   }
 
@@ -1056,6 +1187,14 @@ class Printer extends Visitor<Null> {
       writeSymbol('}');
     } else {
       writeName(name);
+    }
+  }
+
+  void writeStaticType(DartType type) {
+    if (type != null) {
+      writeSymbol('{');
+      writeType(type);
+      writeSymbol('}');
     }
   }
 
@@ -1343,12 +1482,22 @@ class Printer extends Visitor<Null> {
   visitFunctionDeclaration(FunctionDeclaration node) {
     writeIndentation();
     writeWord('function');
-    writeFunction(node.function, name: getVariableName(node.variable));
+    if (node.function != null) {
+      writeFunction(node.function, name: getVariableName(node.variable));
+    } else {
+      writeWord(getVariableName(node.variable));
+      endLine('...;');
+    }
   }
 
   void writeVariableDeclaration(VariableDeclaration node,
       {bool useVarKeyword: false}) {
     if (showOffsets) writeWord("[${node.fileOffset}]");
+    writeAnnotationList(node.annotations);
+    writeModifier(node.isCovariant, 'covariant');
+    writeModifier(node.isGenericCovariantImpl, 'generic-covariant-impl');
+    writeModifier(
+        node.isGenericCovariantInterface, 'generic-covariant-interface');
     writeModifier(node.isFinal, 'final');
     writeModifier(node.isConst, 'const');
     if (node.type != null) {
@@ -1479,9 +1628,19 @@ class Printer extends Visitor<Null> {
 
   visitTypeParameterType(TypeParameterType node) {
     writeTypeParameterReference(node.parameter);
+    if (node.promotedBound != null) {
+      writeSpace();
+      writeWord('extends');
+      writeSpace();
+      writeType(node.promotedBound);
+    }
   }
 
   visitTypeParameter(TypeParameter node) {
+    writeModifier(node.isGenericCovariantImpl, 'generic-covariant-impl');
+    writeModifier(
+        node.isGenericCovariantInterface, 'generic-covariant-interface');
+    writeAnnotationList(node.annotations);
     writeWord(getTypeParameterName(node));
     writeSpaced('extends');
     writeType(node.bound);

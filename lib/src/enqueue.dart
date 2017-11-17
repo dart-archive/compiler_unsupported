@@ -6,18 +6,16 @@ library dart2js.enqueue;
 
 import 'dart:collection' show Queue;
 
-import 'common/resolution.dart' show Resolution;
 import 'common/tasks.dart' show CompilerTask;
 import 'common/work.dart' show WorkItem;
 import 'common.dart';
+import 'common_elements.dart' show ElementEnvironment;
 import 'constants/values.dart';
 import 'compiler.dart' show Compiler;
 import 'options.dart';
-import 'elements/elements.dart'
-    show AnalyzableElement, ClassElement, MemberElement;
 import 'elements/entities.dart';
-import 'elements/resolution_types.dart' show ResolutionTypedefType;
 import 'elements/types.dart';
+import 'js_backend/enqueuer.dart';
 import 'universe/world_builder.dart';
 import 'universe/use.dart'
     show
@@ -35,6 +33,7 @@ import 'world.dart' show ClosedWorld;
 
 class EnqueueTask extends CompilerTask {
   ResolutionEnqueuer _resolution;
+  CodegenEnqueuer codegenEnqueuerForTesting;
   final Compiler compiler;
 
   String get name => 'Enqueue';
@@ -48,8 +47,10 @@ class EnqueueTask extends CompilerTask {
 
   // TODO(johnniwinther): Remove the need for this.
   ResolutionEnqueuer get resolution {
-    assert(invariant(NO_LOCATION_SPANNABLE, _resolution != null,
-        message: "ResolutionEnqueuer has not been created yet."));
+    assert(
+        _resolution != null,
+        failedAt(NO_LOCATION_SPANNABLE,
+            "ResolutionEnqueuer has not been created yet."));
     return _resolution;
   }
 
@@ -59,7 +60,8 @@ class EnqueueTask extends CompilerTask {
   }
 
   Enqueuer createCodegenEnqueuer(ClosedWorld closedWorld) {
-    return compiler.backend.createCodegenEnqueuer(this, compiler, closedWorld);
+    return codegenEnqueuerForTesting =
+        compiler.backend.createCodegenEnqueuer(this, compiler, closedWorld);
   }
 }
 
@@ -85,13 +87,14 @@ abstract class Enqueuer {
   /// provided the impact strategy will remove it from the element impact cache,
   /// if it is no longer needed.
   void applyImpact(WorldImpact worldImpact, {var impactSource});
-  bool checkNoEnqueuedInvokedInstanceMethods();
+  bool checkNoEnqueuedInvokedInstanceMethods(
+      ElementEnvironment elementEnvironment);
 
   /// Check the enqueuer queue is empty or fail otherwise.
   void checkQueueIsEmpty();
   void logSummary(void log(String message));
 
-  Iterable<Entity> get processedEntities;
+  Iterable<MemberEntity> get processedEntities;
 
   Iterable<ClassEntity> get processedClasses;
 }
@@ -114,9 +117,9 @@ abstract class EnqueuerListener {
   /// specific [WorldImpact] of this is returned.
   WorldImpact registerGetOfStaticFunction();
 
-  /// Called to register that [member] has been closurized. Any backend specific
-  /// [WorldImpact] of this is returned.
-  WorldImpact registerClosurizedMember(MemberEntity member);
+  /// Called to register that [function] has been closurized. Any backend
+  /// specific [WorldImpact] of this is returned.
+  WorldImpact registerClosurizedMember(FunctionEntity function);
 
   /// Called to register that [element] is statically known to be used. Any
   /// backend specific [WorldImpact] of this is returned.
@@ -204,9 +207,6 @@ class ResolutionEnqueuer extends EnqueuerImpl {
 
   WorldImpactVisitor _impactVisitor;
 
-  /// All declaration elements that have been processed by the resolver.
-  final Set<Entity> _processedEntities = new Set<Entity>();
-
   final Queue<WorkItem> _queue = new Queue<WorkItem>();
 
   /// Queue of deferred resolution actions to execute when the resolution queue
@@ -226,8 +226,7 @@ class ResolutionEnqueuer extends EnqueuerImpl {
   @override
   void checkQueueIsEmpty() {
     if (_queue.isNotEmpty) {
-      throw new SpannableAssertionFailure(
-          _queue.first.element, "$name queue is not empty.");
+      failedAt(_queue.first.element, "$name queue is not empty.");
     }
   }
 
@@ -255,8 +254,9 @@ class ResolutionEnqueuer extends EnqueuerImpl {
     });
   }
 
-  bool checkNoEnqueuedInvokedInstanceMethods() {
-    return strategy.checkEnqueuerConsistency(this);
+  bool checkNoEnqueuedInvokedInstanceMethods(
+      ElementEnvironment elementEnvironment) {
+    return strategy.checkEnqueuerConsistency(this, elementEnvironment);
   }
 
   void checkClass(ClassEntity cls) {
@@ -278,7 +278,8 @@ class ResolutionEnqueuer extends EnqueuerImpl {
       _registerClosurizedMember(member);
     }
     if (useSet.contains(MemberUse.CLOSURIZE_STATIC)) {
-      applyImpact(listener.registerGetOfStaticFunction());
+      applyImpact(listener.registerGetOfStaticFunction(),
+          impactSource: 'get of static function');
     }
   }
 
@@ -290,10 +291,12 @@ class ResolutionEnqueuer extends EnqueuerImpl {
       // We only tell the backend once that [cls] was instantiated, so
       // any additional dependencies must be treated as global
       // dependencies.
-      applyImpact(listener.registerInstantiatedClass(cls));
+      applyImpact(listener.registerInstantiatedClass(cls),
+          impactSource: 'instantiated class');
     }
     if (useSet.contains(ClassUse.IMPLEMENTED)) {
-      applyImpact(listener.registerImplementedClass(cls));
+      applyImpact(listener.registerImplementedClass(cls),
+          impactSource: 'implemented class');
     }
   }
 
@@ -306,7 +309,8 @@ class ResolutionEnqueuer extends EnqueuerImpl {
   void processConstantUse(ConstantUse constantUse) {
     task.measure(() {
       if (_worldBuilder.registerConstantUse(constantUse)) {
-        applyImpact(listener.registerUsedConstant(constantUse.value));
+        applyImpact(listener.registerUsedConstant(constantUse.value),
+            impactSource: 'constant use');
         _recentConstants = true;
       }
     });
@@ -359,7 +363,7 @@ class ResolutionEnqueuer extends EnqueuerImpl {
         break;
       case TypeUseKind.TYPE_LITERAL:
         if (type.isTypedef) {
-          ResolutionTypedefType typedef = type;
+          TypedefType typedef = type;
           worldBuilder.registerTypedef(typedef.element);
         }
         break;
@@ -372,7 +376,8 @@ class ResolutionEnqueuer extends EnqueuerImpl {
 
   void _registerClosurizedMember(MemberEntity element) {
     assert(element.isInstanceMember);
-    applyImpact(listener.registerClosurizedMember(element));
+    applyImpact(listener.registerClosurizedMember(element),
+        impactSource: 'closurized member');
     _worldBuilder.registerClosurizedMember(element);
   }
 
@@ -381,12 +386,12 @@ class ResolutionEnqueuer extends EnqueuerImpl {
       while (_queue.isNotEmpty) {
         // TODO(johnniwinther): Find an optimal process order.
         WorkItem work = _queue.removeLast();
-        if (!_processedEntities.contains(work.element)) {
+        if (!_worldBuilder.isMemberProcessed(work.element)) {
           strategy.processWorkItem(f, work);
-          _processedEntities.add(work.element);
+          _worldBuilder.registerProcessedMember(work.element);
         }
       }
-      List recents = _recentClasses.toList(growable: false);
+      List<ClassEntity> recents = _recentClasses.toList(growable: false);
       _recentClasses.clear();
       _recentConstants = false;
       if (!_onQueueEmpty(recents)) {
@@ -399,45 +404,39 @@ class ResolutionEnqueuer extends EnqueuerImpl {
   }
 
   void logSummary(void log(String message)) {
-    log('Resolved ${_processedEntities.length} elements.');
+    log('Resolved ${processedEntities.length} elements.');
     listener.logSummary(log);
   }
 
   String toString() => 'Enqueuer($name)';
 
-  Iterable<Entity> get processedEntities => _processedEntities;
+  Iterable<MemberEntity> get processedEntities =>
+      _worldBuilder.processedMembers;
 
   ImpactUseCase get impactUse => IMPACT_USE;
 
   bool get isResolutionQueue => true;
 
-  /// Returns `true` if [element] has been processed by the resolution enqueuer.
-  // TODO(johnniwinther): Remove this together with the resolver.
-  bool hasBeenProcessed(MemberElement element) {
-    assert(invariant(element, element == element.analyzableElement.declaration,
-        message: "Unexpected element $element"));
-    return _processedEntities.contains(element);
-  }
-
   /// Registers [entity] as processed by the resolution enqueuer. Used only for
   /// testing.
-  void registerProcessedElementInternal(Entity entity) {
-    _processedEntities.add(entity);
+  void registerProcessedElementInternal(MemberEntity entity) {
+    _worldBuilder.registerProcessedMember(entity);
   }
 
   /// Create a [WorkItem] for [entity] and add it to the work list if it has not
   /// already been processed.
   void _addToWorkList(MemberEntity entity) {
-    if (_processedEntities.contains(entity)) return;
+    if (_worldBuilder.isMemberProcessed(entity)) return;
     WorkItem workItem = _workItemBuilder.createWorkItem(entity);
     if (workItem == null) return;
 
     if (queueIsClosed) {
-      throw new SpannableAssertionFailure(
+      failedAt(
           entity, "Resolution work list is closed. Trying to add $entity.");
     }
 
-    applyImpact(listener.registerUsedElement(entity));
+    applyImpact(listener.registerUsedElement(entity),
+        impactSource: 'used element');
     _worldBuilder.registerUsedElement(entity);
     _queue.add(workItem);
   }
@@ -449,7 +448,7 @@ class ResolutionEnqueuer extends EnqueuerImpl {
   /// The queue is processed in FIFO order.
   void addDeferredAction(DeferredAction deferredAction) {
     if (queueIsClosed) {
-      throw new SpannableAssertionFailure(
+      failedAt(
           deferredAction.element,
           "Resolution work list is closed. "
           "Trying to add deferred action for ${deferredAction.element}");
@@ -500,7 +499,9 @@ class EnqueuerStrategy {
   void processConstantUse(EnqueuerImpl enqueuer, ConstantUse constantUse) {}
 
   /// Check enqueuer consistency after the queue has been closed.
-  bool checkEnqueuerConsistency(EnqueuerImpl enqueuer) => true;
+  bool checkEnqueuerConsistency(
+          EnqueuerImpl enqueuer, ElementEnvironment elementEnvironment) =>
+      true;
 
   /// Process [work] using [f].
   void processWorkItem(void f(WorkItem work), WorkItem work) {
@@ -543,14 +544,15 @@ class TreeShakingEnqueuerStrategy extends EnqueuerStrategy {
   }
 
   /// Check enqueuer consistency after the queue has been closed.
-  bool checkEnqueuerConsistency(EnqueuerImpl enqueuer) {
+  bool checkEnqueuerConsistency(
+      EnqueuerImpl enqueuer, ElementEnvironment elementEnvironment) {
     enqueuer.task.measure(() {
       // Run through the classes and see if we need to enqueue more methods.
-      for (ClassElement classElement
+      for (ClassEntity classElement
           in enqueuer.worldBuilder.directlyInstantiatedClasses) {
-        for (ClassElement currentClass = classElement;
+        for (ClassEntity currentClass = classElement;
             currentClass != null;
-            currentClass = currentClass.superclass) {
+            currentClass = elementEnvironment.getSuperClass(currentClass)) {
           enqueuer.checkClass(currentClass);
         }
       }
@@ -596,23 +598,5 @@ class DeferredAction {
 
 /// Interface for creating work items for enqueued member entities.
 abstract class WorkItemBuilder {
-  WorkItem createWorkItem(MemberEntity entity);
-}
-
-/// Builder that creates work item necessary for the resolution of a
-/// [MemberElement].
-class ResolutionWorkItemBuilder extends WorkItemBuilder {
-  final Resolution _resolution;
-
-  ResolutionWorkItemBuilder(this._resolution);
-
-  @override
-  WorkItem createWorkItem(MemberElement element) {
-    assert(invariant(element, element.isDeclaration));
-    if (element.isMalformed) return null;
-
-    assert(invariant(element, element is AnalyzableElement,
-        message: 'Element $element is not analyzable.'));
-    return _resolution.createWorkItem(element);
-  }
+  WorkItem createWorkItem(covariant MemberEntity entity);
 }

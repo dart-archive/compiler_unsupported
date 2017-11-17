@@ -4,7 +4,7 @@
 
 library fasta.unhandled_listener;
 
-import '../scanner/token.dart' show Token;
+import '../../scanner/token.dart' show Token;
 
 import 'stack_listener.dart' show NullValue, StackListener;
 
@@ -30,18 +30,12 @@ abstract class UnhandledListener extends StackListener {
   List<String> popIdentifierList(int count) => popList(count);
 
   @override
-  void endMetadataStar(int count, bool forParameter) {
-    debugEvent("MetadataStar");
-    push(popList(count) ?? NullValue.Metadata);
-  }
-
-  @override
-  void endConditionalUri(Token ifKeyword, Token equalitySign) {
+  void endConditionalUri(Token ifKeyword, Token leftParen, Token equalSign) {
     debugEvent("ConditionalUri");
     popCharOffset();
     pop(); // URI.
-    if (equalitySign != null) popCharOffset();
-    popIfNotNull(equalitySign); // String.
+    if (equalSign != null) popCharOffset();
+    popIfNotNull(equalSign); // String.
     pop(); // DottedName.
     push(Unhandled.ConditionalUri);
   }
@@ -74,9 +68,17 @@ abstract class UnhandledListener extends StackListener {
   }
 
   @override
-  void endDottedName(int count, Token firstIdentifier) {
+  void handleDottedName(int count, Token firstIdentifier) {
     debugEvent("DottedName");
     popIdentifierList(count);
     push(Unhandled.DottedName);
+  }
+
+  @override
+  void endFunctionType(Token functionToken, Token endToken) {
+    pop(); // Formals.
+    pop(); // Return type.
+    pop(); // Type variables.
+    push(NullValue.Type);
   }
 }

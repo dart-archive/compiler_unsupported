@@ -4,30 +4,29 @@
 
 library elements;
 
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/parser/async_modifier.dart'
-    show AsyncModifier;
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart'
+    show Token, isUserDefinableOperator, isMinusOperator;
 
 import '../common.dart';
 import '../common/resolution.dart' show Resolution;
+import '../common_elements.dart' show CommonElements;
 import '../constants/constructors.dart';
 import '../constants/expressions.dart';
-import '../common_elements.dart' show CommonElements;
 import '../ordered_typeset.dart' show OrderedTypeSet;
 import '../resolution/scope.dart' show Scope;
 import '../resolution/tree_elements.dart' show TreeElements;
 import '../script.dart';
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart'
-    show Token, isUserDefinableOperator, isMinusOperator;
 import '../tree/tree.dart' hide AsyncModifier;
 import '../universe/call_structure.dart';
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner/characters.dart' show $_;
 import '../util/util.dart';
 import '../world.dart' show ClosedWorld;
 import 'entities.dart';
+import 'entity_utils.dart' as utils;
+import 'jumps.dart';
+import 'names.dart';
 import 'resolution_types.dart';
+import 'types.dart';
 import 'visitor.dart' show ElementVisitor;
-
-part 'names.dart';
 
 const int STATE_NOT_STARTED = 0;
 const int STATE_STARTED = 1;
@@ -470,7 +469,8 @@ class Elements {
   static bool isInStaticContext(Element element) {
     if (isUnresolved(element)) return true;
     if (element.enclosingElement.isClosure) {
-      var closureClass = element.enclosingElement;
+      dynamic closureClass = element.enclosingElement;
+      // ignore: UNDEFINED_GETTER
       element = closureClass.methodElement;
     }
     Element outer = element.outermostEnclosingMemberOrTopLevel;
@@ -509,17 +509,6 @@ class Elements {
         (identical(element.kind, ElementKind.FUNCTION));
   }
 
-  /// Also returns true for [ConstructorBodyElement]s and getters/setters.
-  static bool isNonAbstractInstanceMember(Element element) {
-    // The generative constructor body is not a function. We therefore treat
-    // it specially.
-    if (element.isGenerativeConstructorBody) return true;
-    return !Elements.isUnresolved(element) &&
-        !element.isAbstract &&
-        element.isInstanceMember &&
-        (element.isFunction || element.isAccessor);
-  }
-
   static bool isInstanceSend(Send send, TreeElements elements) {
     Element element = elements[send];
     if (element == null) return !isClosureSend(send, element);
@@ -541,21 +530,11 @@ class Elements {
     return isLocal(element);
   }
 
-  static String reconstructConstructorNameSourceString(Element element) {
+  static String reconstructConstructorNameSourceString(FunctionEntity element) {
     if (element.name == '') {
       return element.enclosingClass.name;
     } else {
-      return reconstructConstructorName(element);
-    }
-  }
-
-  // TODO(johnniwinther): Remove this method.
-  static String reconstructConstructorName(Element element) {
-    String className = element.enclosingClass.name;
-    if (element.name == '') {
-      return className;
-    } else {
-      return '$className\$${element.name}';
+      return utils.reconstructConstructorName(element);
     }
   }
 
@@ -579,7 +558,7 @@ class Elements {
    * For non-operator names, this method just returns its input.
    *
    * The results returned from this method are guaranteed to be valid
-   * JavaScript identifers, except it may include reserved words for
+   * JavaScript identifiers, except it may include reserved words for
    * non-operator names.
    */
   static String operatorNameToIdentifier(String name) {
@@ -666,82 +645,43 @@ class Elements {
     return null;
   }
 
+  /// If `true`, injected members are sorted with their corresponding class or
+  /// library.
+  ///
+  /// This is used for ensuring equivalent output order when testing against
+  /// .dill using the patched_dart2js_sdk.
+  // TODO(johnniwinther): Remove this when patching is implemented in
+  // package:front_end.
+  static bool usePatchedDart2jsSdkSorting = false;
+
   /// A `compareTo` function that places [Element]s in a consistent order based
   /// on the source code order.
   static int compareByPosition(Element a, Element b) {
     if (identical(a, b)) return 0;
-    int r = _compareLibraries(a.library, b.library);
+    int r = utils.compareLibrariesUris(
+        a.library.canonicalUri, b.library.canonicalUri);
     if (r != 0) return r;
-    r = _compareCompilationUnits(a.compilationUnit, b.compilationUnit);
+    Uri aUri = a.compilationUnit.script.readableUri;
+    Uri bUri = b.compilationUnit.script.readableUri;
+    if (usePatchedDart2jsSdkSorting) {
+      Uri computePatchedDart2jsUri(Element e, Uri uri) {
+        if (!e.isInjected) return uri;
+        if (e.enclosingClass != null) {
+          return e.enclosingClass.compilationUnit.script.readableUri;
+        } else {
+          return e.library.compilationUnit.script.readableUri;
+        }
+      }
+
+      aUri = computePatchedDart2jsUri(a, aUri);
+      bUri = computePatchedDart2jsUri(b, bUri);
+    }
+    r = utils.compareSourceUris(aUri, bUri);
     if (r != 0) return r;
-    int offsetA = a.sourceOffset ?? -1;
-    int offsetB = b.sourceOffset ?? -1;
-    r = offsetA.compareTo(offsetB);
-    if (r != 0) return r;
-    r = a.name.compareTo(b.name);
-    if (r != 0) return r;
-    // Same file, position and name.  If this happens, we should find out why
-    // and make the order total and independent of hashCode.
-    return a.hashCode.compareTo(b.hashCode);
+    return utils.compareEntities(a, a.sourceOffset, -1, b, b.sourceOffset, -1);
   }
 
-  // Somewhat stable ordering for [LibraryElement]s
-  static int _compareLibraries(LibraryElement a, LibraryElement b) {
-    if (a == b) return 0;
-
-    int byCanonicalUriPath() {
-      return a.canonicalUri.path.compareTo(b.canonicalUri.path);
-    }
-
-    // Order: platform < package < other.
-    if (a.isPlatformLibrary) {
-      if (b.isPlatformLibrary) return byCanonicalUriPath();
-      return -1;
-    }
-    if (b.isPlatformLibrary) return 1;
-
-    if (a.isPackageLibrary) {
-      if (b.isPackageLibrary) return byCanonicalUriPath();
-      return -1;
-    }
-    if (b.isPackageLibrary) return 1;
-
-    return _compareCanonicalUri(a.canonicalUri, b.canonicalUri);
-  }
-
-  static int _compareCanonicalUri(Uri a, Uri b) {
-    int r = a.scheme.compareTo(b.scheme);
-    if (r != 0) return r;
-
-    // We would like the order of 'file:' Uris to be stable across different
-    // users or different builds from temporary directories.  We sort by
-    // pathSegments elements from the last to the first since that tends to find
-    // a stable distinction regardless of directory root.
-    List<String> aSegments = a.pathSegments;
-    List<String> bSegments = b.pathSegments;
-    int aI = aSegments.length;
-    int bI = bSegments.length;
-    while (aI > 0 && bI > 0) {
-      String aSegment = aSegments[--aI];
-      String bSegment = bSegments[--bI];
-      r = aSegment.compareTo(bSegment);
-      if (r != 0) return r;
-    }
-    return aI.compareTo(bI); // Shortest first.
-  }
-
-  static int _compareCompilationUnits(
-      CompilationUnitElement a, CompilationUnitElement b) {
-    if (a == b) return 0;
-    // Compilation units are compared only within the same library so we expect
-    // the Uris to usually be clustered together with a common scheme and path
-    // prefix.
-    Uri aUri = a.script.readableUri;
-    Uri bUri = b.script.readableUri;
-    return '${aUri}'.compareTo('${bUri}');
-  }
-
-  static List<Element> sortedByPosition(Iterable<Element> elements) {
+  static List<E> sortedByPosition<E extends Element>(Iterable<E> elements) {
     return elements.toList()..sort(compareByPosition);
   }
 
@@ -777,7 +717,7 @@ class Elements {
     constructor = constructor.effectiveTarget;
     ClassElement cls = constructor.enclosingClass;
     return cls.library == closedWorld.commonElements.typedDataLibrary &&
-        closedWorld.backendClasses.isNativeClass(cls) &&
+        closedWorld.nativeData.isNativeClass(cls) &&
         closedWorld.isSubtypeOf(
             cls, closedWorld.commonElements.typedDataClass) &&
         closedWorld.isSubtypeOf(cls, closedWorld.commonElements.listClass) &&
@@ -826,17 +766,18 @@ class Elements {
       FunctionElement element,
       T compileArgument(Node argument),
       T compileDefaultValue(ParameterElement element)) {
-    assert(invariant(element, element.isImplementation));
+    assert(element.isImplementation, failedAt(element));
     List<T> result = <T>[];
 
     FunctionSignature parameters = element.functionSignature;
-    parameters.forEachRequiredParameter((ParameterElement element) {
+    parameters.forEachRequiredParameter((_) {
       result.add(compileArgument(arguments.head));
       arguments = arguments.tail;
     });
 
     if (!parameters.optionalParametersAreNamed) {
-      parameters.forEachOptionalParameter((ParameterElement element) {
+      parameters.forEachOptionalParameter((_element) {
+        ParameterElement element = _element;
         if (!arguments.isEmpty) {
           result.add(compileArgument(arguments.head));
           arguments = arguments.tail;
@@ -854,7 +795,8 @@ class Elements {
       // Iterate over the optional parameters of the signature, and try to
       // find them in [compiledNamedArguments]. If found, we use the
       // value in the temporary list, otherwise the default value.
-      parameters.orderedOptionalParameters.forEach((ParameterElement element) {
+      parameters.orderedOptionalParameters.forEach((_element) {
+        ParameterElement element = _element;
         int foundIndex = callStructure.namedArguments.indexOf(element.name);
         if (foundIndex != -1) {
           result.add(compiledNamedArguments[foundIndex]);
@@ -885,8 +827,11 @@ class Elements {
       ConstructorElement callee,
       T compileArgument(ParameterElement element),
       T compileConstant(ParameterElement element)) {
-    assert(invariant(caller, !callee.isMalformed,
-        message: "Cannot compute arguments to malformed constructor: "
+    assert(
+        !callee.isMalformed,
+        failedAt(
+            caller,
+            "Cannot compute arguments to malformed constructor: "
             "$caller calling $callee."));
 
     FunctionSignature signature = caller.functionSignature;
@@ -896,18 +841,21 @@ class Elements {
     // that we can call [addArgumentsToList].
     Link<Node> computeCallNodesFromParameters() {
       LinkBuilder<Node> builder = new LinkBuilder<Node>();
-      signature.forEachRequiredParameter((ParameterElement element) {
+      signature.forEachRequiredParameter((_element) {
+        ParameterElement element = _element;
         Node node = element.node;
         mapping[node] = element;
         builder.addLast(node);
       });
       if (signature.optionalParametersAreNamed) {
-        signature.forEachOptionalParameter((ParameterElement element) {
+        signature.forEachOptionalParameter((_element) {
+          ParameterElement element = _element;
           mapping[element.initializer] = element;
           builder.addLast(new NamedArgument(null, null, element.initializer));
         });
       } else {
-        signature.forEachOptionalParameter((ParameterElement element) {
+        signature.forEachOptionalParameter((_element) {
+          ParameterElement element = _element;
           Node node = element.node;
           mapping[node] = element;
           builder.addLast(node);
@@ -926,7 +874,7 @@ class Elements {
     // TODO(ngeoffray): Should the resolver do it instead?
     CallStructure callStructure = new CallStructure(
         signature.parameterCount, signature.type.namedParameters);
-    if (!callStructure.signatureApplies(signature.type)) {
+    if (!callStructure.signatureApplies(signature.parameterStructure)) {
       return false;
     }
     list.addAll(makeArgumentsList<T>(callStructure, nodes, callee,
@@ -950,6 +898,7 @@ class Elements {
 /// Code that cannot not handle an [ErroneousElement] should use
 /// `Element.isUnresolved(element)` to check for unresolvable elements instead
 /// of `element == null`.
+// ignore: STRONG_MODE_INVALID_METHOD_OVERRIDE_FROM_BASE
 abstract class ErroneousElement extends Element implements ConstructorElement {
   MessageKind get messageKind;
   Map get messageArguments;
@@ -1002,11 +951,12 @@ abstract class CompilationUnitElement extends Element {
   void forEachLocalMember(f(Element element));
 }
 
-abstract class ImportElement extends Element {
+abstract class ImportElement extends Element implements ImportEntity {
   Uri get uri;
   LibraryElement get importedLibrary;
   bool get isDeferred;
   PrefixElement get prefix;
+  String get name;
   // TODO(johnniwinther): Remove this when no longer needed in source mirrors.
   Import get node;
 }
@@ -1107,7 +1057,11 @@ abstract class PrefixElement extends Element {
 
 /// A type alias definition.
 abstract class TypedefElement extends Element
-    implements AstElement, TypeDeclarationElement, FunctionTypedElement {
+    implements
+        AstElement,
+        TypeDeclarationElement,
+        FunctionTypedElement,
+        TypedefEntity {
   /// The type defined by this typedef with the type variables as its type
   /// arguments.
   ///
@@ -1151,15 +1105,29 @@ abstract class ExecutableElement extends Element
 abstract class MemberElement extends Element
     implements ExecutableElement, MemberEntity {
   /// The local functions defined within this member.
-  List<FunctionElement> get nestedClosures;
+  List<MethodElement> get nestedClosures;
 
   /// The name of this member, taking privacy into account.
   Name get memberName;
 }
 
+/// A local function, variable, parameter or synthesized local.
+abstract class LocalVariable implements Local {
+  /// The context in which this local is defined.
+  ExecutableElement get executableContext;
+
+  /// The outermost member that contains this element.
+  ///
+  /// For top level, static or instance members, the member context is the
+  /// element itself. For parameters, local variables and nested closures, the
+  /// member context is the top level, static or instance member in which it is
+  /// defined.
+  MemberElement get memberContext;
+}
+
 /// A function, variable or parameter defined in an executable context.
 abstract class LocalElement extends Element
-    implements AstElement, TypedElement, Local {
+    implements AstElement, TypedElement, LocalVariable {
   ExecutableElement get executableContext;
 }
 
@@ -1287,6 +1255,8 @@ abstract class FunctionSignature {
   void orderedForEachParameter(void function(FormalElement parameter));
 
   bool isCompatibleWith(FunctionSignature constructorSignature);
+
+  ParameterStructure get parameterStructure;
 }
 
 /// A top level, static or instance method, constructor, local function, or
@@ -1315,7 +1285,17 @@ abstract class FunctionElement extends Element
   AsyncMarker get asyncMarker;
 
   /// `true` if this function is external.
+  ///
+  /// Patched methods are _not_ external, but [isMarkedExternal] is `true`.
   bool get isExternal;
+
+  /// `true` if this function is marked as external.
+  ///
+  /// If the function is implemented through a patch [isExternal] is `false`.
+  bool get isMarkedExternal;
+
+  /// The structure of the function parameters.
+  ParameterStructure get parameterStructure;
 }
 
 /// A getter or setter.
@@ -1337,65 +1317,17 @@ abstract class SetterElement extends AccessorElement {
   GetterElement get getter;
 }
 
-/// Enum for the synchronous/asynchronous function body modifiers.
-class AsyncMarker {
-  /// The default function body marker.
-  static const AsyncMarker SYNC = const AsyncMarker._(AsyncModifier.Sync);
-
-  /// The `sync*` function body marker.
-  static const AsyncMarker SYNC_STAR =
-      const AsyncMarker._(AsyncModifier.SyncStar, isYielding: true);
-
-  /// The `async` function body marker.
-  static const AsyncMarker ASYNC =
-      const AsyncMarker._(AsyncModifier.Async, isAsync: true);
-
-  /// The `async*` function body marker.
-  static const AsyncMarker ASYNC_STAR = const AsyncMarker._(
-      AsyncModifier.AsyncStar,
-      isAsync: true,
-      isYielding: true);
-
-  /// Is `true` if this marker defines the function body to have an
-  /// asynchronous result, that is, either a [Future] or a [Stream].
-  final bool isAsync;
-
-  /// Is `true` if this marker defines the function body to have a plural
-  /// result, that is, either an [Iterable] or a [Stream].
-  final bool isYielding;
-
-  final AsyncModifier asyncParserState;
-
-  const AsyncMarker._(this.asyncParserState,
-      {this.isAsync: false, this.isYielding: false});
-
-  String toString() {
-    return '${isAsync ? 'async' : 'sync'}${isYielding ? '*' : ''}';
-  }
-
-  /// Canonical list of marker values.
-  ///
-  /// Added to make [AsyncMarker] enum-like.
-  static const List<AsyncMarker> values = const <AsyncMarker>[
-    SYNC,
-    SYNC_STAR,
-    ASYNC,
-    ASYNC_STAR
-  ];
-
-  /// Index to this marker within [values].
-  ///
-  /// Added to make [AsyncMarker] enum-like.
-  int get index => values.indexOf(this);
-}
-
 /// A top level, static or instance function.
 abstract class MethodElement extends FunctionElement
     implements MemberElement, FunctionEntity {}
 
 /// A local function or closure (anonymous local function).
 abstract class LocalFunctionElement extends FunctionElement
-    implements LocalElement {}
+    implements LocalElement {
+  /// The synthesized 'call' method created for this local function during
+  /// closure conversion.
+  MethodElement callMethod;
+}
 
 /// A constructor.
 abstract class ConstructorElement extends MethodElement
@@ -1462,7 +1394,8 @@ abstract class ConstructorElement extends MethodElement
 
   /// Compute the type of the effective target of this constructor for an
   /// instantiation site with type [:newType:].
-  ResolutionInterfaceType computeEffectiveTargetType(
+  /// May return a malformed type.
+  ResolutionDartType computeEffectiveTargetType(
       ResolutionInterfaceType newType);
 
   /// If this is a synthesized constructor [definingConstructor] points to
@@ -1506,8 +1439,9 @@ abstract class ConstructorElement extends MethodElement
 
 /// JavaScript backend specific element for the body of constructor.
 // TODO(johnniwinther): Remove this class from the element model.
-abstract class ConstructorBodyElement extends MethodElement {
-  FunctionElement get constructor;
+abstract class ConstructorBodyElement extends MethodElement
+    implements ConstructorBodyEntity {
+  ConstructorElement get constructor;
 }
 
 /// [GenericElement] defines the common interface for generic functions and
@@ -1594,7 +1528,7 @@ abstract class ClassElement extends TypeDeclarationElement
   OrderedTypeSet get allSupertypesAndSelf;
 
   /// A list of all supertypes of this class excluding the class itself.
-  Link<ResolutionDartType> get allSupertypes;
+  Link<InterfaceType> get allSupertypes;
 
   /// Returns the this type of this class as an instance of [cls].
   ResolutionInterfaceType asInstanceOf(ClassElement cls);
@@ -1629,7 +1563,7 @@ abstract class ClassElement extends TypeDeclarationElement
   ///
   bool get isUnnamedMixinApplication;
 
-  bool get hasBackendMembers;
+  bool get hasConstructorBodies;
   bool get hasLocalScopeMembers;
 
   /// Returns `true` if this class is `Object` from dart:core.
@@ -1652,7 +1586,7 @@ abstract class ClassElement extends TypeDeclarationElement
   /// implement `Function`.
   bool implementsInterface(ClassElement intrface);
 
-  bool hasFieldShadowedBy(Element fieldMember);
+  bool hasFieldShadowedBy(FieldElement fieldMember);
 
   /// Returns `true` if this class has a @proxy annotation.
   bool get isProxy;
@@ -1660,8 +1594,7 @@ abstract class ClassElement extends TypeDeclarationElement
   /// Returns `true` if the class hierarchy for this class contains errors.
   bool get hasIncompleteHierarchy;
 
-  void addBackendMember(Element element);
-  void reverseBackendMembers();
+  void addConstructorBody(ConstructorBodyElement element);
 
   Element lookupMember(String memberName);
 
@@ -1670,11 +1603,11 @@ abstract class ClassElement extends TypeDeclarationElement
   ///
   /// This method recursively visits superclasses until the member is found or
   /// [stopAt] is reached.
-  Element lookupByName(Name memberName, {ClassElement stopAt});
-  Element lookupSuperByName(Name memberName);
+  MemberElement lookupByName(Name memberName, {ClassElement stopAt});
+  MemberElement lookupSuperByName(Name memberName);
 
   Element lookupLocalMember(String memberName);
-  Element lookupBackendMember(String memberName);
+  ConstructorBodyElement lookupConstructorBody(String memberName);
   Element lookupSuperMember(String memberName);
 
   Element lookupSuperMemberInLibrary(String memberName, LibraryElement library);
@@ -1695,7 +1628,7 @@ abstract class ClassElement extends TypeDeclarationElement
   /// Similar to [forEachInstanceField] but visits static fields.
   void forEachStaticField(void f(ClassElement enclosingClass, Element field));
 
-  void forEachBackendMember(void f(Element member));
+  void forEachConstructorBody(void f(ConstructorBodyElement member));
 
   /// Looks up the member [name] in this class.
   Member lookupClassMember(Name name);
@@ -1736,39 +1669,6 @@ abstract class EnumConstantElement extends FieldElement {
 
   /// The index of this constant within the values of the enum.
   int get index;
-}
-
-/// The label entity defined by a labeled statement.
-abstract class LabelDefinition extends Entity {
-  Label get label;
-  String get labelName;
-  JumpTarget get target;
-
-  bool get isTarget;
-  bool get isBreakTarget;
-  bool get isContinueTarget;
-
-  void setBreakTarget();
-  void setContinueTarget();
-}
-
-/// A jump target is the reference point of a statement or switch-case,
-/// either by label or as the default target of a break or continue.
-abstract class JumpTarget extends Local {
-  Node get statement;
-  int get nestingLevel;
-  List<LabelDefinition> get labels;
-
-  bool get isTarget;
-  bool get isBreakTarget;
-  bool get isContinueTarget;
-  bool get isSwitch;
-
-  // TODO(kasperl): Try to get rid of these.
-  void set isBreakTarget(bool value);
-  void set isContinueTarget(bool value);
-
-  LabelDefinition addLabel(Label label, String labelName);
 }
 
 /// The [Element] for a type variable declaration on a generic class or typedef.
@@ -1978,11 +1878,11 @@ abstract class MemberSignature {
   /// parameters.
   ResolutionFunctionType get functionType;
 
-  /// Returns `true` if this member is a getter, possibly implictly defined by a
+  /// Returns `true` if this member is a getter, possibly implicitly defined by a
   /// field declaration.
   bool get isGetter;
 
-  /// Returns `true` if this member is a setter, possibly implictly defined by a
+  /// Returns `true` if this member is a setter, possibly implicitly defined by a
   /// field declaration.
   bool get isSetter;
 

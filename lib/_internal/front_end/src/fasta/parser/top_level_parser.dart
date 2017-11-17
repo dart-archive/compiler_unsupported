@@ -4,7 +4,7 @@
 
 library fasta.parser.top_level_parser;
 
-import '../scanner/token.dart' show Token;
+import '../../scanner/token.dart' show Token;
 
 import 'listener.dart' show Listener;
 
@@ -15,5 +15,5 @@ import 'class_member_parser.dart' show ClassMemberParser;
 class TopLevelParser extends ClassMemberParser {
   TopLevelParser(Listener listener) : super(listener);
 
-  Token parseClassBody(Token token) => skipClassBody(token);
+  Token parseClassBody(Token token, Token beforeBody) => skipClassBody(token);
 }

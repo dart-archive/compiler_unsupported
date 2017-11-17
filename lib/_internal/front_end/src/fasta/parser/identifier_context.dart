@@ -2,8 +2,12 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-/// Information about the parser state which is passed to the listener at the
-/// time an identifier is encountered.
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/fasta_codes.dart';
+import 'package:compiler_unsupported/_internal/front_end/src/scanner/token.dart';
+
+/// Information about the parser state that is passed to the listener at the
+/// time an identifier is encountered. It is also used by the parser for error
+/// recovery when a recovery template is defined.
 ///
 /// This can be used by the listener to determine the context in which the
 /// identifier appears; that in turn can help the listener decide how to resolve
@@ -95,16 +99,12 @@ class IdentifierContext {
   static const enumValueDeclaration =
       const IdentifierContext._('enumValueDeclaration', inDeclaration: true);
 
-  /// Identifier is the name being declared by a named mixin declaration (e.g.
-  /// `Foo` in `class Foo = X with Y;`).
-  static const namedMixinDeclaration = const IdentifierContext._(
-      'namedMixinDeclaration',
+  /// Identifier is the name being declared by a class declaration or a named
+  /// mixin application, for example, `Foo` in `class Foo = X with Y;`.
+  static const classOrNamedMixinDeclaration = const IdentifierContext._(
+      'classOrNamedMixinDeclaration',
       inDeclaration: true,
       isBuiltInIdentifierAllowed: false);
-
-  /// Identifier is the name being declared by a class declaration.
-  static const classDeclaration = const IdentifierContext._('classDeclaration',
-      inDeclaration: true, isBuiltInIdentifierAllowed: false);
 
   /// Identifier is the name of a type variable being declared (e.g. `Foo` in
   /// `class C<Foo extends num> {}`).
@@ -113,9 +113,18 @@ class IdentifierContext {
       inDeclaration: true,
       isBuiltInIdentifierAllowed: false);
 
+  /// Identifier is the start of a reference to a type that starts with prefix.
+  static const prefixedTypeReference = const IdentifierContext._(
+      'prefixedTypeReference',
+      isScopeReference: true,
+      isBuiltInIdentifierAllowed: true,
+      recoveryTemplate: templateExpectedType);
+
   /// Identifier is the start of a reference to a type declared elsewhere.
   static const typeReference = const IdentifierContext._('typeReference',
-      isScopeReference: true, isBuiltInIdentifierAllowed: false);
+      isScopeReference: true,
+      isBuiltInIdentifierAllowed: false,
+      recoveryTemplate: templateExpectedType);
 
   /// Identifier is part of a reference to a type declared elsewhere, but it's
   /// not the first identifier of the reference.
@@ -279,6 +288,8 @@ class IdentifierContext {
   /// expressions are required.
   final bool allowedInConstantExpression;
 
+  final Template<_MessageWithArgument<Token>> recoveryTemplate;
+
   const IdentifierContext._(this._name,
       {this.inDeclaration: false,
       this.inLibraryOrPartOfDeclaration: false,
@@ -286,7 +297,8 @@ class IdentifierContext {
       this.isContinuation: false,
       this.isScopeReference: false,
       this.isBuiltInIdentifierAllowed: true,
-      bool allowedInConstantExpression})
+      bool allowedInConstantExpression,
+      this.recoveryTemplate: templateExpectedIdentifier})
       : this.allowedInConstantExpression =
             // Generally, declarations are legal in constant expressions.  A
             // continuation doesn't affect constant expressions: if what it's
@@ -296,3 +308,6 @@ class IdentifierContext {
 
   String toString() => _name;
 }
+
+// TODO(ahe): Remove when analyzer supports generalized function syntax.
+typedef _MessageWithArgument<T> = Message Function(T);

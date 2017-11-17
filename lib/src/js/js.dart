@@ -7,22 +7,20 @@ library js;
 import 'package:compiler_unsupported/_internal/js_ast/js_ast.dart';
 
 import '../common.dart';
-import '../compiler.dart' show Compiler;
+import '../options.dart';
 import '../dump_info.dart' show DumpInfoTask;
 import '../io/code_output.dart' show CodeBuffer;
-import '../js_emitter/js_emitter.dart' show USE_LAZY_EMITTER;
 import 'js_source_mapping.dart';
 
 export 'package:compiler_unsupported/_internal/js_ast/js_ast.dart';
 
-String prettyPrint(Node node, Compiler compiler,
+String prettyPrint(Node node, CompilerOptions compilerOptions,
     {bool allowVariableMinification: true,
     Renamer renamerForNames: JavaScriptPrintingOptions.identityRenamer}) {
   // TODO(johnniwinther): Do we need all the options here?
   JavaScriptPrintingOptions options = new JavaScriptPrintingOptions(
-      shouldCompressOutput: compiler.options.enableMinification,
+      shouldCompressOutput: compilerOptions.enableMinification,
       minifyLocalVariables: allowVariableMinification,
-      preferSemicolonToNewlineInMinifiedOutput: USE_LAZY_EMITTER,
       renamerForNames: renamerForNames);
   SimpleJavaScriptPrintingContext context =
       new SimpleJavaScriptPrintingContext();
@@ -31,25 +29,23 @@ String prettyPrint(Node node, Compiler compiler,
   return context.getText();
 }
 
-CodeBuffer createCodeBuffer(Node node, Compiler compiler,
+CodeBuffer createCodeBuffer(Node node, CompilerOptions compilerOptions,
+    JavaScriptSourceInformationStrategy sourceInformationStrategy,
     {DumpInfoTask monitor,
     bool allowVariableMinification: true,
     Renamer renamerForNames: JavaScriptPrintingOptions.identityRenamer}) {
-  JavaScriptSourceInformationStrategy sourceInformationFactory =
-      compiler.backend.sourceInformationStrategy;
   JavaScriptPrintingOptions options = new JavaScriptPrintingOptions(
-      shouldCompressOutput: compiler.options.enableMinification,
+      shouldCompressOutput: compilerOptions.enableMinification,
       minifyLocalVariables: allowVariableMinification,
-      preferSemicolonToNewlineInMinifiedOutput: USE_LAZY_EMITTER,
       renamerForNames: renamerForNames);
   CodeBuffer outBuffer = new CodeBuffer();
   SourceInformationProcessor sourceInformationProcessor =
-      sourceInformationFactory.createProcessor(
+      sourceInformationStrategy.createProcessor(
           new SourceMapperProviderImpl(outBuffer),
           const SourceInformationReader());
   Dart2JSJavaScriptPrintingContext context =
       new Dart2JSJavaScriptPrintingContext(
-          compiler.reporter, monitor, outBuffer, sourceInformationProcessor);
+          monitor, outBuffer, sourceInformationProcessor);
   Printer printer = new Printer(options, context);
   printer.visit(node);
   sourceInformationProcessor.process(node, outBuffer);
@@ -57,17 +53,16 @@ CodeBuffer createCodeBuffer(Node node, Compiler compiler,
 }
 
 class Dart2JSJavaScriptPrintingContext implements JavaScriptPrintingContext {
-  final DiagnosticReporter reporter;
   final DumpInfoTask monitor;
   final CodeBuffer outBuffer;
   final CodePositionListener codePositionListener;
 
   Dart2JSJavaScriptPrintingContext(
-      this.reporter, this.monitor, this.outBuffer, this.codePositionListener);
+      this.monitor, this.outBuffer, this.codePositionListener);
 
   @override
   void error(String message) {
-    reporter.internalError(NO_LOCATION_SPANNABLE, message);
+    failedAt(NO_LOCATION_SPANNABLE, message);
   }
 
   @override
@@ -118,7 +113,8 @@ class TokenCounter extends BaseVisitor {
     }
   }
 
-  void countTokens(Node node) => node.accept(this);
+  // TODO(28763): Remove `<dynamic>` when issue 28763 is fixed.
+  void countTokens(Node node) => node.accept<dynamic>(this);
 }
 
 abstract class ReferenceCountedAstNode implements Node {
@@ -133,7 +129,7 @@ abstract class ReferenceCountedAstNode implements Node {
 /// for example by the lazy emitter or when generating code generators.
 class UnparsedNode extends DeferredString implements AstContainer {
   final Node tree;
-  final Compiler _compiler;
+  final CompilerOptions _compilerOptions;
   final bool _protectForEval;
   LiteralString _cachedLiteral;
 
@@ -144,11 +140,11 @@ class UnparsedNode extends DeferredString implements AstContainer {
   /// When its string [value] is requested, the node pretty-prints the given
   /// [ast] and, if [protectForEval] is true, wraps the resulting string in
   /// parenthesis. The result is also escaped.
-  UnparsedNode(this.tree, this._compiler, this._protectForEval);
+  UnparsedNode(this.tree, this._compilerOptions, this._protectForEval);
 
   LiteralString get _literal {
     if (_cachedLiteral == null) {
-      String text = prettyPrint(tree, _compiler);
+      String text = prettyPrint(tree, _compilerOptions);
       if (_protectForEval) {
         if (tree is Fun) text = '($text)';
         if (tree is LiteralExpression) {

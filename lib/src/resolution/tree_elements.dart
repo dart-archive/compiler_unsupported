@@ -9,6 +9,7 @@ import '../constants/expressions.dart';
 import '../elements/resolution_types.dart';
 import '../diagnostics/source_span.dart';
 import '../elements/elements.dart';
+import '../elements/jumps.dart';
 import '../tree/tree.dart';
 import '../universe/selector.dart' show Selector;
 import '../util/util.dart';
@@ -133,17 +134,17 @@ class TreeElementMapping extends TreeElements {
   operator []=(Node node, Element element) {
     // TODO(johnniwinther): Simplify this invariant to use only declarations in
     // [TreeElements].
-    assert(invariant(node, () {
+    assert(() {
       if (!element.isMalformed && analyzedElement != null && element.isPatch) {
         return analyzedElement.implementationLibrary.isPatch;
       }
       return true;
-    }));
+    }, failedAt(node));
     // TODO(ahe): Investigate why the invariant below doesn't hold.
-    // assert(invariant(node,
-    //                  getTreeElement(node) == element ||
-    //                  getTreeElement(node) == null,
-    //                  message: '${getTreeElement(node)}; $element'));
+    // assert(
+    //     getTreeElement(node) == element ||
+    //     getTreeElement(node) == null,
+    //     failedAt(node, '${getTreeElement(node)}; $element'));
 
     setTreeElement(node, element);
   }
@@ -351,8 +352,9 @@ class TreeElementMapping extends TreeElements {
   }
 
   @override
-  Element getFunctionDefinition(FunctionExpression node) {
-    return this[node];
+  FunctionElement getFunctionDefinition(FunctionExpression node) {
+    Element e = this[node];
+    return e is FunctionElement ? e : null;
   }
 
   @override

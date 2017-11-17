@@ -6,12 +6,11 @@ library fasta.kernel_target;
 
 import 'dart:async' show Future;
 
-import 'dart:io' show File, IOSink;
-
 import 'package:compiler_unsupported/_internal/kernel/ast.dart'
     show
         Arguments,
-        AsyncMarker,
+        Block,
+        CanonicalName,
         Class,
         Constructor,
         DartType,
@@ -25,13 +24,14 @@ import 'package:compiler_unsupported/_internal/kernel/ast.dart'
         Initializer,
         InvalidInitializer,
         Library,
+        ListLiteral,
         Name,
         NamedExpression,
         NullLiteral,
         ProcedureKind,
         Program,
-        RedirectingInitializer,
         Source,
+        Statement,
         StringLiteral,
         SuperInitializer,
         Throw,
@@ -40,38 +40,37 @@ import 'package:compiler_unsupported/_internal/kernel/ast.dart'
         VariableGet,
         VoidType;
 
-import 'package:compiler_unsupported/_internal/kernel/binary/ast_to_binary.dart' show BinaryPrinter;
-
-import 'package:compiler_unsupported/_internal/kernel/text/ast_to_text.dart' show Printer;
-
-import 'package:compiler_unsupported/_internal/kernel/transformations/erasure.dart' show Erasure;
-
-import 'package:compiler_unsupported/_internal/kernel/transformations/continuation.dart' as transformAsync;
-
-import 'package:compiler_unsupported/_internal/kernel/transformations/mixin_full_resolution.dart'
-    show MixinFullResolution;
-
-import 'package:compiler_unsupported/_internal/kernel/transformations/setup_builtin_library.dart'
-    as setup_builtin_library;
-
 import 'package:compiler_unsupported/_internal/kernel/type_algebra.dart' show substitute;
 
-import '../source/source_loader.dart' show SourceLoader;
+import '../../../file_system.dart' show FileSystem;
 
-import '../source/source_class_builder.dart' show SourceClassBuilder;
+import '../compiler_context.dart' show CompilerContext;
 
-import '../target_implementation.dart' show TargetImplementation;
-
-import '../translate_uri.dart' show TranslateUri;
+import '../deprecated_problems.dart'
+    show deprecated_InputError, reportCrash, resetCrashReporting;
 
 import '../dill/dill_target.dart' show DillTarget;
 
-import '../errors.dart'
-    show InputError, internalError, reportCrash, resetCrashReporting;
+import '../messages.dart'
+    show
+        LocatedMessage,
+        messageConstConstructorNonFinalField,
+        messageConstConstructorNonFinalFieldCause,
+        templateSuperclassHasNoDefaultConstructor;
+
+import '../problems.dart' show unhandled;
+
+import '../severity.dart' show Severity;
+
+import '../source/source_class_builder.dart' show SourceClassBuilder;
+
+import '../source/source_loader.dart' show SourceLoader;
+
+import '../target_implementation.dart' show TargetImplementation;
+
+import '../uri_translator.dart' show UriTranslator;
 
 import '../util/relativize.dart' show relativizeUri;
-
-import '../compiler_context.dart' show CompilerContext;
 
 import 'kernel_builder.dart'
     show
@@ -83,45 +82,56 @@ import 'kernel_builder.dart'
         KernelNamedTypeBuilder,
         KernelProcedureBuilder,
         LibraryBuilder,
-        MixinApplicationBuilder,
-        NamedMixinApplicationBuilder,
+        MemberBuilder,
         NamedTypeBuilder,
         TypeBuilder,
+        TypeDeclarationBuilder,
         TypeVariableBuilder;
+
+import 'metadata_collector.dart' show MetadataCollector;
 
 import 'verifier.dart' show verifyProgram;
 
 class KernelTarget extends TargetImplementation {
+  /// The [FileSystem] which should be used to access files.
+  final FileSystem fileSystem;
+
+  /// Whether comments should be scanned and parsed.
+  final bool includeComments;
+
   final DillTarget dillTarget;
 
   /// Shared with [CompilerContext].
   final Map<String, Source> uriToSource;
 
+  /// The [MetadataCollector] to write metadata to.
+  final MetadataCollector metadataCollector;
+
   SourceLoader<Library> loader;
+
   Program program;
 
-  final List errors = [];
+  final List<LocatedMessage> errors = <LocatedMessage>[];
 
-  final TypeBuilder dynamicType =
-      new KernelNamedTypeBuilder("dynamic", null, -1, null);
+  final TypeBuilder dynamicType = new KernelNamedTypeBuilder("dynamic", null);
 
-  KernelTarget(DillTarget dillTarget, TranslateUri uriTranslator,
-      [Map<String, Source> uriToSource])
+  bool get strongMode => backendTarget.strongMode;
+
+  bool get disableTypeInference => backendTarget.disableTypeInference;
+
+  KernelTarget(this.fileSystem, this.includeComments, DillTarget dillTarget,
+      UriTranslator uriTranslator,
+      {Map<String, Source> uriToSource, MetadataCollector metadataCollector})
       : dillTarget = dillTarget,
         uriToSource = uriToSource ?? CompilerContext.current.uriToSource,
-        super(dillTarget.ticker, uriTranslator) {
+        metadataCollector = metadataCollector,
+        super(dillTarget.ticker, uriTranslator, dillTarget.backendTarget) {
     resetCrashReporting();
     loader = createLoader();
   }
 
-  void addError(file, int charOffset, String message) {
-    Uri uri = file is String ? Uri.parse(file) : file;
-    InputError error = new InputError(uri, charOffset, message);
-    print(error.format());
-    errors.add(error);
-  }
-
-  SourceLoader<Library> createLoader() => new SourceLoader<Library>(this);
+  SourceLoader<Library> createLoader() =>
+      new SourceLoader<Library>(fileSystem, includeComments, this);
 
   void addSourceInformation(
       Uri uri, List<int> lineStarts, List<int> sourceCode) {
@@ -130,52 +140,56 @@ class KernelTarget extends TargetImplementation {
   }
 
   void read(Uri uri) {
-    loader.read(uri);
+    loader.read(uri, -1);
   }
 
-  LibraryBuilder createLibraryBuilder(Uri uri, Uri fileUri) {
+  @override
+  LibraryBuilder createLibraryBuilder(
+      Uri uri, Uri fileUri, KernelLibraryBuilder origin) {
     if (dillTarget.isLoaded) {
       var builder = dillTarget.loader.builders[uri];
       if (builder != null) {
         return builder;
       }
     }
-    return new KernelLibraryBuilder(uri, fileUri, loader);
+    return new KernelLibraryBuilder(uri, fileUri, loader, origin);
+  }
+
+  void forEachDirectSupertype(ClassBuilder cls, void f(NamedTypeBuilder type)) {
+    TypeBuilder supertype = cls.supertype;
+    if (supertype is NamedTypeBuilder) {
+      f(supertype);
+    } else if (supertype != null) {
+      unhandled("${supertype.runtimeType}", "forEachDirectSupertype",
+          cls.charOffset, cls.fileUri);
+    }
+    if (cls.interfaces != null) {
+      for (NamedTypeBuilder t in cls.interfaces) {
+        f(t);
+      }
+    }
+    if (cls.library.loader == loader &&
+        // TODO(ahe): Implement DillClassBuilder.mixedInType and remove the
+        // above check.
+        cls.mixedInType != null) {
+      f(cls.mixedInType);
+    }
   }
 
   void addDirectSupertype(ClassBuilder cls, Set<ClassBuilder> set) {
     if (cls == null) return;
-    TypeBuilder supertype = cls.supertype;
-    add(NamedTypeBuilder type) {
+    forEachDirectSupertype(cls, (NamedTypeBuilder type) {
       Builder builder = type.builder;
       if (builder is ClassBuilder) {
         set.add(builder);
       }
-    }
-
-    if (supertype == null) {
-      // OK.
-    } else if (supertype is MixinApplicationBuilder) {
-      add(supertype.supertype);
-      for (NamedTypeBuilder t in supertype.mixins) {
-        add(t);
-      }
-    } else if (supertype is NamedTypeBuilder) {
-      add(supertype);
-    } else {
-      internalError("Unhandled: ${supertype.runtimeType}");
-    }
-    if (cls.interfaces != null) {
-      for (NamedTypeBuilder t in cls.interfaces) {
-        add(t);
-      }
-    }
+    });
   }
 
   List<ClassBuilder> collectAllClasses() {
     List<ClassBuilder> result = <ClassBuilder>[];
     loader.builders.forEach((Uri uri, LibraryBuilder library) {
-      library.members.forEach((String name, Builder member) {
+      library.forEach((String name, Builder member) {
         if (member is KernelClassBuilder) {
           result.add(member);
         }
@@ -191,8 +205,8 @@ class KernelTarget extends TargetImplementation {
   List<SourceClassBuilder> collectAllSourceClasses() {
     List<SourceClassBuilder> result = <SourceClassBuilder>[];
     loader.builders.forEach((Uri uri, LibraryBuilder library) {
-      library.members.forEach((String name, Builder member) {
-        if (member is SourceClassBuilder) {
+      library.forEach((String name, Builder member) {
+        if (member is SourceClassBuilder && !member.isPatch) {
           result.add(member);
         }
       });
@@ -205,196 +219,180 @@ class KernelTarget extends TargetImplementation {
     cls.implementedTypes.clear();
     cls.supertype = null;
     cls.mixedInType = null;
-    builder.supertype = new KernelNamedTypeBuilder("Object", null,
-        builder.charOffset, builder.fileUri ?? Uri.parse(cls.fileUri))
-      ..builder = objectClassBuilder;
+    builder.supertype = new KernelNamedTypeBuilder("Object", null)
+      ..bind(objectClassBuilder);
     builder.interfaces = null;
+    builder.mixedInType = null;
   }
 
-  Future<Program> handleInputError(Uri uri, InputError error,
-      {bool isFullProgram}) {
+  void handleInputError(deprecated_InputError error, {bool isFullProgram}) {
     if (error != null) {
-      String message = error.format();
-      print(message);
+      LocatedMessage message = deprecated_InputError.toMessage(error);
+      context.report(message, Severity.error);
       errors.add(message);
     }
     program = erroneousProgram(isFullProgram);
-    return uri == null
-        ? new Future<Program>.value(program)
-        : writeLinkedProgram(uri, program, isFullProgram: isFullProgram);
   }
 
-  Future<Program> writeOutline(Uri uri) async {
+  @override
+  Future<Program> buildOutlines({CanonicalName nameRoot}) async {
     if (loader.first == null) return null;
     try {
+      loader.createTypeInferenceEngine();
       await loader.buildOutlines();
       loader.coreLibrary
           .becomeCoreLibrary(const DynamicType(), const VoidType());
-      dynamicType.bind(loader.coreLibrary.members["dynamic"]);
+      dynamicType.bind(loader.coreLibrary["dynamic"]);
       loader.resolveParts();
       loader.computeLibraryScopes();
       loader.resolveTypes();
-      loader.buildProgram();
       loader.checkSemantics();
+      loader.buildProgram();
       List<SourceClassBuilder> sourceClasses = collectAllSourceClasses();
       installDefaultSupertypes();
       installDefaultConstructors(sourceClasses);
       loader.resolveConstructors();
       loader.finishTypeVariables(objectClassBuilder);
-      program = link(new List<Library>.from(loader.libraries));
+      program =
+          link(new List<Library>.from(loader.libraries), nameRoot: nameRoot);
+      if (metadataCollector != null) {
+        program.addMetadataRepository(metadataCollector.repository);
+      }
       loader.computeHierarchy(program);
       loader.checkOverrides(sourceClasses);
-      if (uri == null) return program;
-      return await writeLinkedProgram(uri, program, isFullProgram: false);
-    } on InputError catch (e) {
-      return handleInputError(uri, e, isFullProgram: false);
+      if (!loader.target.disableTypeInference) {
+        loader.prepareTopLevelInference(sourceClasses);
+        loader.performTopLevelInference(sourceClasses);
+      }
+    } on deprecated_InputError catch (e) {
+      handleInputError(e, isFullProgram: false);
     } catch (e, s) {
       return reportCrash(e, s, loader?.currentUriForCrashReporting);
     }
+    return program;
   }
 
-  Future<Program> writeProgram(Uri uri,
-      {bool dumpIr: false, bool verify: false}) async {
+  /// Build the kernel representation of the program loaded by this target. The
+  /// program will contain full bodies for the code loaded from sources, and
+  /// only references to the code loaded by the [DillTarget], which may or may
+  /// not include method bodies (depending on what was loaded into that target,
+  /// an outline or a full kernel program).
+  ///
+  /// If [verify], run the default kernel verification on the resulting program.
+  @override
+  Future<Program> buildProgram({bool verify: false}) async {
     if (loader.first == null) return null;
     if (errors.isNotEmpty) {
-      return handleInputError(uri, null, isFullProgram: true);
+      handleInputError(null, isFullProgram: true);
+      return program;
     }
+
     try {
       await loader.buildBodies();
       loader.finishStaticInvocations();
+      loader.finishDeferredLoadTearoffs();
       finishAllConstructors();
       loader.finishNativeMethods();
-      transformMixinApplications();
-      // TODO(ahe): Don't call this from two different places.
-      setup_builtin_library.transformProgram(program);
-      otherTransformations();
-      if (dumpIr) this.dumpIr();
+      loader.finishPatchMethods();
+      runBuildTransformations();
+
       if (verify) this.verify();
-      errors.addAll(loader.collectCompileTimeErrors().map((e) => e.format()));
       if (errors.isNotEmpty) {
-        return handleInputError(uri, null, isFullProgram: true);
+        handleInputError(null, isFullProgram: true);
       }
-      if (uri == null) return program;
-      return await writeLinkedProgram(uri, program, isFullProgram: true);
-    } on InputError catch (e) {
-      return handleInputError(uri, e, isFullProgram: true);
+      handleRecoverableErrors(loader.unhandledErrors);
+    } on deprecated_InputError catch (e) {
+      handleInputError(e, isFullProgram: true);
     } catch (e, s) {
       return reportCrash(e, s, loader?.currentUriForCrashReporting);
     }
+    return program;
   }
 
-  Future writeDepsFile(Uri output, Uri depsFile,
-      {Iterable<Uri> extraDependencies}) async {
-    String toRelativeFilePath(Uri uri) {
-      return Uri.parse(relativizeUri(uri)).toFilePath();
+  /// Adds a synthetic field named `#errors` to the main library that contains
+  /// [recoverableErrors] formatted.
+  ///
+  /// If [recoverableErrors] is empty, this method does nothing.
+  ///
+  /// If there's no main library, this method uses [erroneousProgram] to
+  /// replace [program].
+  void handleRecoverableErrors(List<LocatedMessage> recoverableErrors) {
+    if (recoverableErrors.isEmpty) return;
+    KernelLibraryBuilder mainLibrary = loader.first;
+    if (mainLibrary == null) {
+      program = erroneousProgram(true);
+      return;
     }
-
-    if (loader.first == null) return null;
-    StringBuffer sb = new StringBuffer();
-    sb.write(toRelativeFilePath(output));
-    sb.write(":");
-    Set<String> allDependencies = new Set<String>();
-    allDependencies.addAll(loader.getDependencies().map(toRelativeFilePath));
-    if (extraDependencies != null) {
-      allDependencies.addAll(extraDependencies.map(toRelativeFilePath));
+    List<Expression> expressions = <Expression>[];
+    for (LocatedMessage error in recoverableErrors) {
+      errors.add(error);
+      expressions.add(new StringLiteral(context.format(error, Severity.error)));
     }
-    for (String path in allDependencies) {
-      sb.write(" ");
-      sb.write(path);
-    }
-    sb.writeln();
-    await new File.fromUri(depsFile).writeAsString("$sb");
-    ticker.logMs("Wrote deps file");
+    mainLibrary.library.addMember(new Field(new Name("#errors"),
+        initializer: new ListLiteral(expressions, isConst: true),
+        isConst: true,
+        isStatic: true));
   }
 
   Program erroneousProgram(bool isFullProgram) {
     Uri uri = loader.first?.uri ?? Uri.parse("error:error");
     Uri fileUri = loader.first?.fileUri ?? uri;
     KernelLibraryBuilder library =
-        new KernelLibraryBuilder(uri, fileUri, loader);
+        new KernelLibraryBuilder(uri, fileUri, loader, null);
     loader.first = library;
     if (isFullProgram) {
       // If this is an outline, we shouldn't add an executable main
       // method. Similarly considerations apply to separate compilation. It
       // could also make sense to add a way to mark .dill files as having
       // compile-time errors.
-      KernelProcedureBuilder mainBuilder = new KernelProcedureBuilder(
-          null,
-          0,
-          null,
-          "main",
-          null,
-          null,
-          AsyncMarker.Sync,
-          ProcedureKind.Method,
-          library,
-          -1,
-          -1,
-          -1);
+      KernelProcedureBuilder mainBuilder = new KernelProcedureBuilder(null, 0,
+          null, "#main", null, null, ProcedureKind.Method, library, -1, -1, -1);
       library.addBuilder(mainBuilder.name, mainBuilder, -1);
-      mainBuilder.body = new ExpressionStatement(
-          new Throw(new StringLiteral("${errors.join('\n')}")));
+      mainBuilder.body = new Block(new List<Statement>.from(errors.map(
+          (LocatedMessage message) => new ExpressionStatement(new Throw(
+              new StringLiteral(context.format(message, Severity.error)))))));
     }
-    library.build();
+    library.build(loader.coreLibrary);
     return link(<Library>[library.library]);
   }
 
   /// Creates a program by combining [libraries] with the libraries of
   /// `dillTarget.loader.program`.
-  Program link(List<Library> libraries) {
+  Program link(List<Library> libraries, {CanonicalName nameRoot}) {
     Map<String, Source> uriToSource =
         new Map<String, Source>.from(this.uriToSource);
 
-    final Program binary = dillTarget.loader.program;
-    if (binary != null) {
-      libraries.addAll(binary.libraries);
-      uriToSource.addAll(binary.uriToSource);
-    }
+    libraries.addAll(dillTarget.loader.libraries);
+    uriToSource.addAll(dillTarget.loader.uriToSource);
 
     // TODO(ahe): Remove this line. Kernel seems to generate a default line map
     // that used when there's no fileUri on an element. Instead, ensure all
     // elements have a fileUri.
     uriToSource[""] = new Source(<int>[0], const <int>[]);
-    Program program = new Program(libraries, uriToSource);
+    Program program = new Program(
+        nameRoot: nameRoot, libraries: libraries, uriToSource: uriToSource);
     if (loader.first != null) {
-      Builder builder = loader.first.members["main"];
+      // TODO(sigmund): do only for full program
+      Builder builder = loader.first.exportScope.lookup("main", -1, null);
       if (builder is KernelProcedureBuilder) {
         program.mainMethod = builder.procedure;
       }
     }
-    if (errors.isEmpty || dillTarget.isLoaded) {
-      setup_builtin_library.transformProgram(program);
-    }
+
     ticker.logMs("Linked program");
     return program;
-  }
-
-  Future<Program> writeLinkedProgram(Uri uri, Program program,
-      {bool isFullProgram}) async {
-    File output = new File.fromUri(uri);
-    IOSink sink = output.openWrite();
-    try {
-      new BinaryPrinter(sink).writeProgramFile(program);
-      program.unbindCanonicalNames();
-    } finally {
-      await sink.close();
-    }
-    if (isFullProgram) {
-      ticker.logMs("Wrote program to ${uri.toFilePath()}");
-    } else {
-      ticker.logMs("Wrote outline to ${uri.toFilePath()}");
-    }
-    return null;
   }
 
   void installDefaultSupertypes() {
     Class objectClass = this.objectClass;
     loader.builders.forEach((Uri uri, LibraryBuilder library) {
-      library.members.forEach((String name, Builder builder) {
+      library.forEach((String name, Builder builder) {
         if (builder is SourceClassBuilder) {
           Class cls = builder.target;
           if (cls != objectClass) {
             cls.supertype ??= objectClass.asRawSupertype;
+            builder.supertype ??= new KernelNamedTypeBuilder("Object", null)
+              ..bind(objectClassBuilder);
           }
           if (builder.isMixinApplication) {
             cls.mixedInType = builder.mixedInType.buildSupertype(library);
@@ -415,27 +413,20 @@ class KernelTarget extends TargetImplementation {
     ticker.logMs("Installed default constructors");
   }
 
-  KernelClassBuilder get objectClassBuilder {
-    return loader.coreLibrary.exports["Object"];
-  }
+  KernelClassBuilder get objectClassBuilder => loader.coreLibrary["Object"];
 
   Class get objectClass => objectClassBuilder.cls;
 
   /// If [builder] doesn't have a constructors, install the defaults.
   void installDefaultConstructor(SourceClassBuilder builder) {
-    if (builder.cls.isMixinApplication) {
-      // We have to test if builder.cls is a mixin application. [builder] may
-      // think it's a mixin application, but if its mixed-in type couldn't be
-      // resolved, the target class won't be a mixin application and we need
-      // to add a default constructor to complete error recovery.
-      return;
-    }
-    if (builder.constructors.isNotEmpty) return;
+    if (builder.isMixinApplication && !builder.isNamedMixinApplication) return;
+    if (builder.constructors.local.isNotEmpty) return;
+    if (builder.isPatch) return;
 
     /// Quotes below are from [Dart Programming Language Specification, 4th
     /// Edition](
     /// https://ecma-international.org/publications/files/ECMA-ST/ECMA-408.pdf):
-    if (builder is NamedMixinApplicationBuilder) {
+    if (builder.isNamedMixinApplication) {
       /// >A mixin application of the form S with M; defines a class C with
       /// >superclass S.
       /// >...
@@ -445,18 +436,15 @@ class KernelTarget extends TargetImplementation {
       /// >that is accessible to LM , C has an implicitly declared constructor
       /// >named q'i = [C/S]qi of the form q'i(ai1,...,aiki) :
       /// >super(ai1,...,aiki);.
-      Builder supertype = builder;
-      while (supertype is NamedMixinApplicationBuilder) {
-        NamedMixinApplicationBuilder named = supertype;
-        TypeBuilder type = named.mixinApplication;
-        if (type is MixinApplicationBuilder) {
-          MixinApplicationBuilder t = type;
-          type = t.supertype;
-        }
+      TypeDeclarationBuilder supertype = builder;
+      while (supertype.isMixinApplication) {
+        SourceClassBuilder named = supertype;
+        TypeBuilder type = named.supertype;
         if (type is NamedTypeBuilder) {
           supertype = type.builder;
         } else {
-          internalError("Unhandled: ${type.runtimeType}");
+          unhandled("${type.runtimeType}", "installDefaultConstructor",
+              builder.charOffset, builder.fileUri);
         }
       }
       if (supertype is KernelClassBuilder) {
@@ -476,7 +464,8 @@ class KernelTarget extends TargetImplementation {
       } else if (supertype is InvalidTypeBuilder) {
         builder.addSyntheticConstructor(makeDefaultConstructor());
       } else {
-        internalError("Unhandled: ${supertype.runtimeType}");
+        unhandled("${supertype.runtimeType}", "installDefaultConstructor",
+            builder.charOffset, builder.fileUri);
       }
     } else {
       /// >Iff no constructor is specified for a class C, it implicitly has a
@@ -536,7 +525,8 @@ class KernelTarget extends TargetImplementation {
   Constructor makeDefaultConstructor() {
     return new Constructor(
         new FunctionNode(new EmptyStatement(), returnType: const VoidType()),
-        name: new Name(""));
+        name: new Name(""),
+        isSyntheticDefault: true);
   }
 
   void finishAllConstructors() {
@@ -544,7 +534,7 @@ class KernelTarget extends TargetImplementation {
     for (SourceClassBuilder builder in collectAllSourceClasses()) {
       Class cls = builder.target;
       if (cls != objectClass) {
-        finishConstructors(cls);
+        finishConstructors(builder);
       }
     }
     ticker.logMs("Finished constructors");
@@ -552,10 +542,12 @@ class KernelTarget extends TargetImplementation {
 
   /// Ensure constructors of [cls] have the correct initializers and other
   /// requirements.
-  void finishConstructors(Class cls) {
+  void finishConstructors(SourceClassBuilder builder) {
+    if (builder.isPatch) return;
+    Class cls = builder.target;
+
     /// Quotes below are from [Dart Programming Language Specification, 4th
     /// Edition](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-408.pdf):
-    Constructor superTarget;
     List<Field> uninitializedFields = <Field>[];
     List<Field> nonFinalFields = <Field>[];
     for (Field field in cls.fields) {
@@ -568,24 +560,28 @@ class KernelTarget extends TargetImplementation {
     }
     Map<Constructor, List<FieldInitializer>> fieldInitializers =
         <Constructor, List<FieldInitializer>>{};
-    for (Constructor constructor in cls.constructors) {
-      if (!isRedirectingGenerativeConstructor(constructor)) {
+    Constructor superTarget;
+    builder.constructors.forEach((String name, Builder member) {
+      if (member.isFactory) return;
+      MemberBuilder constructorBuilder = member;
+      Constructor constructor = constructorBuilder.target;
+      if (!constructorBuilder.isRedirectingGenerativeConstructor) {
         /// >If no superinitializer is provided, an implicit superinitializer
         /// >of the form super() is added at the end of k’s initializer list,
         /// >unless the enclosing class is class Object.
-        if (!constructor.initializers.any(isSuperinitializerOrInvalid)) {
+        if (constructor.initializers.isEmpty) {
           superTarget ??= defaultSuperConstructor(cls);
           Initializer initializer;
           if (superTarget == null) {
-            addError(
-                constructor.enclosingClass.fileUri,
-                constructor.fileOffset,
-                "${cls.superclass.name} has no constructor that takes no"
-                " arguments.");
+            builder.addCompileTimeError(
+                templateSuperclassHasNoDefaultConstructor
+                    .withArguments(cls.superclass.name),
+                constructor.fileOffset);
             initializer = new InvalidInitializer();
           } else {
             initializer =
-                new SuperInitializer(superTarget, new Arguments.empty());
+                new SuperInitializer(superTarget, new Arguments.empty())
+                  ..isSynthetic = true;
           }
           constructor.initializers.add(initializer);
           initializer.parent = constructor;
@@ -605,16 +601,16 @@ class KernelTarget extends TargetImplementation {
         }
         fieldInitializers[constructor] = myFieldInitializers;
         if (constructor.isConst && nonFinalFields.isNotEmpty) {
-          addError(constructor.enclosingClass.fileUri, constructor.fileOffset,
-              "Constructor is marked 'const' so all fields must be final.");
+          builder.addCompileTimeError(
+              messageConstConstructorNonFinalField, constructor.fileOffset);
           for (Field field in nonFinalFields) {
-            addError(constructor.enclosingClass.fileUri, field.fileOffset,
-                "Field isn't final, but constructor is 'const'.");
+            builder.addCompileTimeError(
+                messageConstConstructorNonFinalFieldCause, field.fileOffset);
           }
           nonFinalFields.clear();
         }
       }
-    }
+    });
     Set<Field> initializedFields;
     fieldInitializers.forEach(
         (Constructor constructor, List<FieldInitializer> initializers) {
@@ -640,7 +636,8 @@ class KernelTarget extends TargetImplementation {
       for (Field field in initializedFields.difference(fields.toSet())) {
         if (field.initializer == null) {
           FieldInitializer initializer =
-              new FieldInitializer(field, new NullLiteral());
+              new FieldInitializer(field, new NullLiteral())
+                ..isSynthetic = true;
           initializer.parent = constructor;
           constructor.initializers.insert(0, initializer);
         }
@@ -648,44 +645,48 @@ class KernelTarget extends TargetImplementation {
     });
   }
 
-  void transformMixinApplications() {
-    new MixinFullResolution().transform(program);
-    ticker.logMs("Transformed mixin applications");
-  }
-
-  void otherTransformations() {
-    // TODO(ahe): Don't generate type variables in the first place.
-    program.accept(new Erasure());
-    ticker.logMs("Erased type variables in generic methods");
-    // TODO(kmillikin): Make this run on a per-method basis.
-    transformAsync.transformProgram(program);
-    ticker.logMs("Transformed async methods");
-  }
-
-  void dumpIr() {
-    StringBuffer sb = new StringBuffer();
-    for (Library library in loader.libraries) {
-      Printer printer = new Printer(sb);
-      printer.writeLibraryFile(library);
-    }
-    print("$sb");
-    ticker.logMs("Dumped IR");
+  /// Run all transformations that are needed when building a program for the
+  /// first time.
+  void runBuildTransformations() {
+    backendTarget.performModularTransformationsOnLibraries(
+        loader.coreTypes, loader.hierarchy, loader.libraries,
+        logger: (String msg) => ticker.logMs(msg));
+    backendTarget.performGlobalTransformations(loader.coreTypes, program,
+        logger: (String msg) => ticker.logMs(msg));
   }
 
   void verify() {
     errors.addAll(verifyProgram(program));
     ticker.logMs("Verified program");
   }
-}
 
-bool isSuperinitializerOrInvalid(Initializer initializer) {
-  return initializer is SuperInitializer || initializer is InvalidInitializer;
-}
+  /// Return `true` if the given [library] was built by this [KernelTarget]
+  /// from sources, and not loaded from a [DillTarget].
+  bool isSourceLibrary(Library library) {
+    return loader.libraries.contains(library);
+  }
 
-bool isRedirectingGenerativeConstructor(Constructor constructor) {
-  List<Initializer> initializers = constructor.initializers;
-  return initializers.length == 1 &&
-      initializers.single is RedirectingInitializer;
+  @override
+  void readPatchFiles(KernelLibraryBuilder library) {
+    assert(library.uri.scheme == "dart");
+    List<Uri> patches = uriTranslator.getDartPatches(library.uri.path);
+    if (patches != null) {
+      KernelLibraryBuilder first;
+      for (Uri patch in patches) {
+        if (first == null) {
+          first =
+              library.loader.read(patch, -1, fileUri: patch, origin: library);
+        } else {
+          // If there's more than one patch file, it's interpreted as a part of
+          // the patch library.
+          KernelLibraryBuilder part =
+              library.loader.read(patch, -1, fileUri: patch);
+          first.parts.add(part);
+          part.addPartOf(null, null, "${first.uri}", -1);
+        }
+      }
+    }
+  }
 }
 
 /// Looks for a constructor call that matches `super()` from a constructor in

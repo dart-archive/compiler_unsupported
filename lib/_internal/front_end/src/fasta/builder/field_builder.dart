@@ -6,6 +6,8 @@ library fasta.field_builder;
 
 import 'builder.dart' show LibraryBuilder, MemberBuilder;
 
+import 'package:compiler_unsupported/_internal/kernel/ast.dart' show DartType;
+
 abstract class FieldBuilder<T> extends MemberBuilder {
   final String name;
 
@@ -15,7 +17,15 @@ abstract class FieldBuilder<T> extends MemberBuilder {
       this.name, this.modifiers, LibraryBuilder compilationUnit, int charOffset)
       : super(compilationUnit, charOffset);
 
+  String get debugName => "FieldBuilder";
+
+  DartType get builtType;
+
   void set initializer(T value);
 
+  bool get hasInitializer;
+
   bool get isField => true;
+
+  bool get hasImplicitType;
 }

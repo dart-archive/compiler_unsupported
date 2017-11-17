@@ -10,8 +10,9 @@ import '../elements/resolution_types.dart';
 import '../diagnostics/messages.dart';
 import '../elements/elements.dart';
 import '../elements/modelx.dart' show WrappedMessage;
+import '../elements/names.dart';
+import '../elements/operators.dart';
 import '../resolution/access_semantics.dart';
-import '../resolution/operators.dart';
 import '../resolution/send_structure.dart';
 import '../universe/call_structure.dart';
 import '../universe/selector.dart';
@@ -191,6 +192,7 @@ void serializeSendStructure(
 }
 
 /// Deserialize a [SendStructure] from [decoder].
+// ignore: MISSING_RETURN
 SendStructure deserializeSendStructure(ObjectDecoder decoder) {
   SendStructureKind kind = decoder.getEnum(Key.KIND, SendStructureKind.values);
   switch (kind) {
@@ -341,6 +343,7 @@ void serializeNewStructure(NewStructure newStructure, ObjectEncoder encoder) {
 }
 
 /// Deserialize a [NewStructure] from [decoder].
+// ignore: MISSING_RETURN
 NewStructure deserializeNewStructure(ObjectDecoder decoder) {
   NewStructureKind kind = decoder.getEnum(Key.KIND, NewStructureKind.values);
   switch (kind) {
@@ -421,6 +424,7 @@ void serializeAccessSemantics(
 }
 
 /// Deserialize a [AccessSemantics] from [decoder].
+// ignore: MISSING_RETURN
 AccessSemantics deserializeAccessSemantics(ObjectDecoder decoder) {
   AccessKind kind = decoder.getEnum(Key.KIND, AccessKind.values);
   switch (kind) {
@@ -484,8 +488,11 @@ void serializeElementReference(Element context, Key elementKey, Key nameKey,
     ObjectEncoder encoder, Element element) {
   if (element.isGenerativeConstructor &&
       element.enclosingClass.isUnnamedMixinApplication) {
-    assert(invariant(element, element.isConstructor,
-        message: "Unexpected reference of forwarding constructor "
+    assert(
+        element.isConstructor,
+        failedAt(
+            element,
+            "Unexpected reference of forwarding constructor "
             "${element} from $context."));
     encoder.setString(nameKey, element.name);
   } else {
@@ -508,20 +515,29 @@ Element deserializeElementReference(
     }
     ClassElement cls;
     if (context is ClassElement) {
-      assert(invariant(NO_LOCATION_SPANNABLE, context.isNamedMixinApplication,
-          message: "Unexpected reference of forwarding constructor "
+      assert(
+          context.isNamedMixinApplication,
+          failedAt(
+              NO_LOCATION_SPANNABLE,
+              "Unexpected reference of forwarding constructor "
               "'${elementName}' from $context."));
       cls = context;
     } else {
-      assert(invariant(NO_LOCATION_SPANNABLE, context.isConstructor,
-          message: "Unexpected reference of forwarding constructor "
+      assert(
+          context.isConstructor,
+          failedAt(
+              NO_LOCATION_SPANNABLE,
+              "Unexpected reference of forwarding constructor "
               "'${elementName}' from $context."));
       cls = context.enclosingClass;
     }
     ClassElement superclass = cls.superclass;
     element = superclass.lookupConstructor(elementName);
-    assert(invariant(NO_LOCATION_SPANNABLE, element != null,
-        message: "Unresolved reference of forwarding constructor "
+    assert(
+        element != null,
+        failedAt(
+            NO_LOCATION_SPANNABLE,
+            "Unresolved reference of forwarding constructor "
             "'${elementName}' from $context."));
   }
   return element;

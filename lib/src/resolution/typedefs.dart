@@ -16,6 +16,7 @@ import 'class_hierarchy.dart' show TypeDefinitionVisitor;
 import 'registry.dart' show ResolutionRegistry;
 import 'scope.dart' show MethodScope, TypeDeclarationScope;
 import 'signatures.dart' show SignatureResolver;
+import 'type_resolver.dart' show FunctionTypeParameterScope;
 
 class TypedefResolverVisitor extends TypeDefinitionVisitor {
   TypedefElementX get element => enclosingElement;
@@ -29,8 +30,18 @@ class TypedefResolverVisitor extends TypeDefinitionVisitor {
     scope = new TypeDeclarationScope(scope, element);
     resolveTypeVariableBounds(node.templateParameters);
 
-    FunctionSignature signature = SignatureResolver.analyze(resolution, scope,
-        node.typeParameters, node.formals, node.returnType, element, registry,
+    FunctionTypeParameterScope functionTypeParameters =
+        const FunctionTypeParameterScope().expand(node.typeParameters);
+
+    FunctionSignature signature = SignatureResolver.analyze(
+        resolution,
+        scope,
+        functionTypeParameters,
+        null, // Don't create type variable types for the type parameters.
+        node.formals,
+        node.returnType,
+        element,
+        registry,
         defaultValuesError: MessageKind.TYPEDEF_FORMAL_WITH_DEFAULT);
     element.functionSignature = signature;
 
@@ -49,7 +60,7 @@ class TypedefResolverVisitor extends TypeDefinitionVisitor {
 
 // TODO(johnniwinther): Replace with a traversal on the AST when the type
 // annotations in typedef alias are stored in a [TreeElements] mapping.
-class TypedefCyclicVisitor extends BaseDartTypeVisitor {
+class TypedefCyclicVisitor extends BaseResolutionDartTypeVisitor {
   final DiagnosticReporter reporter;
   final TypedefElementX element;
   bool hasCyclicReference = false;

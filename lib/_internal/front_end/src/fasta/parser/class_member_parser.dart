@@ -4,7 +4,11 @@
 
 library fasta.parser.class_member_parser;
 
-import '../scanner/token.dart' show Token;
+import '../../scanner/token.dart' show Token;
+
+import '../fasta_codes.dart' show Message;
+
+import 'assert.dart' show Assert;
 
 import 'listener.dart' show Listener;
 
@@ -15,12 +19,23 @@ import 'parser.dart' show Parser;
 class ClassMemberParser extends Parser {
   ClassMemberParser(Listener listener) : super(listener);
 
+  @override
   Token parseExpression(Token token) => skipExpression(token);
 
-  Token parseRecoverExpression(Token token) {
+  @override
+  Token parseAssert(Token token, Assert kind) {
+    if (kind == Assert.Statement) {
+      return super.parseAssert(token, kind);
+    } else {
+      return skipExpression(token);
+    }
+  }
+
+  @override
+  Token parseRecoverExpression(Token token, Message message) {
     Token begin = token;
     token = skipExpression(token);
-    listener.handleRecoverExpression(begin);
+    listener.handleRecoverExpression(begin, message);
     return token;
   }
 

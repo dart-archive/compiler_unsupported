@@ -4,23 +4,32 @@
 
 library fasta.dill_library_builder;
 
+import 'dart:convert' show JSON;
+
 import 'package:compiler_unsupported/_internal/kernel/ast.dart'
     show
         Class,
-        ExpressionStatement,
         Field,
-        FunctionNode,
-        Let,
         Library,
         ListLiteral,
         Member,
         Procedure,
-        StaticGet;
+        StaticGet,
+        StringLiteral,
+        Typedef;
 
-import '../errors.dart' show internalError;
+import '../fasta_codes.dart' show templateUnspecified;
+
+import '../problems.dart' show unhandled, unimplemented;
 
 import '../kernel/kernel_builder.dart'
-    show Builder, KernelInvalidTypeBuilder, KernelTypeBuilder, LibraryBuilder;
+    show
+        Builder,
+        InvalidTypeBuilder,
+        KernelInvalidTypeBuilder,
+        KernelTypeBuilder,
+        LibraryBuilder,
+        Scope;
 
 import '../kernel/redirecting_factory_body.dart' show RedirectingFactoryBody;
 
@@ -30,25 +39,31 @@ import 'dill_member_builder.dart' show DillMemberBuilder;
 
 import 'dill_loader.dart' show DillLoader;
 
+import 'dill_typedef_builder.dart' show DillFunctionTypeAliasBuilder;
+
 class DillLibraryBuilder extends LibraryBuilder<KernelTypeBuilder, Library> {
   final Uri uri;
-
-  final Map<String, Builder> members = <String, Builder>{};
-
-  // TODO(ahe): Some export information needs to be serialized.
-  final Map<String, Builder> exports = <String, Builder>{};
 
   final DillLoader loader;
 
   Library library;
 
-  DillLibraryBuilder(Uri uri, this.loader)
-      : uri = uri,
-        super(uri);
+  /// Exports that can't be serialized.
+  ///
+  /// The elements of this map are documented in
+  /// [../kernel/kernel_library_builder.dart].
+  Map<String, String> unserializableExports;
 
-  get scope => internalError("Scope not supported");
+  DillLibraryBuilder(this.uri, this.loader)
+      : super(uri, new Scope.top(), new Scope.top());
 
   Uri get fileUri => uri;
+
+  @override
+  String get name => library.name;
+
+  @override
+  Library get target => library;
 
   void addClass(Class cls) {
     DillClassBuilder classBulder = new DillClassBuilder(cls, this);
@@ -57,21 +72,10 @@ class DillLibraryBuilder extends LibraryBuilder<KernelTypeBuilder, Library> {
     cls.constructors.forEach(classBulder.addMember);
     for (Field field in cls.fields) {
       if (field.name.name == "_redirecting#") {
-        // This is a hack / work around for storing redirecting constructors in
-        // dill files. See `buildFactoryConstructor` in
-        // [package:compiler_unsupported/_internal/kernel/analyzer/ast_from_analyzer.dart]
-        // (../../../../kernel/lib/analyzer/ast_from_analyzer.dart).
         ListLiteral initializer = field.initializer;
         for (StaticGet get in initializer.expressions) {
-          Procedure factory = get.target;
-          FunctionNode function = factory.function;
-          ExpressionStatement statement = function.body;
-          Let let = statement.expression;
-          StaticGet getTarget = let.variable.initializer;
-          function.body = new RedirectingFactoryBody(getTarget.target)
-            ..parent = function;
+          RedirectingFactoryBody.restoreFromDill(get.target);
         }
-        initializer.expressions.clear();
       } else {
         classBulder.addMember(field);
       }
@@ -81,8 +85,9 @@ class DillLibraryBuilder extends LibraryBuilder<KernelTypeBuilder, Library> {
   void addMember(Member member) {
     String name = member.name.name;
     if (name == "_exports#") {
-      // This is a hack / work around for storing exports in dill files. See
-      // [compile_platform.dart](../compile_platform.dart).
+      Field field = member;
+      StringLiteral string = field.initializer;
+      unserializableExports = JSON.decode(string.value);
     } else {
       addBuilder(name, new DillMemberBuilder(member, this), member.fileOffset);
     }
@@ -90,31 +95,105 @@ class DillLibraryBuilder extends LibraryBuilder<KernelTypeBuilder, Library> {
 
   Builder addBuilder(String name, Builder builder, int charOffset) {
     if (name == null || name.isEmpty) return null;
-    members[name] = builder;
+    bool isSetter = builder.isSetter;
+    if (isSetter) {
+      scopeBuilder.addSetter(name, builder);
+    } else {
+      scopeBuilder.addMember(name, builder);
+    }
     if (!name.startsWith("_")) {
-      exports[name] = builder;
+      if (isSetter) {
+        exportScopeBuilder.addSetter(name, builder);
+      } else {
+        exportScopeBuilder.addMember(name, builder);
+      }
     }
     return builder;
   }
 
-  bool addToExportScope(String name, Builder member) {
-    return internalError("Not implemented yet.");
+  void addTypedef(Typedef typedef) {
+    var typedefBuilder = new DillFunctionTypeAliasBuilder(typedef, this);
+    addBuilder(typedef.name, typedefBuilder, typedef.fileOffset);
   }
 
   @override
   void addToScope(String name, Builder member, int charOffset, bool isImport) {
-    internalError("Not implemented yet.");
+    unimplemented("addToScope", charOffset, fileUri);
   }
 
   @override
   Builder buildAmbiguousBuilder(
       String name, Builder builder, Builder other, int charOffset,
       {bool isExport: false, bool isImport: false}) {
+    if (builder == other) return builder;
+    if (builder is InvalidTypeBuilder) return builder;
+    if (other is InvalidTypeBuilder) return other;
+    // For each entry mapping key `k` to declaration `d` in `NS` an entry
+    // mapping `k` to `d` is added to the exported namespace of `L` unless a
+    // top-level declaration with the name `k` exists in `L`.
+    if (builder.parent == this) return builder;
     return new KernelInvalidTypeBuilder(name, charOffset, fileUri);
   }
 
   @override
   String get fullNameForErrors {
     return library.name ?? "<library '${library.fileUri}'>";
+  }
+
+  void finalizeExports() {
+    unserializableExports?.forEach((String name, String message) {
+      Builder builder;
+      switch (name) {
+        case "dynamic":
+        case "void":
+          // TODO(ahe): It's likely that we shouldn't be exporting these types
+          // from dart:core, and this case can be removed.
+          builder = loader.coreLibrary.exportScopeBuilder[name];
+          break;
+
+        default:
+          builder = new KernelInvalidTypeBuilder(
+              name,
+              -1,
+              null,
+              message == null
+                  ? null
+                  : templateUnspecified.withArguments(message));
+      }
+      exportScopeBuilder.addMember(name, builder);
+    });
+
+    for (var reference in library.additionalExports) {
+      var node = reference.node;
+      Uri libraryUri;
+      String name;
+      bool isSetter = false;
+      if (node is Class) {
+        libraryUri = node.enclosingLibrary.importUri;
+        name = node.name;
+      } else if (node is Procedure) {
+        libraryUri = node.enclosingLibrary.importUri;
+        name = node.name.name;
+        isSetter = node.isSetter;
+      } else if (node is Member) {
+        libraryUri = node.enclosingLibrary.importUri;
+        name = node.name.name;
+      } else if (node is Typedef) {
+        libraryUri = node.enclosingLibrary.importUri;
+        name = node.name;
+      } else {
+        unhandled("${node.runtimeType}", "finalizeExports", -1, fileUri);
+      }
+      var library = loader.read(libraryUri, -1);
+      Builder builder;
+      if (isSetter) {
+        builder = library.exportScope.setters[name];
+        exportScopeBuilder.addSetter(name, builder);
+      } else {
+        builder = library.exportScope.local[name];
+        exportScopeBuilder.addMember(name, builder);
+      }
+      assert(node == builder.target);
+    }
   }
 }

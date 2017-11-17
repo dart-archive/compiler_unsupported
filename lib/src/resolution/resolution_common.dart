@@ -7,6 +7,7 @@ library dart2js.resolution.common;
 import '../common.dart';
 import '../common/resolution.dart' show Resolution;
 import '../elements/elements.dart';
+import '../elements/entities.dart' show AsyncMarker;
 import '../enqueue.dart' show DeferredAction;
 import '../tree/tree.dart';
 import 'registry.dart' show ResolutionRegistry;
@@ -25,7 +26,7 @@ class CommonResolverVisitor<R> extends Visitor<R> {
         node, 'internal error: Unhandled node: ${node.getObjectDescription()}');
   }
 
-  R visitEmptyStatement(Node node) => null;
+  R visitEmptyStatement(EmptyStatement node) => null;
 
   /** Convenience method for visiting nodes that may be null. */
   R visit(Node node) => (node == null) ? null : node.accept(this);

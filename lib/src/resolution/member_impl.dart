@@ -6,7 +6,7 @@ part of dart2js.resolution.compute_members;
 
 class DeclaredMember implements Member {
   final Name name;
-  final Element element;
+  final MemberElement element;
   final ResolutionInterfaceType declarer;
   final ResolutionDartType type;
   final ResolutionFunctionType functionType;
@@ -116,7 +116,7 @@ class InheritedMember implements DeclaredMember {
     assert(!declaration.isStatic);
   }
 
-  Element get element => declaration.element;
+  MemberElement get element => declaration.element;
 
   Name get name => declaration.name;
 
@@ -143,17 +143,18 @@ class InheritedMember implements DeclaredMember {
   }
 
   DeclaredMember inheritFrom(ResolutionInterfaceType newInstance) {
-    assert(invariant(declaration.element, () {
+    assert(() {
       // Assert that if [instance] contains type variables, then these are
       // defined in the declaration of [newInstance] and will therefore be
       // substituted into the context of [newInstance] in the created member.
-      ClassElement contextClass = Types.getClassContext(instance);
+      ClassElement contextClass = DartTypes.getClassContext(instance);
       return contextClass == null || contextClass == newInstance.element;
-    }, message: () {
-      return "Context mismatch: Context class "
-          "${Types.getClassContext(instance)} from $instance does match "
-          "the new instance $newInstance.";
-    }));
+    },
+        failedAt(
+            declaration.element,
+            "Context mismatch: Context class "
+            "${DartTypes.getClassContext(instance)} from $instance does match "
+            "the new instance $newInstance."));
     return _newInheritedMember(newInstance);
   }
 

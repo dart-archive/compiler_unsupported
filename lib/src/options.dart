@@ -166,6 +166,9 @@ class CompilerOptions implements DiagnosticOptions {
   /// Location of the platform configuration file.
   final Uri platformConfigUri;
 
+  /// Location of the kernel platform `.dill` files.
+  final Uri platformBinaries;
+
   /// Whether to emit URIs in the reflection metadata.
   final bool preserveUris;
 
@@ -199,12 +202,16 @@ class CompilerOptions implements DiagnosticOptions {
   /// Whether to generate code compliant with content security policy (CSP).
   final bool useContentSecurityPolicy;
 
-  /// Whether to use kernel internally as part of compilation.
+  /// Preview the unified front-end and compilation from kernel.
+  ///
+  /// When enabled the compiler will use the unified front-end to compile
+  /// sources to kernel, and then continue compilation from the kernel
+  /// representation.
+  ///
+  /// When this flag is on, the compiler also acccepts reading .dill files from
+  /// disk. The compiler reads the sources differently depending on the
+  /// extension format.
   final bool useKernel;
-
-  // Whether to use kernel internally for global type inference calculations.
-  // TODO(efortuna): Remove this and consolidate with useKernel.
-  final bool kernelGlobalInference;
 
   /// When obfuscating for minification, whether to use the frequency of a name
   /// as an heuristic to pick shorter names.
@@ -226,6 +233,19 @@ class CompilerOptions implements DiagnosticOptions {
   /// during each phase and a time-breakdown between phases at the end.
   final bool verbose;
 
+  /// Track allocations in the JS output.
+  ///
+  /// This is an experimental feature.
+  final bool experimentalTrackAllocations;
+
+  /// The path to the file that contains the profiled allocations.
+  ///
+  /// The file must contain the Map that was produced by using
+  /// [experimentalTrackAllocations] encoded as a JSON map.
+  ///
+  /// This is an experimental feature.
+  final String experimentalAllocationsPath;
+
   // -------------------------------------------------
   // Options for deprecated features
   // -------------------------------------------------
@@ -243,6 +263,7 @@ class CompilerOptions implements DiagnosticOptions {
       Uri libraryRoot,
       Uri packageRoot,
       Uri packageConfig,
+      Uri platformBinaries,
       List<Uri> resolutionInputs,
       Uri resolutionOutput,
       PackagesDiscoveryProvider packagesDiscoveryProvider,
@@ -279,14 +300,19 @@ class CompilerOptions implements DiagnosticOptions {
         enableNativeLiveTypeAnalysis:
             !_hasOption(options, Flags.disableNativeLiveTypeAnalysis),
         enableTypeAssertions: _hasOption(options, Flags.enableCheckedMode),
-        enableUserAssertions: _hasOption(options, Flags.enableCheckedMode),
+        enableUserAssertions: _hasOption(options, Flags.enableCheckedMode) ||
+            _hasOption(options, Flags.enableAsserts),
+        experimentalTrackAllocations:
+            _hasOption(options, Flags.experimentalTrackAllocations),
+        experimentalAllocationsPath: _extractStringOption(
+            options, "${Flags.experimentalAllocationsPath}=", null),
         generateCodeWithCompileTimeErrors:
             _hasOption(options, Flags.generateCodeWithCompileTimeErrors),
         generateSourceMap: !_hasOption(options, Flags.noSourceMaps),
-        kernelGlobalInference: _hasOption(options, Flags.kernelGlobalInference),
         outputUri: _extractUriOption(options, '--out='),
         platformConfigUri:
             _resolvePlatformConfigFromOptions(libraryRoot, options),
+        platformBinaries: platformBinaries,
         preserveComments: _hasOption(options, Flags.preserveComments),
         preserveUris: _hasOption(options, Flags.preserveUris),
         resolutionInputs: resolutionInputs,
@@ -344,11 +370,14 @@ class CompilerOptions implements DiagnosticOptions {
       bool enableNativeLiveTypeAnalysis: true,
       bool enableTypeAssertions: false,
       bool enableUserAssertions: false,
+      bool experimentalTrackAllocations: false,
+      String experimentalAllocationsPath: null,
       bool generateCodeWithCompileTimeErrors: false,
       bool generateSourceMap: true,
       bool kernelGlobalInference: false,
       Uri outputUri: null,
       Uri platformConfigUri: null,
+      Uri platformBinaries: null,
       bool preserveComments: false,
       bool preserveUris: false,
       List<Uri> resolutionInputs: null,
@@ -390,6 +419,11 @@ class CompilerOptions implements DiagnosticOptions {
             "with ${Flags.analyzeOnly}");
       }
     }
+    if (useKernel && platformBinaries == null) {
+      throw new ArgumentError(
+          "${Flags.useKernel} is only supported in combination "
+          "with ${Flags.platformBinaries}");
+    }
     return new CompilerOptions._(entryPoint, libraryRoot, packageRoot,
         packageConfig, packagesDiscoveryProvider, environment,
         allowMockCompilation: allowMockCompilation,
@@ -415,12 +449,15 @@ class CompilerOptions implements DiagnosticOptions {
         enableNativeLiveTypeAnalysis: enableNativeLiveTypeAnalysis,
         enableTypeAssertions: enableTypeAssertions,
         enableUserAssertions: enableUserAssertions,
-        generateCodeWithCompileTimeErrors: generateCodeWithCompileTimeErrors,
+        experimentalTrackAllocations: experimentalTrackAllocations,
+        experimentalAllocationsPath: experimentalAllocationsPath,
+        generateCodeWithCompileTimeErrors:
+            generateCodeWithCompileTimeErrors && !useKernel,
         generateSourceMap: generateSourceMap,
-        kernelGlobalInference: kernelGlobalInference,
         outputUri: outputUri,
         platformConfigUri: platformConfigUri ??
             _resolvePlatformConfig(libraryRoot, null, const []),
+        platformBinaries: platformBinaries,
         preserveComments: preserveComments,
         preserveUris: preserveUris,
         resolutionInputs: resolutionInputs,
@@ -465,11 +502,13 @@ class CompilerOptions implements DiagnosticOptions {
       this.enableNativeLiveTypeAnalysis: false,
       this.enableTypeAssertions: false,
       this.enableUserAssertions: false,
+      this.experimentalTrackAllocations: false,
+      this.experimentalAllocationsPath: null,
       this.generateCodeWithCompileTimeErrors: false,
       this.generateSourceMap: true,
-      this.kernelGlobalInference: false,
       this.outputUri: null,
       this.platformConfigUri: null,
+      this.platformBinaries: null,
       this.preserveComments: false,
       this.preserveUris: false,
       this.resolutionInputs: null,
@@ -522,11 +561,14 @@ class CompilerOptions implements DiagnosticOptions {
       enableNativeLiveTypeAnalysis,
       enableTypeAssertions,
       enableUserAssertions,
+      experimentalTrackAllocations,
+      experimentalAllocationsPath,
       generateCodeWithCompileTimeErrors,
       generateSourceMap,
       kernelGlobalInference,
       outputUri,
       platformConfigUri,
+      platformBinaries,
       preserveComments,
       preserveUris,
       resolutionInputs,
@@ -584,13 +626,16 @@ class CompilerOptions implements DiagnosticOptions {
             enableTypeAssertions ?? options.enableTypeAssertions,
         enableUserAssertions:
             enableUserAssertions ?? options.enableUserAssertions,
+        experimentalTrackAllocations: experimentalTrackAllocations ??
+            options.experimentalTrackAllocations,
+        experimentalAllocationsPath:
+            experimentalAllocationsPath ?? options.experimentalAllocationsPath,
         generateCodeWithCompileTimeErrors: generateCodeWithCompileTimeErrors ??
             options.generateCodeWithCompileTimeErrors,
         generateSourceMap: generateSourceMap ?? options.generateSourceMap,
-        kernelGlobalInference:
-            kernelGlobalInference ?? options.kernelGlobalInference,
         outputUri: outputUri ?? options.outputUri,
         platformConfigUri: platformConfigUri ?? options.platformConfigUri,
+        platformBinaries: platformBinaries ?? options.platformBinaries,
         preserveComments: preserveComments ?? options.preserveComments,
         preserveUris: preserveUris ?? options.preserveUris,
         resolutionInputs: resolutionInputs ?? options.resolutionInputs,

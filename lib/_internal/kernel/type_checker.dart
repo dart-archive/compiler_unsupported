@@ -16,15 +16,18 @@ import 'type_environment.dart';
 abstract class TypeChecker {
   final CoreTypes coreTypes;
   final ClassHierarchy hierarchy;
+  final bool ignoreSdk;
   TypeEnvironment environment;
 
-  TypeChecker(this.coreTypes, this.hierarchy) {
-    environment = new TypeEnvironment(coreTypes, hierarchy);
+  TypeChecker(this.coreTypes, this.hierarchy,
+      {bool strongMode: false, this.ignoreSdk: true}) {
+    environment =
+        new TypeEnvironment(coreTypes, hierarchy, strongMode: strongMode);
   }
 
   void checkProgram(Program program) {
     for (var library in program.libraries) {
-      if (library.importUri.scheme == 'dart') continue;
+      if (ignoreSdk && library.importUri.scheme == 'dart') continue;
       for (var class_ in library.classes) {
         hierarchy.forEachOverridePair(class_,
             (Member ownMember, Member superMember, bool isSetter) {
@@ -34,7 +37,7 @@ abstract class TypeChecker {
     }
     var visitor = new TypeCheckingVisitor(this, environment);
     for (var library in program.libraries) {
-      if (library.importUri.scheme == 'dart') continue;
+      if (ignoreSdk && library.importUri.scheme == 'dart') continue;
       for (var class_ in library.classes) {
         environment.thisType = class_.thisType;
         for (var field in class_.fields) {
@@ -69,6 +72,7 @@ abstract class TypeChecker {
     return substitution.substituteType(member.setterType, contravariant: true);
   }
 
+  /// Check that [ownMember] of [host] can override [superMember].
   void checkOverride(
       Class host, Member ownMember, Member superMember, bool isSetter) {
     if (isSetter) {
@@ -95,6 +99,12 @@ abstract class TypeChecker {
     return expression;
   }
 
+  /// Check unresolved invocation (one that has no interfaceTarget)
+  /// and report an error if necessary.
+  void checkUnresolvedInvocation(DartType receiver, TreeNode where) {
+    // By default we ignore unresolved method invocations.
+  }
+
   /// Indicates that type checking failed.
   void fail(TreeNode where, String message);
 }
@@ -116,6 +126,10 @@ class TypeCheckingVisitor
 
   void checkAssignable(TreeNode where, DartType from, DartType to) {
     checker.checkAssignable(where, from, to);
+  }
+
+  void checkUnresolvedInvocation(DartType receiver, TreeNode where) {
+    checker.checkUnresolvedInvocation(receiver, where);
   }
 
   Expression checkAndDowncastExpression(Expression from, DartType to) {
@@ -220,7 +234,7 @@ class TypeCheckingVisitor
       return Substitution.empty; // Members on Object are always accessible.
     }
     while (type is TypeParameterType) {
-      type = (type as TypeParameterType).parameter.bound;
+      type = (type as TypeParameterType).bound;
     }
     if (type is BottomType) {
       // The bottom type is a subtype of all types, so it should be allowed.
@@ -248,56 +262,64 @@ class TypeCheckingVisitor
         hierarchy.getClassAsInstanceOf(currentClass, member.enclosingClass));
   }
 
-  DartType handleCall(Arguments arguments, FunctionNode function,
+  DartType handleCall(Arguments arguments, DartType functionType,
       {Substitution receiver: Substitution.empty,
       List<TypeParameter> typeParameters}) {
-    typeParameters ??= function.typeParameters;
-    if (arguments.positional.length < function.requiredParameterCount) {
-      fail(arguments, 'Too few positional arguments');
-      return const BottomType();
-    }
-    if (arguments.positional.length > function.positionalParameters.length) {
-      fail(arguments, 'Too many positional arguments');
-      return const BottomType();
-    }
-    if (arguments.types.length != typeParameters.length) {
-      fail(arguments, 'Wrong number of type arguments');
-      return const BottomType();
-    }
-    var instantiation = Substitution.fromPairs(typeParameters, arguments.types);
-    var substitution = Substitution.combine(receiver, instantiation);
-    for (int i = 0; i < typeParameters.length; ++i) {
-      var argument = arguments.types[i];
-      var bound = substitution.substituteType(typeParameters[i].bound);
-      checkAssignable(arguments, argument, bound);
-    }
-    for (int i = 0; i < arguments.positional.length; ++i) {
-      var expectedType = substitution.substituteType(
-          function.positionalParameters[i].type,
-          contravariant: true);
-      arguments.positional[i] =
-          checkAndDowncastExpression(arguments.positional[i], expectedType);
-    }
-    for (int i = 0; i < arguments.named.length; ++i) {
-      var argument = arguments.named[i];
-      bool found = false;
-      for (int j = 0; j < function.namedParameters.length; ++j) {
-        if (argument.name == function.namedParameters[j].name) {
-          var expectedType = substitution.substituteType(
-              function.namedParameters[j].type,
-              contravariant: true);
-          argument.value =
-              checkAndDowncastExpression(argument.value, expectedType);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        fail(argument.value, 'Unexpected named parameter: ${argument.name}');
+    if (functionType is FunctionType) {
+      typeParameters ??= functionType.typeParameters;
+      if (arguments.positional.length < functionType.requiredParameterCount) {
+        fail(arguments, 'Too few positional arguments');
         return const BottomType();
       }
+      if (arguments.positional.length >
+          functionType.positionalParameters.length) {
+        fail(arguments, 'Too many positional arguments');
+        return const BottomType();
+      }
+      if (arguments.types.length != typeParameters.length) {
+        fail(arguments, 'Wrong number of type arguments');
+        return const BottomType();
+      }
+      var instantiation =
+          Substitution.fromPairs(typeParameters, arguments.types);
+      var substitution = Substitution.combine(receiver, instantiation);
+      for (int i = 0; i < typeParameters.length; ++i) {
+        var argument = arguments.types[i];
+        var bound = substitution.substituteType(typeParameters[i].bound);
+        checkAssignable(arguments, argument, bound);
+      }
+      for (int i = 0; i < arguments.positional.length; ++i) {
+        var expectedType = substitution.substituteType(
+            functionType.positionalParameters[i],
+            contravariant: true);
+        arguments.positional[i] =
+            checkAndDowncastExpression(arguments.positional[i], expectedType);
+      }
+      for (int i = 0; i < arguments.named.length; ++i) {
+        var argument = arguments.named[i];
+        bool found = false;
+        for (int j = 0; j < functionType.namedParameters.length; ++j) {
+          if (argument.name == functionType.namedParameters[j].name) {
+            var expectedType = substitution.substituteType(
+                functionType.namedParameters[j].type,
+                contravariant: true);
+            argument.value =
+                checkAndDowncastExpression(argument.value, expectedType);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          fail(argument.value, 'Unexpected named parameter: ${argument.name}');
+          return const BottomType();
+        }
+      }
+      return substitution.substituteType(functionType.returnType);
+    } else {
+      // Note: attempting to resolve .call() on [functionType] could lead to an
+      // infinite regress, so just assume `dynamic`.
+      return const DynamicType();
     }
-    return substitution.substituteType(function.returnType);
   }
 
   DartType _getInternalReturnType(FunctionNode function) {
@@ -315,7 +337,17 @@ class TypeCheckingVisitor
 
       case AsyncMarker.SyncStar:
       case AsyncMarker.AsyncStar:
+        return null;
+
       case AsyncMarker.SyncYielding:
+        TreeNode parent = function.parent;
+        while (parent is! FunctionNode) {
+          parent = parent.parent;
+        }
+        final enclosingFunction = parent as FunctionNode;
+        if (enclosingFunction.dartAsyncMarker == AsyncMarker.SyncStar) {
+          return coreTypes.boolClass.rawType;
+        }
         return null;
 
       default:
@@ -379,14 +411,14 @@ class TypeCheckingVisitor
     Constructor target = node.target;
     Arguments arguments = node.arguments;
     Class class_ = target.enclosingClass;
-    handleCall(arguments, target.function,
+    handleCall(arguments, target.function.functionType,
         typeParameters: class_.typeParameters);
     return new InterfaceType(target.enclosingClass, arguments.types);
   }
 
   @override
   DartType visitDirectMethodInvocation(DirectMethodInvocation node) {
-    return handleCall(node.arguments, node.target.function,
+    return handleCall(node.arguments, node.target.getterType,
         receiver: getReceiverType(node, node.receiver, node.target));
   }
 
@@ -497,19 +529,13 @@ class TypeCheckingVisitor
     }
     for (int i = 0; i < arguments.named.length; ++i) {
       var argument = arguments.named[i];
-      bool found = false;
-      for (int j = 0; j < function.namedParameters.length; ++j) {
-        if (argument.name == function.namedParameters[j].name) {
-          var expectedType = instantiation.substituteType(
-              function.namedParameters[j].type,
-              contravariant: true);
-          argument.value =
-              checkAndDowncastExpression(argument.value, expectedType);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
+      var parameterType = function.getNamedParameter(argument.name);
+      if (parameterType != null) {
+        var expectedType =
+            instantiation.substituteType(parameterType, contravariant: true);
+        argument.value =
+            checkAndDowncastExpression(argument.value, expectedType);
+      } else {
         fail(argument.value, 'Unexpected named parameter: ${argument.name}');
         return const BottomType();
       }
@@ -529,14 +555,16 @@ class TypeCheckingVisitor
       if (node.name.name == 'call' && receiver is FunctionType) {
         return handleFunctionCall(node, receiver, node.arguments);
       }
+      checkUnresolvedInvocation(receiver, node);
       return handleDynamicCall(receiver, node.arguments);
-    } else if (environment.isOverloadedArithmeticOperator(target)) {
+    } else if (target is Procedure &&
+        environment.isOverloadedArithmeticOperator(target)) {
       assert(node.arguments.positional.length == 1);
       var receiver = visitExpression(node.receiver);
       var argument = visitExpression(node.arguments.positional[0]);
       return environment.getTypeOfOverloadedArithmetic(receiver, argument);
     } else {
-      return handleCall(node.arguments, target.function,
+      return handleCall(node.arguments, target.getterType,
           receiver: getReceiverType(node, node.receiver, node.interfaceTarget));
     }
   }
@@ -544,7 +572,8 @@ class TypeCheckingVisitor
   @override
   DartType visitPropertyGet(PropertyGet node) {
     if (node.interfaceTarget == null) {
-      visitExpression(node.receiver);
+      final receiver = visitExpression(node.receiver);
+      checkUnresolvedInvocation(receiver, node);
       return const DynamicType();
     } else {
       var receiver = getReceiverType(node, node.receiver, node.interfaceTarget);
@@ -563,7 +592,8 @@ class TypeCheckingVisitor
           receiver.substituteType(node.interfaceTarget.setterType,
               contravariant: true));
     } else {
-      visitExpression(node.receiver);
+      final receiver = visitExpression(node.receiver);
+      checkUnresolvedInvocation(receiver, node);
     }
     return value;
   }
@@ -591,7 +621,7 @@ class TypeCheckingVisitor
 
   @override
   DartType visitStaticInvocation(StaticInvocation node) {
-    return handleCall(node.arguments, node.target.function);
+    return handleCall(node.arguments, node.target.getterType);
   }
 
   @override
@@ -615,9 +645,10 @@ class TypeCheckingVisitor
   @override
   DartType visitSuperMethodInvocation(SuperMethodInvocation node) {
     if (node.interfaceTarget == null) {
+      checkUnresolvedInvocation(environment.thisType, node);
       return handleDynamicCall(environment.thisType, node.arguments);
     } else {
-      return handleCall(node.arguments, node.interfaceTarget.function,
+      return handleCall(node.arguments, node.interfaceTarget.getterType,
           receiver: getSuperReceiverType(node.interfaceTarget));
     }
   }
@@ -625,6 +656,7 @@ class TypeCheckingVisitor
   @override
   DartType visitSuperPropertyGet(SuperPropertyGet node) {
     if (node.interfaceTarget == null) {
+      checkUnresolvedInvocation(environment.thisType, node);
       return const DynamicType();
     } else {
       var receiver = getSuperReceiverType(node.interfaceTarget);
@@ -642,6 +674,8 @@ class TypeCheckingVisitor
           value,
           receiver.substituteType(node.interfaceTarget.setterType,
               contravariant: true));
+    } else {
+      checkUnresolvedInvocation(environment.thisType, node);
     }
     return value;
   }
@@ -690,6 +724,11 @@ class TypeCheckingVisitor
   }
 
   @override
+  DartType visitVectorCreation(VectorCreation node) {
+    return const VectorType();
+  }
+
+  @override
   DartType visitVectorGet(VectorGet node) {
     var type = visitExpression(node.vectorExpression);
     if (type is! VectorType) {
@@ -726,8 +765,15 @@ class TypeCheckingVisitor
   }
 
   @override
-  DartType visitVectorCreation(VectorCreation node) {
-    return const VectorType();
+  visitClosureCreation(ClosureCreation node) {
+    var contextType = visitExpression(node.contextVector);
+    if (contextType is! VectorType) {
+      fail(
+          node.contextVector,
+          "The second child of 'ClosureConversion' node is supposed to be a "
+          "Vector, but $contextType found.");
+    }
+    return node.functionType;
   }
 
   @override
@@ -931,13 +977,13 @@ class TypeCheckingVisitor
 
   @override
   visitRedirectingInitializer(RedirectingInitializer node) {
-    handleCall(node.arguments, node.target.function,
+    handleCall(node.arguments, node.target.getterType,
         typeParameters: const <TypeParameter>[]);
   }
 
   @override
   visitSuperInitializer(SuperInitializer node) {
-    handleCall(node.arguments, node.target.function,
+    handleCall(node.arguments, node.target.getterType,
         typeParameters: const <TypeParameter>[],
         receiver: getSuperReceiverType(node.target));
   }

@@ -7,7 +7,9 @@ library fasta.kernel_type_variable_builder;
 import 'package:compiler_unsupported/_internal/kernel/ast.dart'
     show DartType, TypeParameter, TypeParameterType;
 
-import '../errors.dart' show inputError;
+import '../deprecated_problems.dart' show deprecated_inputError;
+
+import '../fasta_codes.dart' show templateTypeArgumentsOnTypeVariable;
 
 import 'kernel_builder.dart'
     show
@@ -20,30 +22,41 @@ import 'kernel_builder.dart'
 
 class KernelTypeVariableBuilder
     extends TypeVariableBuilder<KernelTypeBuilder, DartType> {
-  final TypeParameter parameter;
+  final TypeParameter actualParameter;
+
+  KernelTypeVariableBuilder actualOrigin;
 
   KernelTypeVariableBuilder(
       String name, KernelLibraryBuilder compilationUnit, int charOffset,
       [KernelTypeBuilder bound])
-      : parameter = new TypeParameter(name, null),
+      : actualParameter = new TypeParameter(name, null)
+          ..fileOffset = charOffset,
         super(name, bound, compilationUnit, charOffset);
+
+  @override
+  KernelTypeVariableBuilder get origin => actualOrigin ?? this;
+
+  TypeParameter get parameter => origin.actualParameter;
 
   TypeParameter get target => parameter;
 
   DartType buildType(
       LibraryBuilder library, List<KernelTypeBuilder> arguments) {
     if (arguments != null) {
-      return inputError(null, null,
-          "Can't use type arguments with type parameter $parameter");
-    } else {
-      return new TypeParameterType(parameter);
+      int charOffset = -1; // TODO(ahe): Provide these.
+      Uri fileUri = null; // TODO(ahe): Provide these.
+      library.addWarning(
+          templateTypeArgumentsOnTypeVariable.withArguments(name),
+          charOffset,
+          fileUri);
     }
+    return new TypeParameterType(parameter);
   }
 
   DartType buildTypesWithBuiltArguments(
       LibraryBuilder library, List<DartType> arguments) {
     if (arguments != null) {
-      return inputError(null, null,
+      return deprecated_inputError(null, null,
           "Can't use type arguments with type parameter $parameter");
     } else {
       return buildType(library, null);
@@ -51,10 +64,16 @@ class KernelTypeVariableBuilder
   }
 
   KernelTypeBuilder asTypeBuilder() {
-    return new KernelNamedTypeBuilder(name, null, -1, null)..builder = this;
+    return new KernelNamedTypeBuilder(name, null)..bind(this);
   }
 
   void finish(LibraryBuilder library, KernelClassBuilder object) {
-    parameter.bound = bound?.build(library) ?? object.buildType(library, null);
+    if (isPatch) return;
+    parameter.bound ??=
+        bound?.build(library) ?? object.buildType(library, null);
+  }
+
+  void applyPatch(covariant KernelTypeVariableBuilder patch) {
+    patch.actualOrigin = this;
   }
 }

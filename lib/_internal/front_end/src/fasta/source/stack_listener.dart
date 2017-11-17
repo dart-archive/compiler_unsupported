@@ -4,34 +4,46 @@
 
 library fasta.stack_listener;
 
-import '../fasta_codes.dart' show FastaMessage;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart' show AsyncMarker, Expression;
 
-import '../parser.dart' show Listener;
+import '../deprecated_problems.dart' show deprecated_inputError;
 
-import '../parser/identifier_context.dart' show IdentifierContext;
-
-import '../scanner.dart' show BeginGroupToken, Token;
-
-import 'package:compiler_unsupported/_internal/kernel/ast.dart' show AsyncMarker;
-
-import '../errors.dart' show inputError, internalError;
-
-import '../quote.dart' show unescapeString;
+import '../fasta_codes.dart'
+    show
+        Message,
+        messageNativeClauseShouldBeAnnotation,
+        templateInternalProblemStackNotEmpty;
 
 import '../messages.dart' as messages;
 
+import '../parser.dart' show Listener, MemberKind;
+
+import '../parser/identifier_context.dart' show IdentifierContext;
+
+import '../problems.dart'
+    show internalProblem, unhandled, unimplemented, unsupported;
+
+import '../quote.dart' show unescapeString;
+
+import '../scanner.dart' show Token;
+
 enum NullValue {
   Arguments,
+  As,
   Block,
   BreakTarget,
   CascadeReceiver,
   Combinators,
   Comments,
   ConditionalUris,
+  ConstructorInitializerSeparator,
   ConstructorInitializers,
   ConstructorReferenceContinuationAfterTypeArguments,
   ContinueTarget,
+  Deferred,
+  DocumentationComment,
   Expression,
+  ExtendsClause,
   FieldInitializer,
   FormalParameters,
   FunctionBody,
@@ -43,12 +55,16 @@ enum NullValue {
   Metadata,
   Modifiers,
   ParameterDefaultValue,
+  Prefix,
+  StringLiteral,
   SwitchScope,
   Type,
   TypeArguments,
+  TypeBuilderList,
   TypeList,
   TypeVariable,
   TypeVariables,
+  WithClause,
 }
 
 abstract class StackListener extends Listener {
@@ -59,35 +75,49 @@ abstract class StackListener extends Listener {
 
   // TODO(ahe): This doesn't belong here. Only implemented by body_builder.dart
   // and ast_builder.dart.
-  void finishFunction(
-      covariant formals, AsyncMarker asyncModifier, covariant body) {
-    return internalError("Unsupported operation");
+  void finishFunction(List annotations, covariant formals,
+      AsyncMarker asyncModifier, covariant body) {
+    return unsupported("finishFunction", -1, uri);
   }
 
   // TODO(ahe): This doesn't belong here. Only implemented by body_builder.dart
   // and ast_builder.dart.
-  void exitLocalScope() => internalError("Unsupported operation");
+  dynamic finishFields() {
+    return unsupported("finishFields", -1, uri);
+  }
 
   // TODO(ahe): This doesn't belong here. Only implemented by body_builder.dart
   // and ast_builder.dart.
-  void prepareInitializers() => internalError("Unsupported operation");
+  List<Expression> finishMetadata() {
+    return unsupported("finishMetadata", -1, uri);
+  }
+
+  // TODO(ahe): This doesn't belong here. Only implemented by body_builder.dart
+  // and ast_builder.dart.
+  void exitLocalScope() => unsupported("exitLocalScope", -1, uri);
 
   void push(Object node) {
-    if (node == null) internalError("null not allowed.");
+    if (node == null) unhandled("null", "push", -1, uri);
     stack.push(node);
+  }
+
+  void pushIfNull(Token tokenOrNull, NullValue nullValue) {
+    if (tokenOrNull == null) stack.push(nullValue);
   }
 
   Object peek() => stack.last;
 
-  Object pop() => stack.pop();
+  Object pop([NullValue nullValue]) {
+    return stack.pop(nullValue);
+  }
 
   Object popIfNotNull(Object value) {
     return value == null ? null : pop();
   }
 
-  List popList(int n) {
+  List popList(int n, [List list]) {
     if (n == 0) return null;
-    return stack.popList(n);
+    return stack.popList(n, list);
   }
 
   void debugEvent(String name) {
@@ -104,12 +134,13 @@ abstract class StackListener extends Listener {
       print(s);
     }
     print(name);
+    print('------------------\n');
   }
 
   @override
   void logEvent(String name) {
-    internalError("Unhandled event: $name in $runtimeType $uri:\n"
-        "  ${stack.values.join('\n  ')}");
+    printEvent(name);
+    unhandled(name, "$runtimeType", -1, uri);
   }
 
   @override
@@ -131,15 +162,16 @@ abstract class StackListener extends Listener {
 
   void checkEmpty(int charOffset) {
     if (stack.isNotEmpty) {
-      internalError(
-          "${runtimeType}: Stack not empty:\n"
-          "  ${stack.values.join('\n  ')}",
-          uri,
-          charOffset);
+      internalProblem(
+          templateInternalProblemStackNotEmpty.withArguments(
+              "${runtimeType}", stack.values.join("\n  ")),
+          charOffset,
+          uri);
     }
     if (recoverableErrors.isNotEmpty) {
       // TODO(ahe): Handle recoverable errors better.
-      inputError(uri, recoverableErrors.first.beginOffset, recoverableErrors);
+      deprecated_inputError(
+          uri, recoverableErrors.first.beginOffset, recoverableErrors);
     }
   }
 
@@ -153,6 +185,26 @@ abstract class StackListener extends Listener {
   void endCompilationUnit(int count, Token token) {
     debugEvent("CompilationUnit");
     checkEmpty(token.charOffset);
+  }
+
+  @override
+  void handleClassExtends(Token extendsKeyword) {
+    debugEvent("ClassExtends");
+  }
+
+  @override
+  void handleClassHeader(Token begin, Token classKeyword, Token nativeToken) {
+    debugEvent("ClassHeader");
+  }
+
+  @override
+  void handleRecoverClassHeader() {
+    debugEvent("RecoverClassHeader");
+  }
+
+  @override
+  void handleClassImplements(Token implementsKeyword, int interfacesCount) {
+    debugEvent("ClassImplements");
   }
 
   @override
@@ -179,7 +231,7 @@ abstract class StackListener extends Listener {
   }
 
   @override
-  void handleNoFormalParameters(Token token) {
+  void handleNoFormalParameters(Token token, MemberKind kind) {
     debugEvent("NoFormalParameters");
     push(NullValue.FormalParameters);
   }
@@ -188,6 +240,22 @@ abstract class StackListener extends Listener {
   void handleNoArguments(Token token) {
     debugEvent("NoArguments");
     push(NullValue.Arguments);
+  }
+
+  @override
+  void handleNativeFunctionBody(Token nativeToken, Token semicolon) {
+    debugEvent("NativeFunctionBody");
+    push(NullValue.FunctionBody);
+  }
+
+  @override
+  void handleNativeFunctionBodyIgnored(Token nativeToken, Token semicolon) {
+    debugEvent("NativeFunctionBodyIgnored");
+  }
+
+  @override
+  void handleNativeFunctionBodySkipped(Token nativeToken, Token semicolon) {
+    debugEvent("NativeFunctionBodySkipped");
   }
 
   @override
@@ -203,7 +271,7 @@ abstract class StackListener extends Listener {
   }
 
   @override
-  void handleParenthesizedExpression(BeginGroupToken token) {
+  void handleParenthesizedExpression(Token token) {
     debugEvent("ParenthesizedExpression");
   }
 
@@ -220,7 +288,15 @@ abstract class StackListener extends Listener {
       Token token = pop();
       push(unescapeString(token.lexeme));
     } else {
-      internalError("String interpolation not implemented.");
+      unimplemented("string interpolation", endToken.charOffset, uri);
+    }
+  }
+
+  @override
+  void handleNativeClause(Token nativeToken, bool hasName) {
+    debugEvent("NativeClause");
+    if (hasName) {
+      pop(); // Pop the native name which is a String.
     }
   }
 
@@ -231,8 +307,18 @@ abstract class StackListener extends Listener {
   }
 
   @override
-  void handleRecoverExpression(Token token) {
+  void handleRecoverExpression(Token token, Message message) {
     debugEvent("RecoverExpression");
+  }
+
+  void handleExtraneousExpression(Token token, Message message) {
+    debugEvent("ExtraneousExpression");
+    pop(); // Discard the extraneous expression.
+  }
+
+  @override
+  void endCaseExpression(Token colon) {
+    debugEvent("CaseExpression");
   }
 
   @override
@@ -241,22 +327,30 @@ abstract class StackListener extends Listener {
   }
 
   @override
-  void handleRecoverableError(Token token, FastaMessage message) {
+  void handleRecoverableError(
+      Message message, Token startToken, Token endToken) {
+    /// TODO(danrubel): Ignore this error until we deprecate `native` support.
+    if (message == messageNativeClauseShouldBeAnnotation) {
+      return;
+    }
     debugEvent("Error: ${message.message}");
-    super.handleRecoverableError(token, message);
+    int offset = startToken.offset;
+    addCompileTimeError(message, offset, endToken.end - offset);
   }
+
+  void addCompileTimeError(Message message, int offset, int length);
 
   @override
-  Token handleUnrecoverableError(Token token, FastaMessage message) {
-    throw inputError(uri, token.charOffset, message.message);
+  Token handleUnrecoverableError(Token token, Message message) {
+    throw deprecated_inputError(uri, token.charOffset, message.message);
   }
 
-  void nit(String message, [int charOffset = -1]) {
-    messages.nit(uri, charOffset, message);
+  void nit(Message message, int charOffset) {
+    messages.nit(message, charOffset, uri);
   }
 
-  void warning(String message, [int charOffset = -1]) {
-    messages.warning(uri, charOffset, message);
+  void warning(Message message, int offset, int length) {
+    messages.warning(message, offset, uri);
   }
 }
 
@@ -280,20 +374,26 @@ class Stack {
     }
   }
 
-  Object pop() {
+  Object pop([NullValue nullValue]) {
     assert(arrayLength > 0);
     final Object value = array[--arrayLength];
     array[arrayLength] = null;
-    return value is NullValue ? null : value;
+    if (value is! NullValue) {
+      return value;
+    } else if (nullValue == null || value == nullValue) {
+      return null;
+    } else {
+      return value;
+    }
   }
 
-  List popList(int count) {
+  List popList(int count, List list) {
     assert(arrayLength >= count);
 
     final table = array;
     final length = arrayLength;
 
-    final tailList = new List.filled(count, null, growable: true);
+    final tailList = list ?? new List.filled(count, null, growable: true);
     final startIndex = length - count;
     for (int i = 0; i < count; i++) {
       final value = table[startIndex + i];

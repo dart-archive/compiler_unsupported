@@ -27,6 +27,7 @@ import 'elements/elements.dart'
         LibraryElement,
         MetadataAnnotation,
         ScopeContainerElement;
+import 'elements/entities.dart';
 import 'resolution/tree_elements.dart' show TreeElements;
 import 'tree/tree.dart' show NamedArgument, NewExpression, Node;
 
@@ -91,8 +92,9 @@ class MirrorUsageAnalyzerTask extends CompilerTask {
 
   /// Collect @MirrorsUsed annotations in all libraries.  Called by the
   /// compiler after all libraries are loaded, but before resolution.
-  void analyzeUsage(LibraryElement mainApp) {
-    if (mainApp == null || compiler.commonElements.mirrorsLibrary == null) {
+  void analyzeUsage(LibraryEntity mainApp) {
+    if (mainApp == null ||
+        compiler.resolution.commonElements.mirrorsLibrary == null) {
       return;
     }
     measure(analyzer.run);
@@ -244,7 +246,7 @@ class MirrorUsageAnalyzer {
   List<MirrorUsage> mirrorsUsedOnLibraryTag(
       LibraryElement library, ImportElement import) {
     LibraryElement importedLibrary = import.importedLibrary;
-    if (importedLibrary != compiler.commonElements.mirrorsLibrary) {
+    if (importedLibrary != compiler.resolution.commonElements.mirrorsLibrary) {
       return null;
     }
     List<MirrorUsage> result = <MirrorUsage>[];
@@ -252,9 +254,10 @@ class MirrorUsageAnalyzer {
       metadata.ensureResolved(compiler.resolution);
       ConstantValue value =
           compiler.constants.getConstantValue(metadata.constant);
-      ResolutionDartType type = value.getType(compiler.commonElements);
+      ResolutionDartType type =
+          value.getType(compiler.resolution.commonElements);
       Element element = type.element;
-      if (element == compiler.commonElements.mirrorsUsedClass) {
+      if (element == compiler.resolution.commonElements.mirrorsUsedClass) {
         result.add(buildUsage(value));
       }
     }
@@ -317,7 +320,7 @@ class MirrorUsageAnalyzer {
   /// that was resolved during [MirrorUsageAnalyzerTask.validate].
   MirrorUsage buildUsage(ConstructedConstantValue constant) {
     Map<FieldElement, ConstantValue> fields = constant.fields;
-    ClassElement cls = compiler.commonElements.mirrorsUsedClass;
+    ClassElement cls = compiler.resolution.commonElements.mirrorsUsedClass;
     FieldElement symbolsField = cls.lookupLocalMember('symbols');
     FieldElement targetsField = cls.lookupLocalMember('targets');
     FieldElement metaTargetsField = cls.lookupLocalMember('metaTargets');
@@ -382,7 +385,7 @@ class MirrorUsageBuilder {
       for (ConstantValue entry in list.entries) {
         if (entry.isString) {
           StringConstantValue string = entry;
-          result.add(string.primitiveValue.slowToString());
+          result.add(string.primitiveValue);
         } else if (!onlyStrings && entry.isType) {
           TypeConstantValue type = entry;
           result.add(type.representedType);
@@ -401,8 +404,7 @@ class MirrorUsageBuilder {
       return [type.representedType];
     } else if (constant.isString) {
       StringConstantValue string = constant;
-      var iterable =
-          string.primitiveValue.slowToString().split(',').map((e) => e.trim());
+      var iterable = string.primitiveValue.split(',').map((e) => e.trim());
       return onlyStrings ? new List<String>.from(iterable) : iterable.toList();
     } else {
       Spannable node = positionOf(constant);
@@ -417,13 +419,14 @@ class MirrorUsageBuilder {
 
   /// Find the first non-implementation interface of constant.
   ResolutionDartType apiTypeOf(ConstantValue constant) {
-    ResolutionDartType type = constant.getType(compiler.commonElements);
+    ResolutionDartType type =
+        constant.getType(compiler.resolution.commonElements);
     LibraryElement library = type.element.library;
     if (type.isInterfaceType && library.isInternalLibrary) {
       ResolutionInterfaceType interface = type;
       ClassElement cls = type.element;
       cls.ensureResolved(compiler.resolution);
-      for (ResolutionDartType supertype in cls.allSupertypes) {
+      for (ResolutionInterfaceType supertype in cls.allSupertypes) {
         if (supertype.isInterfaceType &&
             !supertype.element.library.isInternalLibrary) {
           return interface.asInstanceOf(supertype.element);
@@ -452,32 +455,32 @@ class MirrorUsageBuilder {
         result.add(type.element);
       } else {
         String string = entry;
-        LibraryElement libraryCandiate;
-        String libraryNameCandiate;
+        LibraryElement libraryCandidate;
+        String libraryNameCandidate;
         for (LibraryElement l in compiler.libraryLoader.libraries) {
           if (l.hasLibraryName) {
             String libraryName = l.libraryName;
             if (string == libraryName) {
               // Found an exact match.
-              libraryCandiate = l;
-              libraryNameCandiate = libraryName;
+              libraryCandidate = l;
+              libraryNameCandidate = libraryName;
               break;
             } else if (string.startsWith('$libraryName.')) {
-              if (libraryNameCandiate == null ||
-                  libraryNameCandiate.length < libraryName.length) {
-                // Found a better candiate
-                libraryCandiate = l;
-                libraryNameCandiate = libraryName;
+              if (libraryNameCandidate == null ||
+                  libraryNameCandidate.length < libraryName.length) {
+                // Found a better candidate
+                libraryCandidate = l;
+                libraryNameCandidate = libraryName;
               }
             }
           }
         }
         Element e;
-        if (libraryNameCandiate == string) {
-          e = libraryCandiate;
-        } else if (libraryNameCandiate != null) {
-          e = resolveLocalExpression(libraryCandiate,
-              string.substring(libraryNameCandiate.length + 1).split('.'));
+        if (libraryNameCandidate == string) {
+          e = libraryCandidate;
+        } else if (libraryNameCandidate != null) {
+          e = resolveLocalExpression(libraryCandidate,
+              string.substring(libraryNameCandidate.length + 1).split('.'));
         } else {
           e = resolveExpression(string);
         }

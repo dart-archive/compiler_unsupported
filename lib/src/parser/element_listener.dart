@@ -4,7 +4,7 @@
 
 library dart2js.parser.element_listener;
 
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/fasta_codes.dart' show FastaMessage;
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/fasta_codes.dart' show Message;
 
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/fasta_codes.dart' as codes;
 
@@ -27,16 +27,15 @@ import '../id_generator.dart';
 import '../native/native.dart' as native;
 import '../string_validator.dart' show StringValidator;
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart'
-    show Keyword, BeginGroupToken, ErrorToken, KeywordToken, StringToken, Token;
+    show ErrorToken, StringToken, Token;
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart' as Tokens show EOF_TOKEN;
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner/precedence.dart' as Precedence
-    show IDENTIFIER_INFO;
 import '../tree/tree.dart';
 import '../util/util.dart' show Link, LinkBuilder;
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/parser.dart'
     show Listener, ParserError, optional;
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/parser/identifier_context.dart'
     show IdentifierContext;
+import 'package:compiler_unsupported/_internal/front_end/src/scanner/token.dart' show KeywordToken, TokenType;
 import 'partial_elements.dart'
     show
         PartialClassElement,
@@ -98,6 +97,8 @@ class ElementListener extends Listener {
   /// [handleInvalidFunctionBody] which is called immediately after.
   bool lastErrorWasNativeFunctionBody = false;
 
+  LiteralString nativeName;
+
   ElementListener(this.scannerOptions, DiagnosticReporter reporter,
       this.compilationUnitElement, this.idGenerator)
       : this.reporter = reporter,
@@ -148,14 +149,21 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endImport(Token importKeyword, Token deferredKeyword, Token asKeyword,
-      Token semicolon) {
-    NodeList combinators = popNode();
-    bool isDeferred = deferredKeyword != null;
-    Identifier prefix;
-    if (asKeyword != null) {
-      prefix = popNode();
+  void handleImportPrefix(Token deferredKeyword, Token asKeyword) {
+    if (asKeyword == null) {
+      // If asKeyword is null, then no prefix has been pushed on the stack.
+      // Push a placeholder indicating that there is no prefix.
+      pushNode(null);
     }
+    pushNode(deferredKeyword != null ? Flag.TRUE : Flag.FALSE);
+  }
+
+  @override
+  void endImport(Token importKeyword, Token semicolon) {
+    NodeList combinators = popNode();
+    Flag flag = popNode();
+    bool isDeferred = flag == Flag.TRUE;
+    Identifier prefix = popNode();
     NodeList conditionalUris = popNode();
     StringNode uri = popLiteralString();
     addLibraryTag(new Import(importKeyword, uri, conditionalUris, prefix,
@@ -164,7 +172,16 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endDottedName(int count, Token token) {
+  void handleRecoverImport(Token semicolon) {
+    popNode(); // combinators
+    popNode(); // isDeferred
+    popNode(); // prefix
+    popNode(); // conditionalUris
+    // TODO(danrubel): recover
+  }
+
+  @override
+  void handleDottedName(int count, Token token) {
     NodeList identifiers = makeNodeList(count, null, null, '.');
     pushNode(new DottedName(token, identifiers));
   }
@@ -179,7 +196,7 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endConditionalUri(Token ifToken, Token equalSign) {
+  void endConditionalUri(Token ifToken, Token leftParen, Token equalSign) {
     StringNode uri = popNode();
     LiteralString conditionValue = (equalSign != null) ? popNode() : null;
     DottedName identifier = popNode();
@@ -187,8 +204,8 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endEnum(Token enumKeyword, Token endBrace, int count) {
-    NodeList names = makeNodeList(count, enumKeyword.next.next, endBrace, ",");
+  void endEnum(Token enumKeyword, Token leftBrace, int count) {
+    NodeList names = makeNodeList(count, leftBrace, leftBrace?.endGroup, ",");
     Identifier name = popNode();
 
     int id = idGenerator.getNextFreeId();
@@ -228,7 +245,7 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endIdentifierList(int count) {
+  void handleIdentifierList(int count) {
     pushNode(makeNodeList(count, null, null, ","));
   }
 
@@ -245,7 +262,8 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endPartOf(Token partKeyword, Token semicolon, bool hasName) {
+  void endPartOf(
+      Token partKeyword, Token ofKeyword, Token semicolon, bool hasName) {
     Expression name = popNode();
     addPartOfTag(
         new PartOf(partKeyword, name, popMetadata(compilationUnitElement)));
@@ -280,14 +298,20 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endClassDeclaration(
-      int interfacesCount,
-      Token beginToken,
-      Token classKeyword,
-      Token extendsKeyword,
-      Token implementsKeyword,
-      Token endToken) {
+  void handleNativeFunctionBody(Token nativeToken, Token semicolon) {}
+
+  @override
+  void handleClassImplements(Token implementsKeyword, int interfacesCount) {
     makeNodeList(interfacesCount, implementsKeyword, null, ","); // interfaces
+  }
+
+  @override
+  void handleRecoverClassHeader() {
+    popNode(); // superType
+  }
+
+  @override
+  void endClassDeclaration(Token beginToken, Token endToken) {
     popNode(); // superType
     popNode(); // typeParameters
     Identifier name = popNode();
@@ -300,9 +324,9 @@ class ElementListener extends Listener {
 
   void rejectBuiltInIdentifier(Identifier name) {
     if (name.token is KeywordToken) {
-      Keyword keyword = (name.token as KeywordToken).keyword;
-      if (!keyword.isPseudo) {
-        recoverableError(name, "Illegal name '${keyword.syntax}'.");
+      TokenType type = name.token.type;
+      if (!type.isPseudo) {
+        recoverableError(name, "Illegal name '${type.lexeme}'.");
       }
     }
   }
@@ -414,6 +438,9 @@ class ElementListener extends Listener {
 
   @override
   void handleIdentifier(Token token, IdentifierContext context) {
+    if (context == IdentifierContext.enumValueDeclaration) {
+      metadata.clear();
+    }
     pushNode(new Identifier(token));
   }
 
@@ -479,14 +506,14 @@ class ElementListener extends Listener {
   }
 
   @override
-  void handleFunctionType(Token functionToken, Token endToken) {
-    popNode(); // Type parameters.
+  void endFunctionType(Token functionToken, Token endToken) {
     popNode(); // Return type.
+    popNode(); // Type parameters.
     pushNode(null);
   }
 
   @override
-  void handleParenthesizedExpression(BeginGroupToken token) {
+  void handleParenthesizedExpression(Token token) {
     Expression expression = popNode();
     pushNode(new ParenthesizedExpression(expression, token));
   }
@@ -507,7 +534,7 @@ class ElementListener extends Listener {
   }
 
   @override
-  Token handleUnrecoverableError(Token token, FastaMessage message) {
+  Token handleUnrecoverableError(Token token, Message message) {
     Token next = handleError(token, message);
     if (next == null &&
         message.code != codes.codeUnterminatedComment &&
@@ -519,8 +546,13 @@ class ElementListener extends Listener {
   }
 
   @override
-  void handleRecoverableError(Token token, FastaMessage message) {
-    handleError(token, message);
+  void handleRecoverableError(
+      Message message, Token startToken, Token endToken) {
+    if (message == codes.messageNativeClauseShouldBeAnnotation) {
+      native.checkAllowedLibrary(this, startToken);
+      return;
+    }
+    handleError(startToken, message);
   }
 
   @override
@@ -538,13 +570,15 @@ class ElementListener extends Listener {
     pushNode(null);
   }
 
-  Token handleError(Token token, FastaMessage message) {
+  Token handleError(Token token, Message message) {
     MessageKind errorCode;
     Map<String, dynamic> arguments = message.arguments;
 
     switch (message.code.dart2jsCode) {
       case "MISSING_TOKEN_BEFORE_THIS":
         String expected = arguments["string"];
+        // TODO(danrubel): This functionality is being replaced by
+        // the parser's ensureSemicolon method.
         if (identical(";", expected)) {
           // When a semicolon is missing, it often leads to an error on the
           // following line. So we try to find the token preceding the semicolon
@@ -581,10 +615,6 @@ class ElementListener extends Listener {
               "Expected identifier, but got '${token.lexeme}'.");
         }
         return newSyntheticToken(token);
-
-      case "FASTA_FATAL":
-        reportFatalError(reporter.spanFromToken(token), message.message);
-        return null;
 
       case "NATIVE_OR_BODY_EXPECTED":
         if (optional("native", token)) {
@@ -705,8 +735,20 @@ class ElementListener extends Listener {
         errorCode = MessageKind.UNTERMINATED_TOKEN;
         break;
 
-      case "FASTA_IGNORED":
-        return null; // Ignored. This error is already implemented elsewhere.
+      case "*fatal*":
+        // This is an error that Fasta can recover from, but dart2js can't.
+        reportFatalError(reporter.spanFromToken(token), message.message);
+        return null;
+
+      case "*ignored*":
+        // This is an error that Fasta reports as a recoverable error during
+        // parsing. For historical reasons, dart2js implements this in a later
+        // phase already, so we just ignore it. Another possibilty is that we
+        // wan't to avoid introducing a breaking change to dart2js.
+        return null;
+
+      default:
+        throw "Unexpected message code: ${message.code}";
     }
     SourceSpan span = reporter.spanFromToken(token);
     reportError(span, errorCode, arguments);
@@ -773,8 +815,8 @@ class ElementListener extends Listener {
   /// Finds the preceding token via the begin token of the last AST node pushed
   /// on the [nodes] stack.
   Token synthesizeIdentifier(Token token) {
-    Token synthesizedToken = new StringToken.fromString(
-        Precedence.IDENTIFIER_INFO, '?', token.charOffset);
+    Token synthesizedToken =
+        new StringToken.fromString(TokenType.IDENTIFIER, '?', token.charOffset);
     synthesizedToken.next = token.next;
     return synthesizedToken;
   }
@@ -785,8 +827,8 @@ class ElementListener extends Listener {
   }
 
   void pushElement(ElementX element) {
-    assert(invariant(element, element.declarationSite != null,
-        message: 'Missing declaration site for $element.'));
+    assert(element.declarationSite != null,
+        failedAt(element, 'Missing declaration site for $element.'));
     popMetadata(element);
     compilationUnitElement.addMember(element, reporter);
   }
@@ -857,14 +899,14 @@ class ElementListener extends Listener {
   }
 
   @override
-  void endLiteralString(int count, Token endToken) {
+  void endLiteralString(int interpolationCount, Token endToken) {
     StringQuoting quoting = popQuoting();
 
     Link<StringInterpolationPart> parts = const Link<StringInterpolationPart>();
     // Parts of the string interpolation are popped in reverse order,
     // starting with the last literal string part.
     bool isLast = true;
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < interpolationCount; i++) {
       LiteralString string = popNode();
       DartString validation = stringValidator.validateInterpolationPart(
           string.token, quoting,
@@ -887,6 +929,15 @@ class ElementListener extends Listener {
     } else {
       NodeList partNodes = new NodeList(null, parts, null, "");
       pushNode(new StringInterpolation(string, partNodes));
+    }
+  }
+
+  @override
+  void handleNativeClause(Token nativeToken, bool hasName) {
+    if (hasName) {
+      nativeName = popNode(); // LiteralString
+    } else {
+      nativeName = null;
     }
   }
 
@@ -924,8 +975,8 @@ class ElementListener extends Listener {
     reportError(spannable, MessageKind.GENERIC, {'text': message});
     // Some parse errors are infeasible to recover from, so we throw an error.
     SourceSpan span = reporter.spanFromSpannable(spannable);
-    throw new ParserError(span.begin, span.end,
-        codes.codeUnspecified.format(uri, span.begin, message));
+    throw new ParserError(
+        span.begin, span.end, codes.templateUnspecified.withArguments(message));
   }
 
   void reportError(Spannable spannable, MessageKind errorCode,

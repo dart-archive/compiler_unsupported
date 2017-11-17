@@ -20,8 +20,9 @@ import '../closure.dart' show BoxFieldElement;
 import '../common.dart';
 import '../constants/values.dart';
 import '../elements/types.dart';
-import '../elements/elements.dart' show ConstructorBodyElement, Element;
+import '../elements/elements.dart' show Element;
 import '../elements/entities.dart';
+import '../js_model/closure.dart';
 import '../util/util.dart' show Hashing;
 import '../world.dart' show World;
 import 'call_structure.dart' show CallStructure;
@@ -77,6 +78,7 @@ enum StaticUseKind {
   FIELD_GET,
   FIELD_SET,
   CLOSURE,
+  CALL_METHOD,
   CONSTRUCTOR_INVOKE,
   CONST_CONSTRUCTOR_INVOKE,
   REDIRECTION,
@@ -85,7 +87,7 @@ enum StaticUseKind {
   INLINING,
 }
 
-/// Statically known use of an [Element].
+/// Statically known use of an [Entity].
 // TODO(johnniwinther): Create backend-specific implementations with better
 // invariants.
 class StaticUse {
@@ -99,9 +101,10 @@ class StaticUse {
         this.kind = kind,
         this.type = type,
         this.hashCode = Hashing.objectsHash(element, kind, type) {
-    assert(invariant(element, !(element is Element && !element.isDeclaration),
-        message: "Static use element $element must be "
-            "the declaration element."));
+    assert(
+        !(element is Element && !element.isDeclaration),
+        failedAt(element,
+            "Static use element $element must be the declaration element."));
   }
 
   /// Invocation of a static or top-level [element] with the given
@@ -109,48 +112,67 @@ class StaticUse {
   factory StaticUse.staticInvoke(
       FunctionEntity element, CallStructure callStructure) {
     // TODO(johnniwinther): Use the [callStructure].
-    assert(invariant(element, element.isStatic || element.isTopLevel,
-        message: "Static invoke element $element must be a top-level "
+    assert(
+        element.isStatic || element.isTopLevel,
+        failedAt(
+            element,
+            "Static invoke element $element must be a top-level "
             "or static method."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Closurization of a static or top-level function [element].
   factory StaticUse.staticTearOff(FunctionEntity element) {
-    assert(invariant(element, element.isStatic || element.isTopLevel,
-        message: "Static tear-off element $element must be a top-level "
+    assert(
+        element.isStatic || element.isTopLevel,
+        failedAt(
+            element,
+            "Static tear-off element $element must be a top-level "
             "or static method."));
     return new StaticUse.internal(element, StaticUseKind.STATIC_TEAR_OFF);
   }
 
   /// Read access of a static or top-level field or getter [element].
   factory StaticUse.staticGet(MemberEntity element) {
-    assert(invariant(element, element.isStatic || element.isTopLevel,
-        message: "Static get element $element must be a top-level "
+    assert(
+        element.isStatic || element.isTopLevel,
+        failedAt(
+            element,
+            "Static get element $element must be a top-level "
             "or static method."));
-    assert(invariant(element, element.isField || element.isGetter,
-        message: "Static get element $element must be a field or a getter."));
+    assert(
+        element.isField || element.isGetter,
+        failedAt(element,
+            "Static get element $element must be a field or a getter."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Write access of a static or top-level field or setter [element].
   factory StaticUse.staticSet(MemberEntity element) {
-    assert(invariant(element, element.isStatic || element.isTopLevel,
-        message: "Static set element $element must be a top-level "
-            "or static method."));
-    assert(invariant(element, element.isField || element.isSetter,
-        message: "Static set element $element must be a field or a setter."));
+    assert(
+        element.isStatic || element.isTopLevel,
+        failedAt(
+            element,
+            "Static set element $element "
+            "must be a top-level or static method."));
+    assert(
+        element.isField || element.isSetter,
+        failedAt(element,
+            "Static set element $element must be a field or a setter."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Invocation of the lazy initializer for a static or top-level field
   /// [element].
   factory StaticUse.staticInit(FieldEntity element) {
-    assert(invariant(element, element.isStatic || element.isTopLevel,
-        message: "Static init element $element must be a top-level "
+    assert(
+        element.isStatic || element.isTopLevel,
+        failedAt(
+            element,
+            "Static init element $element must be a top-level "
             "or static method."));
-    assert(invariant(element, element.isField,
-        message: "Static init element $element must be a field."));
+    assert(element.isField,
+        failedAt(element, "Static init element $element must be a field."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
@@ -158,42 +180,54 @@ class StaticUse {
   factory StaticUse.superInvoke(
       FunctionEntity element, CallStructure callStructure) {
     // TODO(johnniwinther): Use the [callStructure].
-    assert(invariant(element, element.isInstanceMember,
-        message: "Super invoke element $element must be an instance method."));
+    assert(
+        element.isInstanceMember,
+        failedAt(element,
+            "Super invoke element $element must be an instance method."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Read access of a super field or getter [element].
   factory StaticUse.superGet(MemberEntity element) {
-    assert(invariant(element, element.isInstanceMember,
-        message: "Super get element $element must be an instance method."));
-    assert(invariant(element, element.isField || element.isGetter,
-        message: "Super get element $element must be a field or a getter."));
+    assert(
+        element.isInstanceMember,
+        failedAt(
+            element, "Super get element $element must be an instance method."));
+    assert(
+        element.isField || element.isGetter,
+        failedAt(element,
+            "Super get element $element must be a field or a getter."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Write access of a super field [element].
   factory StaticUse.superFieldSet(FieldEntity element) {
-    assert(invariant(element, element.isInstanceMember,
-        message: "Super set element $element must be an instance method."));
-    assert(invariant(element, element.isField,
-        message: "Super set element $element must be a field."));
+    assert(
+        element.isInstanceMember,
+        failedAt(
+            element, "Super set element $element must be an instance method."));
+    assert(element.isField,
+        failedAt(element, "Super set element $element must be a field."));
     return new StaticUse.internal(element, StaticUseKind.SUPER_FIELD_SET);
   }
 
   /// Write access of a super setter [element].
   factory StaticUse.superSetterSet(FunctionEntity element) {
-    assert(invariant(element, element.isInstanceMember,
-        message: "Super set element $element must be an instance method."));
-    assert(invariant(element, element.isSetter,
-        message: "Super set element $element must be a setter."));
+    assert(
+        element.isInstanceMember,
+        failedAt(
+            element, "Super set element $element must be an instance method."));
+    assert(element.isSetter,
+        failedAt(element, "Super set element $element must be a setter."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Closurization of a super method [element].
   factory StaticUse.superTearOff(FunctionEntity element) {
-    assert(invariant(element, element.isInstanceMember && element.isFunction,
-        message: "Super invoke element $element must be an instance method."));
+    assert(
+        element.isInstanceMember && element.isFunction,
+        failedAt(element,
+            "Super invoke element $element must be an instance method."));
     return new StaticUse.internal(element, StaticUseKind.SUPER_TEAR_OFF);
   }
 
@@ -202,8 +236,11 @@ class StaticUse {
   factory StaticUse.superConstructorInvoke(
       ConstructorEntity element, CallStructure callStructure) {
     // TODO(johnniwinther): Use the [callStructure].
-    assert(invariant(element, element.isGenerativeConstructor,
-        message: "Constructor invoke element $element must be a "
+    assert(
+        element.isGenerativeConstructor,
+        failedAt(
+            element,
+            "Constructor invoke element $element must be a "
             "generative constructor."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
@@ -211,7 +248,7 @@ class StaticUse {
   /// Invocation of a constructor (body) [element] through a this or super
   /// constructor call with the given [callStructure].
   factory StaticUse.constructorBodyInvoke(
-      ConstructorBodyElement element, CallStructure callStructure) {
+      ConstructorBodyEntity element, CallStructure callStructure) {
     // TODO(johnniwinther): Use the [callStructure].
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
@@ -220,37 +257,46 @@ class StaticUse {
   factory StaticUse.directInvoke(
       FunctionEntity element, CallStructure callStructure) {
     // TODO(johnniwinther): Use the [callStructure].
-    assert(invariant(element, element.isInstanceMember,
-        message: "Direct invoke element $element must be an instance member."));
-    assert(invariant(element, element.isFunction,
-        message: "Direct invoke element $element must be a method."));
+    assert(
+        element.isInstanceMember,
+        failedAt(element,
+            "Direct invoke element $element must be an instance member."));
+    assert(element.isFunction,
+        failedAt(element, "Direct invoke element $element must be a method."));
     return new StaticUse.internal(element, StaticUseKind.DIRECT_INVOKE);
   }
 
   /// Direct read access of a field or getter [element].
   factory StaticUse.directGet(MemberEntity element) {
-    assert(invariant(element, element.isInstanceMember,
-        message: "Direct get element $element must be an instance member."));
-    assert(invariant(element, element.isField || element.isGetter,
-        message: "Direct get element $element must be a field or a getter."));
+    assert(
+        element.isInstanceMember,
+        failedAt(element,
+            "Direct get element $element must be an instance member."));
+    assert(
+        element.isField || element.isGetter,
+        failedAt(element,
+            "Direct get element $element must be a field or a getter."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Direct write access of a field [element].
   factory StaticUse.directSet(FieldEntity element) {
-    assert(invariant(element, element.isInstanceMember,
-        message: "Direct set element $element must be an instance member."));
-    assert(invariant(element, element.isField,
-        message: "Direct set element $element must be a field."));
+    assert(
+        element.isInstanceMember,
+        failedAt(element,
+            "Direct set element $element must be an instance member."));
+    assert(element.isField,
+        failedAt(element, "Direct set element $element must be a field."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Constructor invocation of [element] with the given [callStructure].
   factory StaticUse.constructorInvoke(
       ConstructorEntity element, CallStructure callStructure) {
-    assert(invariant(element, element.isConstructor,
-        message: "Constructor invocation element $element "
-            "must be a constructor."));
+    assert(
+        element.isConstructor,
+        failedAt(element,
+            "Constructor invocation element $element must be a constructor."));
     // TODO(johnniwinther): Use the [callStructure].
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
@@ -259,10 +305,13 @@ class StaticUse {
   /// [type].
   factory StaticUse.typedConstructorInvoke(
       ConstructorEntity element, CallStructure callStructure, DartType type) {
-    assert(invariant(element, type != null,
-        message: "No type provided for constructor invocation."));
-    assert(invariant(element, element.isConstructor,
-        message: "Typed constructor invocation element $element "
+    assert(type != null,
+        failedAt(element, "No type provided for constructor invocation."));
+    assert(
+        element.isConstructor,
+        failedAt(
+            element,
+            "Typed constructor invocation element $element "
             "must be a constructor."));
     // TODO(johnniwinther): Use the [callStructure].
     return new StaticUse.internal(
@@ -273,10 +322,13 @@ class StaticUse {
   /// [callStructure] on [type].
   factory StaticUse.constConstructorInvoke(
       ConstructorEntity element, CallStructure callStructure, DartType type) {
-    assert(invariant(element, type != null,
-        message: "No type provided for constructor invocation."));
-    assert(invariant(element, element.isConstructor,
-        message: "Const constructor invocation element $element "
+    assert(type != null,
+        failedAt(element, "No type provided for constructor invocation."));
+    assert(
+        element.isConstructor,
+        failedAt(
+            element,
+            "Const constructor invocation element $element "
             "must be a constructor."));
     // TODO(johnniwinther): Use the [callStructure].
     return new StaticUse.internal(
@@ -286,42 +338,54 @@ class StaticUse {
   /// Constructor redirection to [element] on [type].
   factory StaticUse.constructorRedirect(
       ConstructorEntity element, InterfaceType type) {
-    assert(invariant(element, type != null,
-        message: "No type provided for constructor redirection."));
-    assert(invariant(element, element.isConstructor,
-        message: "Constructor redirection element $element "
-            "must be a constructor."));
+    assert(type != null,
+        failedAt(element, "No type provided for constructor redirection."));
+    assert(
+        element.isConstructor,
+        failedAt(element,
+            "Constructor redirection element $element must be a constructor."));
     return new StaticUse.internal(element, StaticUseKind.REDIRECTION, type);
   }
 
   /// Initialization of an instance field [element].
   factory StaticUse.fieldInit(FieldEntity element) {
-    assert(invariant(element, element.isInstanceMember,
-        message: "Field init element $element must be an instance field."));
+    assert(
+        element.isInstanceMember,
+        failedAt(
+            element, "Field init element $element must be an instance field."));
     return new StaticUse.internal(element, StaticUseKind.GENERAL);
   }
 
   /// Read access of an instance field or boxed field [element].
   factory StaticUse.fieldGet(FieldEntity element) {
-    assert(invariant(
-        element, element.isInstanceMember || element is BoxFieldElement,
-        message: "Field init element $element must be an instance "
-            "or boxed field."));
+    assert(
+        element.isInstanceMember ||
+            element is BoxFieldElement ||
+            element is JRecordField,
+        failedAt(element,
+            "Field init element $element must be an instance or boxed field."));
     return new StaticUse.internal(element, StaticUseKind.FIELD_GET);
   }
 
   /// Write access of an instance field or boxed field [element].
   factory StaticUse.fieldSet(FieldEntity element) {
-    assert(invariant(
-        element, element.isInstanceMember || element is BoxFieldElement,
-        message: "Field init element $element must be an instance "
-            "or boxed field."));
+    assert(
+        element.isInstanceMember ||
+            element is BoxFieldElement ||
+            element is JRecordField,
+        failedAt(element,
+            "Field init element $element must be an instance or boxed field."));
     return new StaticUse.internal(element, StaticUseKind.FIELD_SET);
   }
 
   /// Read of a local function [element].
   factory StaticUse.closure(Local element) {
     return new StaticUse.internal(element, StaticUseKind.CLOSURE);
+  }
+
+  /// Read of a call [method] on a closureClass.
+  factory StaticUse.callMethod(FunctionEntity method) {
+    return new StaticUse.internal(method, StaticUseKind.CALL_METHOD);
   }
 
   /// Use of [element] through reflection.
@@ -447,10 +511,6 @@ class ConstantUse {
   /// Type constant used for registration of custom elements.
   ConstantUse.customElements(TypeConstantValue value)
       : this._(value, ConstantUseKind.DIRECT);
-
-  /// Constant used through a lookup map.
-  ConstantUse.lookupMap(ConstantValue value)
-      : this._(value, ConstantUseKind.INDIRECT);
 
   /// Constant used through mirrors.
   // TODO(johnniwinther): Maybe if this is `DIRECT` and we can avoid the

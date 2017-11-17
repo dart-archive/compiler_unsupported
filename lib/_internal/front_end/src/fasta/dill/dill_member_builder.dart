@@ -7,12 +7,16 @@ library fasta.dill_member_builder;
 import 'package:compiler_unsupported/_internal/kernel/ast.dart'
     show Constructor, Field, Member, Procedure, ProcedureKind;
 
-import '../errors.dart' show internalError;
-
-import '../kernel/kernel_builder.dart' show Builder, MemberBuilder;
+import '../kernel/kernel_builder.dart'
+    show
+        Builder,
+        MemberBuilder,
+        isRedirectingGenerativeConstructorImplementation;
 
 import '../modifier.dart'
     show abstractMask, constMask, externalMask, finalMask, staticMask;
+
+import '../problems.dart' show unhandled;
 
 class DillMemberBuilder extends MemberBuilder {
   final int modifiers;
@@ -24,19 +28,39 @@ class DillMemberBuilder extends MemberBuilder {
         member = member,
         super(parent, member.fileOffset);
 
+  String get debugName => "DillMemberBuilder";
+
   Member get target => member;
 
   String get name => member.name.name;
 
   bool get isConstructor => member is Constructor;
 
-  bool get isFactory {
-    if (member is Procedure) {
-      Procedure procedure = member;
-      return procedure.kind == ProcedureKind.Factory;
-    } else {
-      return false;
-    }
+  ProcedureKind get kind {
+    final member = this.member;
+    return member is Procedure ? member.kind : null;
+  }
+
+  bool get isRegularMethod => identical(ProcedureKind.Method, kind);
+
+  bool get isGetter => identical(ProcedureKind.Getter, kind);
+
+  bool get isSetter => identical(ProcedureKind.Setter, kind);
+
+  bool get isOperator => identical(ProcedureKind.Operator, kind);
+
+  bool get isFactory => identical(ProcedureKind.Factory, kind);
+
+  bool get isRedirectingGenerativeConstructor {
+    return isConstructor &&
+        isRedirectingGenerativeConstructorImplementation(member);
+  }
+
+  bool get isSynthetic {
+    // TODO(ahe): Kernel should eventually support a synthetic bit.
+    return isConstructor &&
+        name == "" &&
+        (charOffset == parent.charOffset || charOffset == -1);
   }
 }
 
@@ -53,7 +77,9 @@ int computeModifiers(Member member) {
   } else if (member is Constructor) {
     modifier |= member.isConst ? constMask : 0;
   } else {
-    internalError("Unhandled: ${member.runtimeType}");
+    dynamic parent = member.parent;
+    unhandled("${member.runtimeType}", "computeModifiers", member.fileOffset,
+        Uri.base.resolve(parent.fileUri));
   }
   return modifier;
 }

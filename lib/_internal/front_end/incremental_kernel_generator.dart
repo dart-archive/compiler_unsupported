@@ -5,34 +5,64 @@
 import 'dart:async';
 
 import 'package:compiler_unsupported/_internal/front_end/src/base/processed_options.dart';
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/compiler_context.dart';
 import 'package:compiler_unsupported/_internal/front_end/src/incremental_kernel_generator_impl.dart';
 import 'package:compiler_unsupported/_internal/kernel/kernel.dart';
 
 import 'compiler_options.dart';
 
+/// The type of the function that clients can pass to track used files.
+///
+/// When a file is first used during compilation, this function is called with
+/// the [Uri] of that file and [used] == `true`. The content of the file is not
+/// read until the [Future] returned by the function completes. If, during a
+/// subsequent compilation, a file that was being used is no longer used, then
+/// the function is called with the [Uri] of that file and [used] == `false`.
+///
+/// Multiple invocations of may be running concurrently.
+///
+typedef Future<Null> WatchUsedFilesFn(Uri uri, bool used);
+
 /// Represents the difference between "old" and "new" states of a program.
 ///
 /// Not intended to be implemented or extended by clients.
 class DeltaProgram {
-  /// The new state of the program.
+  /// The state of the program.
   ///
-  /// Libraries whose kernel representation is known to be unchanged since the
-  /// last [DeltaProgram] are not included.
-  final Map<Uri, Program> newState;
+  /// It should be treated as opaque data by the clients. Its only purpose is
+  /// to be passed to [IncrementalKernelGeneratorImpl.setState].
+  final String state;
 
-  DeltaProgram(this.newState);
+  /// The new program.
+  ///
+  /// It includes full kernels for changed libraries and for libraries that
+  /// are affected by the transitive change of API in the changed libraries.
+  ///
+  /// For VM reload purposes we need to provide also full kernels for the
+  /// libraries that are transitively imported by the entry point and
+  /// transitively import a changed library.
+  ///
+  /// Also includes external references to other libraries that were not
+  /// modified or affected.
+  final Program newProgram;
 
-  /// TODO(paulberry): add information about libraries that were removed.
+  DeltaProgram(this.state, this.newProgram);
 }
 
 /// Interface for generating an initial kernel representation of a program and
 /// keeping it up to date as incremental changes are made.
 ///
-/// This class maintains an internal "previous program state"; each
-/// time [computeDelta] is called, it updates the previous program state and
-/// produces a representation of what has changed.  When there are few changes,
-/// a call to [computeDelta] should be much faster than compiling the whole
-/// program from scratch.
+/// This class maintains an internal "current program state"; each time
+/// [computeDelta] is called, it computes the "last program state" and libraries
+/// that were affected relative to the "current program state".  When there are
+/// few changes, a call to [computeDelta] should be much faster than compiling
+/// the whole program from scratch.
+///
+/// Each invocation of [computeDelta] must be followed by invocation of either
+/// [acceptLastDelta] or [rejectLastDelta].  [acceptLastDelta] makes the
+/// "last program state" the "current program state".  [rejectLastDelta] simply
+/// discards the "last program state", so that the "current program state"
+/// stays the same.
 ///
 /// This class also maintains a set of "valid sources", which is a (possibly
 /// empty) subset of the sources constituting the previous program state.  Files
@@ -42,21 +72,17 @@ class DeltaProgram {
 /// Behavior is undefined if the client does not obey the following concurrency
 /// restrictions:
 /// - no two invocations of [computeDelta] may be outstanding at any given time.
-/// - neither [invalidate] nor [invalidateAll] may be called while an invocation
-///   of [computeDelta] is outstanding.
+/// - [invalidate] may not be called while an invocation of [computeDelta] is
+///   outstanding.
 ///
 /// Not intended to be implemented or extended by clients.
 abstract class IncrementalKernelGenerator {
-  /// Creates an [IncrementalKernelGenerator] which is prepared to generate
-  /// kernel representations of the program whose main library is in the given
-  /// [source].
-  ///
-  /// No file system access is performed by this constructor; the initial
-  /// "previous program state" is an empty program containing no code, and the
-  /// initial set of valid sources is empty.  To obtain a kernel representation
-  /// of the program, call [computeDelta].
-  factory IncrementalKernelGenerator(Uri source, CompilerOptions options) =>
-      new IncrementalKernelGeneratorImpl(source, new ProcessedOptions(options));
+  /// Notify the generator that the last [DeltaProgram] returned from the
+  /// [computeDelta] was accepted.  So, the "last program state" becomes the
+  /// "current program state", and the next invocation of [computeDelta] will
+  /// not include the libraries of the last delta, unless these libraries are
+  /// affected by [invalidate] since the last [computeDelta].
+  void acceptLastDelta();
 
   /// Generates a kernel representation of the changes to the program, assuming
   /// that all valid sources are unchanged since the last call to
@@ -66,16 +92,6 @@ abstract class IncrementalKernelGenerator {
   /// from disk; they are assumed to be unchanged regardless of the state of the
   /// filesystem.
   ///
-  /// If [watch] is not `null`, then when a source file is first used
-  /// by [computeDelta], [watch] is called with the Uri of that source
-  /// file and `used` == `true` indicating that the source file is being
-  /// used when compiling the program. The content of the file is not read
-  /// until the Future returned by [watch] completes. If during a subsequent
-  /// call to [computeDelta], a source file that was being used is no longer
-  /// used, then [watch] is called with the Uri of that source file and
-  /// `used` == `false` indicating that the source file is no longer needed.
-  /// Multiple invocations of [watch] may be running concurrently.
-  ///
   /// If the future completes successfully, the previous file state is updated
   /// and the set of valid sources is set to the set of all sources in the
   /// program.
@@ -84,19 +100,51 @@ abstract class IncrementalKernelGenerator {
   /// source code), the caller may consider the previous file state and the set
   /// of valid sources to be unchanged; this means that once the user fixes the
   /// errors, it is safe to call [computeDelta] again.
-  Future<DeltaProgram> computeDelta({Future<Null> watch(Uri uri, bool used)});
-
-  /// Remove any source file(s) associated with the given file path from the set
-  /// of valid sources.  This guarantees that those files will be re-read on the
-  /// next call to [computeDelta]).
-  void invalidate(String path);
-
-  /// Remove all source files from the set of valid sources.  This guarantees
-  /// that all files will be re-read on the next call to [computeDelta].
   ///
-  /// Note that this does not erase the previous program state; the next time
-  /// [computeDelta] is called, if parts of the program are discovered to be
-  /// unchanged, parts of the previous program state will still be re-used to
-  /// speed up compilation.
-  void invalidateAll();
+  /// Each invocation of [computeDelta] must be followed by invocation of
+  /// either [acceptLastDelta] or [rejectLastDelta].
+  Future<DeltaProgram> computeDelta();
+
+  /// Remove the file associated with the given file [uri] from the set of
+  /// valid files.  This guarantees that those files will be re-read on the
+  /// next call to [computeDelta]).
+  void invalidate(Uri uri);
+
+  /// Notify the generator that the last [DeltaProgram] returned from the
+  /// [computeDelta] was rejected.  The "last program state" is discarded and
+  /// the "current program state" is kept unchanged.
+  void rejectLastDelta();
+
+  /// Notify the generator that the client wants to reset the "current program
+  /// state" to nothing, so that the next invocation of [computeDelta] will
+  /// include all the program libraries.  Neither [acceptLastDelta] nor
+  /// [rejectLastDelta] are allowed after this method until the next
+  /// [computeDelta] invocation.
+  void reset();
+
+  /// Set the "current program state", so that the next invocation of
+  /// [computeDelta] will include only libraries changed since this [state].
+  ///
+  /// The [state] must be a value returned in [DeltaProgram.state].
+  void setState(String state);
+
+  /// Creates an [IncrementalKernelGenerator] which is prepared to generate
+  /// kernel representations of the program whose main library is in the given
+  /// [entryPoint].
+  ///
+  /// The initial "previous program state" is an empty program containing no
+  /// code, and the initial set of valid sources is empty.  To obtain a kernel
+  /// representation of the program, call [computeDelta].
+  static Future<IncrementalKernelGenerator> newInstance(
+      CompilerOptions options, Uri entryPoint,
+      {WatchUsedFilesFn watch}) async {
+    var processedOptions = new ProcessedOptions(options, false, [entryPoint]);
+    return await CompilerContext.runWithOptions(processedOptions, (_) async {
+      var uriTranslator = await processedOptions.getUriTranslator();
+      var sdkOutlineBytes = await processedOptions.loadSdkSummaryBytes();
+      return new IncrementalKernelGeneratorImpl(
+          processedOptions, uriTranslator, sdkOutlineBytes, entryPoint,
+          watch: watch);
+    });
+  }
 }

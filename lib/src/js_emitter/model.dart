@@ -8,6 +8,7 @@ import '../constants/values.dart' show ConstantValue;
 import '../deferred_load.dart' show OutputUnit;
 import '../elements/entities.dart';
 import '../js/js.dart' as js show Expression, Name, Statement, TokenFinalizer;
+import '../js/js_debug.dart' as js show nodeToString;
 import 'js_emitter.dart' show MetadataCollector;
 
 class Program {
@@ -16,6 +17,7 @@ class Program {
   final bool outputContainsConstantList;
   final bool needsNativeSupport;
   final bool hasIsolateSupport;
+  final bool hasSoftDeferredClasses;
 
   /// A map from load id to the list of fragments that need to be loaded.
   final Map<String, List<Fragment>> loadMap;
@@ -38,15 +40,17 @@ class Program {
       this.typeToInterceptorMap, this._metadataCollector, this.finalizers,
       {this.needsNativeSupport,
       this.outputContainsConstantList,
-      this.hasIsolateSupport}) {
+      this.hasIsolateSupport,
+      this.hasSoftDeferredClasses}) {
     assert(needsNativeSupport != null);
     assert(outputContainsConstantList != null);
     assert(hasIsolateSupport != null);
   }
 
-  /// A list of metadata expressions.
+  /// Accessor for the list of metadata entries for a given [OutputUnit].
   ///
-  /// This list must be emitted in the `METADATA` embedded global.
+  /// There is one list for each output unit. The list belonging to the main
+  /// unit must be emitted in the `METADATA` embedded global.
   /// The list references constants and must hence be emitted after constants
   /// have been initialized.
   ///
@@ -54,9 +58,11 @@ class Program {
   /// list must not be emitted before all operations on it are done. For
   /// example, the old emitter generates metadata when emitting reflection
   /// data.
-  js.Expression get metadata => _metadataCollector.globalMetadata;
+  js.Expression metadataForOutputUnit(OutputUnit unit) {
+    return _metadataCollector.getMetadataForOutputUnit(unit);
+  }
 
-  /// Accessor for the list of metadata entries for a given [OutputUnit].
+  /// Accessor for the list of type entries for a given [OutputUnit].
   ///
   /// There is one list for each output unit. The list belonging to the main
   /// unit must be emitted in the `TYPES` embedded global. The list references
@@ -86,6 +92,10 @@ class Holder {
 
   Holder(this.name, this.index,
       {this.isStaticStateHolder: false, this.isConstantsHolder: false});
+
+  String toString() {
+    return 'Holder(name=${name})';
+  }
 }
 
 /**
@@ -141,6 +151,10 @@ class MainFragment extends Fragment {
             staticLazilyInitializedFields, constants);
 
   bool get isMainFragment => true;
+
+  String toString() {
+    return 'MainFragment()';
+  }
 }
 
 /**
@@ -161,6 +175,10 @@ class DeferredFragment extends Fragment {
             staticLazilyInitializedFields, constants);
 
   bool get isMainFragment => false;
+
+  String toString() {
+    return 'DeferredFragment(name=${name})';
+  }
 }
 
 class Constant {
@@ -169,6 +187,10 @@ class Constant {
   final ConstantValue value;
 
   Constant(this.name, this.holder, this.value);
+
+  String toString() {
+    return 'Constant(name=${name},value=${value.toStructuredText()})';
+  }
 }
 
 abstract class FieldContainer {
@@ -188,6 +210,10 @@ class Library implements FieldContainer {
 
   Library(this.element, this.uri, this.statics, this.classes,
       this.staticFieldsForReflection);
+
+  String toString() {
+    return 'Library(uri=${uri},element=${element})';
+  }
 }
 
 class StaticField {
@@ -205,6 +231,10 @@ class StaticField {
 
   StaticField(this.element, this.name, this.holder, this.code, this.isFinal,
       this.isLazy);
+
+  String toString() {
+    return 'StaticField(name=${name},element=${element})';
+  }
 }
 
 class Class implements FieldContainer {
@@ -230,6 +260,12 @@ class Class implements FieldContainer {
   final bool onlyForRti;
   final bool isDirectlyInstantiated;
   final bool isNative;
+  final bool isClosureBaseClass; // Common base class for closures.
+
+  /// Whether this class should be soft deferred.
+  ///
+  /// A soft-deferred class is only fully initialized at first instantiation.
+  final bool isSoftDeferred;
 
   // If the class implements a function type, and the type is encoded in the
   // metatada table, then this field contains the index into that field.
@@ -262,10 +298,13 @@ class Class implements FieldContainer {
       {this.hasRtiField,
       this.onlyForRti,
       this.isDirectlyInstantiated,
-      this.isNative}) {
+      this.isNative,
+      this.isClosureBaseClass,
+      this.isSoftDeferred = false}) {
     assert(onlyForRti != null);
     assert(isDirectlyInstantiated != null);
     assert(isNative != null);
+    assert(isClosureBaseClass != null);
   }
 
   bool get isMixinApplication => false;
@@ -279,6 +318,8 @@ class Class implements FieldContainer {
 
   int get superclassHolderIndex =>
       (superclass == null) ? 0 : superclass.holder.index;
+
+  String toString() => 'Class(name=${name},element=$element)';
 }
 
 class MixinApplication extends Class {
@@ -312,7 +353,8 @@ class MixinApplication extends Class {
             hasRtiField: hasRtiField,
             onlyForRti: onlyForRti,
             isDirectlyInstantiated: isDirectlyInstantiated,
-            isNative: false);
+            isNative: false,
+            isClosureBaseClass: false);
 
   bool get isMixinApplication => true;
   Class get mixinClass => _mixinClass;
@@ -320,6 +362,8 @@ class MixinApplication extends Class {
   void setMixinClass(Class mixinClass) {
     _mixinClass = mixinClass;
   }
+
+  String toString() => 'Mixin(name=${name},element=$element)';
 }
 
 /// A field.
@@ -363,6 +407,10 @@ class Field {
 
   bool get needsInterceptedGetterOnThis => getterFlags == 3;
   bool get needsInterceptedSetterOnThis => setterFlags == 3;
+
+  String toString() {
+    return 'Field(name=${name},element=${element})';
+  }
 }
 
 abstract class Method {
@@ -461,6 +509,11 @@ class InstanceMethod extends DartMethod {
   }
 
   bool get isStatic => false;
+
+  String toString() {
+    return 'InstanceMethod(name=${name},element=${element}'
+        ',code=${js.nodeToString(code)})';
+  }
 }
 
 /// A method that is generated by the backend and has not direct correspondence
@@ -469,6 +522,11 @@ class InstanceMethod extends DartMethod {
 class StubMethod extends Method {
   StubMethod(js.Name name, js.Expression code, {MemberEntity element})
       : super(element, name, code);
+
+  String toString() {
+    return 'StubMethod(name=${name},element=${element}'
+        ',code=${js.nodeToString(code)})';
+  }
 }
 
 /// A stub that adapts and redirects to the main method (the one containing)
@@ -490,6 +548,11 @@ class ParameterStubMethod extends StubMethod {
 
   ParameterStubMethod(js.Name name, this.callName, js.Expression code)
       : super(name, code);
+
+  String toString() {
+    return 'ParameterStubMethod(name=${name},element=${element}'
+        ',code=${js.nodeToString(code)})';
+  }
 }
 
 abstract class StaticMethod implements Method {
@@ -523,10 +586,20 @@ class StaticDartMethod extends DartMethod implements StaticMethod {
             functionType: functionType);
 
   bool get isStatic => true;
+
+  String toString() {
+    return 'StaticDartMethod(name=${name},element=${element}'
+        ',code=${js.nodeToString(code)})';
+  }
 }
 
 class StaticStubMethod extends StubMethod implements StaticMethod {
   Holder holder;
   StaticStubMethod(js.Name name, this.holder, js.Expression code)
       : super(name, code);
+
+  String toString() {
+    return 'StaticStubMethod(name=${name},element=${element}}'
+        ',code=${js.nodeToString(code)})';
+  }
 }

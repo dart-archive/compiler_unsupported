@@ -61,7 +61,7 @@ class MirrorsResolutionAnalysisImpl implements MirrorsResolutionAnalysis {
   /// `mirrorsData.targetsUsed`. If the target is a library or class all nested
   /// static fields are included too.
   Iterable<Element> _findStaticFieldTargets() {
-    List staticFields = [];
+    List<Element> staticFields = <Element>[];
 
     void addFieldsInContainer(ScopeContainerElement container) {
       container.forEachLocalMember((Element member) {
@@ -73,13 +73,16 @@ class MirrorsResolutionAnalysisImpl implements MirrorsResolutionAnalysis {
       });
     }
 
-    for (Element target in _mirrorsData.targetsUsed) {
-      if (target == null) continue;
+    for (MemberElement target in _mirrorsData.membersInMirrorsUsedTargets) {
       if (target.isField) {
         staticFields.add(target);
-      } else if (target.isLibrary || target.isClass) {
-        addFieldsInContainer(target);
       }
+    }
+    for (ClassElement target in _mirrorsData.classesInMirrorsUsedTargets) {
+      addFieldsInContainer(target);
+    }
+    for (LibraryElement target in _mirrorsData.librariesInMirrorsUsedTargets) {
+      addFieldsInContainer(target);
     }
     return staticFields;
   }
@@ -107,7 +110,9 @@ class MirrorsResolutionAnalysisImpl implements MirrorsResolutionAnalysis {
     if (_mirrorsData.isTreeShakingDisabled) {
       enqueuer.applyImpact(_computeImpactForReflectiveElements(recentClasses,
           enqueuer.processedClasses, _compiler.libraryLoader.libraries));
-    } else if (!_mirrorsData.targetsUsed.isEmpty) {
+    } else if (_mirrorsData.membersInMirrorsUsedTargets.isNotEmpty ||
+        _mirrorsData.classesInMirrorsUsedTargets.isNotEmpty ||
+        _mirrorsData.librariesInMirrorsUsedTargets.isNotEmpty) {
       // Add all static elements (not classes) that have been requested for
       // reflection. If there is no mirror-usage these are probably not
       // necessary, but the backend relies on them being resolved.
@@ -120,7 +125,10 @@ class MirrorsResolutionAnalysisImpl implements MirrorsResolutionAnalysis {
     if (_mirrorsData.mustRetainMetadata) {
       _reporter.log('Retaining metadata.');
 
-      _compiler.libraryLoader.libraries.forEach(_mirrorsData.retainMetadataOf);
+      for (LibraryEntity library in _compiler.libraryLoader.libraries) {
+        _mirrorsData.retainMetadataOfLibrary(library,
+            addForEmission: !enqueuer.isResolutionQueue);
+      }
 
       if (!enqueuer.queueIsClosed) {
         /// Register the constant value of [metadata] as live in resolution.
@@ -185,7 +193,7 @@ class MirrorsResolutionAnalysisImpl implements MirrorsResolutionAnalysis {
       }
     }
 
-    entities.forEach(processElementMetadata);
+    entities.forEach((member) => processElementMetadata(member));
   }
 
   void onResolutionComplete() {
@@ -243,7 +251,8 @@ class MirrorsCodegenAnalysisImpl implements MirrorsCodegenAnalysis {
     if (_mirrorsData.mustRetainMetadata) {
       _reporter.log('Retaining metadata.');
 
-      _compiler.libraryLoader.libraries.forEach(_mirrorsData.retainMetadataOf);
+      (_compiler.libraryLoader.libraries as Iterable<LibraryElement>)
+          .forEach(_mirrorsData.retainMetadataOfLibrary);
 
       for (Dependency dependency in _metadataConstants) {
         _impactBuilder
@@ -287,10 +296,22 @@ class MirrorsHandler {
    * [MirrorsUsed] pattern, as we do not have a complete picture of the world,
    * yet.
    */
-  bool _shouldIncludeElementDueToMirrors(Element element,
+  bool _shouldIncludeLibraryDueToMirrors(LibraryElement element,
       {bool includedEnclosing}) {
     return includedEnclosing ||
-        _backend.mirrorsData.requiredByMirrorSystem(element);
+        _backend.mirrorsData.isLibraryRequiredByMirrorSystem(element);
+  }
+
+  bool _shouldIncludeClassDueToMirrors(ClassElement element,
+      {bool includedEnclosing}) {
+    return includedEnclosing ||
+        _backend.mirrorsData.isClassRequiredByMirrorSystem(element);
+  }
+
+  bool _shouldIncludeMemberDueToMirrors(MemberElement element,
+      {bool includedEnclosing}) {
+    return includedEnclosing ||
+        _backend.mirrorsData.isMemberRequiredByMirrorSystem(element);
   }
 
   /// Enqueue the constructor [ctor] if it is required for reflection.
@@ -300,8 +321,9 @@ class MirrorsHandler {
   void _enqueueReflectiveConstructor(ConstructorElement constructor,
       {bool enclosingWasIncluded}) {
     assert(constructor.isDeclaration);
-    if (_shouldIncludeElementDueToMirrors(constructor,
+    if (_shouldIncludeMemberDueToMirrors(constructor,
         includedEnclosing: enclosingWasIncluded)) {
+      if (constructor.isFromEnvironmentConstructor) return;
       _logEnqueueReflectiveAction(constructor);
       ClassElement cls = constructor.enclosingClass;
       impactBuilder
@@ -317,7 +339,7 @@ class MirrorsHandler {
   void _enqueueReflectiveMember(
       MemberElement element, bool enclosingWasIncluded) {
     assert(element.isDeclaration);
-    if (_shouldIncludeElementDueToMirrors(element,
+    if (_shouldIncludeMemberDueToMirrors(element,
         includedEnclosing: enclosingWasIncluded)) {
       _logEnqueueReflectiveAction(element);
       if (Elements.isStaticOrTopLevel(element)) {
@@ -331,9 +353,7 @@ class MirrorsHandler {
         impactBuilder.registerDynamicUse(dynamicUse);
         if (element.isField) {
           DynamicUse dynamicUse = new DynamicUse(
-              new Selector.setter(
-                  new Name(element.name, element.library, isSetter: true)),
-              null);
+              new Selector.setter(element.memberName.setter), null);
           impactBuilder.registerDynamicUse(dynamicUse);
         }
       }
@@ -349,7 +369,7 @@ class MirrorsHandler {
       {bool enclosingWasIncluded}) {
     assert(cls.isDeclaration);
     if (cls.library.isInternalLibrary || cls.isInjected) return;
-    bool includeClass = _shouldIncludeElementDueToMirrors(cls,
+    bool includeClass = _shouldIncludeClassDueToMirrors(cls,
         includedEnclosing: enclosingWasIncluded);
     if (includeClass) {
       _logEnqueueReflectiveAction(cls, "register");
@@ -363,7 +383,7 @@ class MirrorsHandler {
     // TODO(herhut): Add a warning if a mirrors annotation cannot hit.
     if (recents.contains(cls.declaration)) {
       _logEnqueueReflectiveAction(cls, "members");
-      cls.constructors.forEach((ConstructorElement element) {
+      cls.constructors.forEach((Element element) {
         _enqueueReflectiveConstructor(element.declaration,
             enclosingWasIncluded: includeClass);
       });
@@ -371,6 +391,16 @@ class MirrorsHandler {
         _enqueueReflectiveMember(member.element, includeClass);
       });
     }
+  }
+
+  /// Set of classes that need to be considered for reflection although not
+  /// otherwise visible during resolution.
+  Iterable<ClassEntity> get _classesRequiredForReflection {
+    // TODO(herhut): Clean this up when classes needed for rti are tracked.
+    return [
+      _resolution.commonElements.closureClass,
+      _resolution.commonElements.jsIndexableClass
+    ];
   }
 
   /// Enqueue special classes that might not be visible by normal means or that
@@ -381,9 +411,9 @@ class MirrorsHandler {
   /// that none of its methods are reflectable, unless reflectable by
   /// inheritance.
   void _enqueueReflectiveSpecialClasses() {
-    Iterable<ClassElement> classes = _backend.classesRequiredForReflection;
+    Iterable<ClassElement> classes = _classesRequiredForReflection;
     for (ClassElement cls in classes) {
-      if (_backend.mirrorsData.referencedFromMirrorSystem(cls)) {
+      if (_backend.mirrorsData.isClassReferencedFromMirrorSystem(cls)) {
         _logEnqueueReflectiveAction(cls);
         cls.ensureResolved(_resolution);
         impactBuilder
@@ -398,7 +428,7 @@ class MirrorsHandler {
       LibraryElement lib, Iterable<ClassEntity> recents) {
     assert(lib.isDeclaration);
     bool includeLibrary =
-        _shouldIncludeElementDueToMirrors(lib, includedEnclosing: false);
+        _shouldIncludeLibraryDueToMirrors(lib, includedEnclosing: false);
     lib.forEachLocalMember((Element member) {
       if (member.isInjected) return;
       if (member.isClass) {
@@ -445,9 +475,10 @@ class MirrorsHandler {
     } else if (recents.isNotEmpty) {
       // Keep looking at new classes until fixpoint is reached.
       _logEnqueueReflectiveAction("!START enqueueRecents");
-      recents.forEach((ClassElement cls) {
+      recents.forEach((ClassEntity _cls) {
+        ClassElement cls = _cls;
         _enqueueReflectiveElementsInClass(cls, recents,
-            enclosingWasIncluded: _shouldIncludeElementDueToMirrors(cls.library,
+            enclosingWasIncluded: _shouldIncludeLibraryDueToMirrors(cls.library,
                 includedEnclosing: false));
       });
       _logEnqueueReflectiveAction("!DONE enqueueRecents");

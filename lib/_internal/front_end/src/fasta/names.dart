@@ -6,28 +6,38 @@ library front_end.src.fasta.names;
 
 import 'package:compiler_unsupported/_internal/kernel/ast.dart' show Name;
 
-export 'package:compiler_unsupported/_internal/kernel/frontend/accessors.dart' show indexGetName, indexSetName;
+final Name ampersandName = new Name("&");
+
+final Name barName = new Name("|");
 
 final Name callName = new Name("call");
 
-final Name plusName = new Name("+");
+final Name caretName = new Name("^");
+
+final Name divisionName = new Name("/");
+
+final Name emptyName = new Name("");
+
+final Name equalsName = new Name('==');
+
+final Name indexGetName = new Name("[]");
+
+final Name indexSetName = new Name("[]=");
+
+final Name leftShiftName = new Name("<<");
+
+final Name lengthName = new Name("length");
 
 final Name minusName = new Name("-");
 
 final Name multiplyName = new Name("*");
 
-final Name divisionName = new Name("/");
+final Name mustacheName = new Name("~/");
+
+final Name noSuchMethodName = new Name("noSuchMethod");
 
 final Name percentName = new Name("%");
 
-final Name ampersandName = new Name("&");
-
-final Name leftShiftName = new Name("<<");
+final Name plusName = new Name("+");
 
 final Name rightShiftName = new Name(">>");
-
-final Name caretName = new Name("^");
-
-final Name barName = new Name("|");
-
-final Name mustacheName = new Name("~/");

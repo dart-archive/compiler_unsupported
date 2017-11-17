@@ -10,7 +10,12 @@ import 'dart:collection' show Queue;
 
 import 'builder/builder.dart' show Builder, LibraryBuilder;
 
-import 'errors.dart' show InputError, firstSourceUri;
+import 'deprecated_problems.dart' show firstSourceUri;
+
+import 'messages.dart'
+    show LocatedMessage, Message, messagePlatformPrivateLibraryAccess;
+
+import 'severity.dart' show Severity;
 
 import 'target_implementation.dart' show TargetImplementation;
 
@@ -25,8 +30,24 @@ abstract class Loader<L> {
 
   final TargetImplementation target;
 
+  /// List of all handled compile-time errors seen so far by libraries loaded
+  /// by this loader.
+  ///
+  /// A handled error is an error that has been added to the generated AST
+  /// already, for example, as a throw expression.
+  final List<LocatedMessage> handledErrors = <LocatedMessage>[];
+
+  /// List of all unhandled compile-time errors seen so far by libraries loaded
+  /// by this loader.
+  ///
+  /// An unhandled error is an error that hasn't been handled, see
+  /// [handledErrors].
+  final List<LocatedMessage> unhandledErrors = <LocatedMessage>[];
+
   LibraryBuilder coreLibrary;
 
+  /// The first library that we've been asked to compile. When compiling a
+  /// program (aka script), this is the library that should have a main method.
   LibraryBuilder first;
 
   int byteCount = 0;
@@ -37,14 +58,19 @@ abstract class Loader<L> {
 
   Ticker get ticker => target.ticker;
 
-  /// Look up a library builder by the the name [uri], or if such doesn't
+  /// Look up a library builder by the name [uri], or if such doesn't
   /// exist, create one. The canonical URI of the library is [uri], and its
   /// actual location is [fileUri].
   ///
   /// Canonical URIs have schemes like "dart", or "package", and the actual
   /// location is often a file URI.
-  LibraryBuilder read(Uri uri, [Uri fileUri]) {
-    firstSourceUri ??= uri;
+  ///
+  /// The [accessor] is the library that's trying to import, export, or include
+  /// as part [uri], and [charOffset] is the location of the corresponding
+  /// directive. If [accessor] isn't allowed to access [uri], it's a
+  /// compile-time error.
+  LibraryBuilder read(Uri uri, int charOffset,
+      {Uri fileUri, LibraryBuilder accessor, LibraryBuilder origin}) {
     LibraryBuilder builder = builders.putIfAbsent(uri, () {
       if (fileUri == null) {
         switch (uri.scheme) {
@@ -58,23 +84,47 @@ abstract class Loader<L> {
             break;
         }
       }
-      LibraryBuilder library = target.createLibraryBuilder(uri, fileUri);
+      LibraryBuilder library =
+          target.createLibraryBuilder(uri, fileUri, origin);
       if (uri.scheme == "dart" && uri.path == "core") {
         coreLibrary = library;
         target.loadExtraRequiredLibraries(this);
       }
-      first ??= library;
-      if (library.loader == this) {
-        unparsedLibraries.addLast(library);
+      if (library.loader != this) {
+        // This library isn't owned by this loader, so not further processing
+        // should be attempted.
+        return library;
       }
+
+      {
+        // Add any additional logic after this block. Setting the
+        // firstSourceUri and first library should be done as early as
+        // possible.
+        firstSourceUri ??= uri;
+        first ??= library;
+      }
+      if (target.backendTarget.mayDefineRestrictedType(origin?.uri ?? uri)) {
+        library.mayImplementRestrictedTypes = true;
+      }
+      if (uri.scheme == "dart") {
+        target.readPatchFiles(library);
+      }
+      unparsedLibraries.addLast(library);
       return library;
     });
+    if (accessor != null &&
+        !accessor.isPatch &&
+        !target.backendTarget
+            .allowPlatformPrivateLibraryAccess(accessor.uri, uri)) {
+      accessor.addCompileTimeError(
+          messagePlatformPrivateLibraryAccess, charOffset, accessor.fileUri);
+    }
     return builder;
   }
 
   void ensureCoreLibrary() {
     if (coreLibrary == null) {
-      read(Uri.parse("dart:core"));
+      read(Uri.parse("dart:core"), -1);
       assert(coreLibrary != null);
     }
   }
@@ -126,23 +176,37 @@ ${format(ms / libraryCount, 3, 12)} ms/compilation unit.""");
   /// Builds all the method bodies found in the given [library].
   Future<Null> buildBody(covariant LibraryBuilder library);
 
-  List<InputError> collectCompileTimeErrors() {
-    List<InputError> errors = <InputError>[];
-    for (LibraryBuilder library in builders.values) {
-      if (library.loader == this) {
-        errors.addAll(library.compileTimeErrors);
+  /// Register [message] as a compile-time error.
+  ///
+  /// If [silent] is true, no error is printed as it is assumed the error has
+  /// been previously reported.
+  ///
+  /// If [wasHandled] is true, this error is added to [handledErrors],
+  /// otherwise it is added to [unhandledErrors].
+  void addCompileTimeError(Message message, int charOffset, Uri fileUri,
+      {bool silent: false, bool wasHandled: false, LocatedMessage context}) {
+    if (!silent) {
+      target.context
+          .report(message.withLocation(fileUri, charOffset), Severity.error);
+      if (context != null) {
+        target.context.report(context, Severity.error);
       }
     }
-    return errors;
+    (wasHandled ? handledErrors : unhandledErrors)
+        .add(message.withLocation(fileUri, charOffset));
   }
-
-  Builder getCompileTimeError() => target.getCompileTimeError(this);
-
-  Builder getNativeAnnotation() => target.getNativeAnnotation(this);
 
   Builder getAbstractClassInstantiationError() {
     return target.getAbstractClassInstantiationError(this);
   }
+
+  Builder getCompileTimeError() => target.getCompileTimeError(this);
+
+  Builder getDuplicatedFieldInitializerError() {
+    return target.getDuplicatedFieldInitializerError(this);
+  }
+
+  Builder getNativeAnnotation() => target.getNativeAnnotation(this);
 }
 
 String format(double d, int fractionDigits, int width) {

@@ -8,6 +8,7 @@ import '../constants/constant_system.dart';
 import '../constants/expressions.dart';
 import '../constants/values.dart';
 import '../elements/elements.dart';
+import '../elements/entities.dart';
 import '../elements/visitor.dart' show BaseElementVisitor;
 import '../resolution/tree_elements.dart' show TreeElements;
 import '../tree/tree.dart';
@@ -98,7 +99,7 @@ class JavaScriptConstantTask extends ConstantCompilerTask {
   // TODO(johnniwinther): Remove this when values are computed from the
   // expressions.
   @override
-  void copyConstantValues(JavaScriptConstantTask task) {
+  void copyConstantValues(covariant JavaScriptConstantTask task) {
     jsConstantCompiler.constantValueMap
         .addAll(task.jsConstantCompiler.constantValueMap);
     dartConstantCompiler.constantValueMap
@@ -113,12 +114,9 @@ class JavaScriptConstantTask extends ConstantCompilerTask {
  */
 class JavaScriptConstantCompiler extends ConstantCompilerBase
     implements BackendConstantEnvironment {
-  /** Set of all registered compiled constants. */
-  final Set<ConstantValue> compiledConstants = new Set<ConstantValue>();
-
   // TODO(johnniwinther): Move this to the backend constant handler.
   /** Caches the statics where the initial value cannot be eagerly compiled. */
-  final Set<FieldElement> lazyStatics = new Set<FieldElement>();
+  final Set<FieldEntity> lazyStatics = new Set<FieldEntity>();
 
   // Constants computed for constant expressions.
   final Map<Node, ConstantExpression> nodeConstantMap =
@@ -143,51 +141,19 @@ class JavaScriptConstantCompiler extends ConstantCompilerBase
         element, definitions,
         isConst: isConst, checkType: checkType);
     if (!isConst && value == null) {
-      registerLazyStatic(element);
+      FieldElement field = element;
+      registerLazyStatic(field);
     }
     return value;
   }
 
   @override
-  void registerLazyStatic(FieldElement element) {
+  void registerLazyStatic(FieldEntity element) {
     lazyStatics.add(element);
   }
 
-  void addCompileTimeConstantForEmission(ConstantValue constant) {
-    compiledConstants.add(constant);
-  }
-
-  List<FieldElement> getLazilyInitializedFieldsForEmission() {
-    return new List<FieldElement>.from(lazyStatics);
-  }
-
-  /**
-   * Returns a list of constants topologically sorted so that dependencies
-   * appear before the dependent constant.  [preSortCompare] is a comparator
-   * function that gives the constants a consistent order prior to the
-   * topological sort which gives the constants an ordering that is less
-   * sensitive to perturbations in the source code.
-   */
-  List<ConstantValue> getConstantsForEmission([preSortCompare]) {
-    // We must emit dependencies before their uses.
-    Set<ConstantValue> seenConstants = new Set<ConstantValue>();
-    List<ConstantValue> result = new List<ConstantValue>();
-
-    void addConstant(ConstantValue constant) {
-      if (!seenConstants.contains(constant)) {
-        constant.getDependencies().forEach(addConstant);
-        assert(!seenConstants.contains(constant));
-        result.add(constant);
-        seenConstants.add(constant);
-      }
-    }
-
-    List<ConstantValue> sorted = compiledConstants.toList();
-    if (preSortCompare != null) {
-      sorted.sort(preSortCompare);
-    }
-    sorted.forEach(addConstant);
-    return result;
+  List<FieldEntity> getLazilyInitializedFieldsForEmission() {
+    return new List<FieldEntity>.from(lazyStatics);
   }
 
   ConstantExpression compileNode(Node node, TreeElements elements,

@@ -4,42 +4,52 @@
 
 library fasta.prefix_builder;
 
-import 'builder.dart' show Builder, LibraryBuilder, MemberBuilder;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart' show LibraryDependency;
 
-import '../messages.dart' show warning;
-
-import 'package:compiler_unsupported/_internal/kernel/ast.dart' show Member;
-
-import '../dill/dill_member_builder.dart' show DillMemberBuilder;
-
-import '../errors.dart' show internalError;
+import 'builder.dart' show Builder, LibraryBuilder, Scope, LoadLibraryBuilder;
 
 class PrefixBuilder extends Builder {
   final String name;
 
-  final Map<String, Builder> exports;
+  final Scope exportScope = new Scope.top();
 
   final LibraryBuilder parent;
 
-  PrefixBuilder(this.name, this.exports, LibraryBuilder parent, int charOffset)
-      : parent = parent,
-        super(parent, charOffset, parent.fileUri);
+  final LibraryDependency dependency;
 
-  Member findTopLevelMember(String name) {
-    // TODO(ahe): Move this to KernelPrefixBuilder.
-    Builder builder = exports[name];
-    if (builder == null) {
-      warning(
-          parent.fileUri, -1, "'${this.name}' has no member named '$name'.");
+  LoadLibraryBuilder loadLibraryBuilder;
+
+  final bool deferred;
+
+  @override
+  final int charOffset;
+
+  PrefixBuilder(this.name, this.deferred, LibraryBuilder parent,
+      this.dependency, int charOffset)
+      : parent = parent,
+        charOffset = charOffset,
+        super(parent, charOffset, parent.fileUri) {
+    if (deferred) {
+      loadLibraryBuilder =
+          new LoadLibraryBuilder(parent, dependency, charOffset);
+      addToExportScope('loadLibrary', loadLibraryBuilder, charOffset);
     }
-    if (builder is DillMemberBuilder) {
-      return builder.member.isInstanceMember
-          ? internalError("Unexpected instance member in export scope")
-          : builder.member;
-    } else if (builder is MemberBuilder) {
-      return builder.target;
+  }
+
+  Builder lookup(String name, int charOffset, Uri fileUri) {
+    return exportScope.lookup(name, charOffset, fileUri);
+  }
+
+  void addToExportScope(String name, Builder member, int charOffset) {
+    Map<String, Builder> map =
+        member.isSetter ? exportScope.setters : exportScope.local;
+    Builder existing = map[name];
+    if (existing != null) {
+      map[name] = parent.buildAmbiguousBuilder(
+          name, existing, member, charOffset,
+          isExport: true);
     } else {
-      return null;
+      map[name] = member;
     }
   }
 

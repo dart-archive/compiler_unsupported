@@ -10,6 +10,7 @@ import '../elements/resolution_types.dart';
 import '../elements/types.dart';
 import '../js/js.dart' as js;
 import '../native/native.dart';
+import '../resolution/resolution_strategy.dart';
 import '../serialization/keys.dart';
 import '../serialization/serialization.dart'
     show DeserializerPlugin, ObjectDecoder, ObjectEncoder, SerializerPlugin;
@@ -53,8 +54,9 @@ class JavaScriptBackendSerializer implements SerializerPlugin {
 
   JavaScriptBackendSerializer(this._backend);
 
-  NativeBasicDataImpl get nativeBasicData => _backend.nativeBasicData;
-  NativeDataImpl get nativeData => _backend.nativeData;
+  NativeBasicDataImpl get nativeBasicData =>
+      _backend.compiler.frontendStrategy.nativeBasicData;
+  NativeDataBuilderImpl get nativeData => _backend.nativeDataBuilder;
 
   @override
   void onElement(Element element, ObjectEncoder createEncoder(String tag)) {
@@ -63,15 +65,15 @@ class JavaScriptBackendSerializer implements SerializerPlugin {
       return encoder ??= createEncoder(_BACKEND_DATA_TAG);
     }
 
-    String jsInteropLibraryName = nativeData.jsInteropLibraryNames[element];
+    String jsInteropLibraryName = nativeData.jsInteropLibraries[element];
     if (jsInteropLibraryName != null) {
       getEncoder().setString(JS_INTEROP_LIBRARY_NAME, jsInteropLibraryName);
     }
-    String jsInteropClassName = nativeData.jsInteropClassNames[element];
+    String jsInteropClassName = nativeData.jsInteropClasses[element];
     if (jsInteropClassName != null) {
       getEncoder().setString(JS_INTEROP_CLASS_NAME, jsInteropClassName);
     }
-    String jsInteropMemberName = nativeData.jsInteropMemberNames[element];
+    String jsInteropMemberName = nativeData.jsInteropMembers[element];
     if (jsInteropMemberName != null) {
       getEncoder().setString(JS_INTEROP_MEMBER_NAME, jsInteropMemberName);
     }
@@ -107,7 +109,7 @@ class JavaScriptBackendSerializer implements SerializerPlugin {
   }
 
   @override
-  void onData(NativeBehavior behavior, ObjectEncoder encoder) {
+  void onData(covariant NativeBehavior behavior, ObjectEncoder encoder) {
     NativeBehaviorSerialization.serializeNativeBehavior(behavior, encoder);
   }
 }
@@ -117,9 +119,13 @@ class JavaScriptBackendDeserializer implements DeserializerPlugin {
 
   JavaScriptBackendDeserializer(this._backend);
 
-  NativeBasicDataBuilderImpl get nativeBasicData =>
-      _backend.nativeBasicDataBuilder;
-  NativeDataImpl get nativeData => _backend.nativeData;
+  NativeBasicDataBuilderImpl get nativeBasicData {
+    ResolutionFrontEndStrategy frontendStrategy =
+        _backend.compiler.frontendStrategy;
+    return frontendStrategy.nativeBasicDataBuilder;
+  }
+
+  NativeDataBuilderImpl get nativeData => _backend.nativeDataBuilder;
 
   @override
   void onElement(Element element, ObjectDecoder getDecoder(String tag)) {
@@ -129,13 +135,13 @@ class JavaScriptBackendDeserializer implements DeserializerPlugin {
         String jsInteropLibraryName =
             decoder.getString(JS_INTEROP_LIBRARY_NAME, isOptional: true);
         if (jsInteropLibraryName != null) {
-          nativeData.jsInteropLibraryNames[element] = jsInteropLibraryName;
+          nativeData.jsInteropLibraries[element] = jsInteropLibraryName;
         }
       } else if (element is ClassElement) {
         String jsInteropClassName =
             decoder.getString(JS_INTEROP_CLASS_NAME, isOptional: true);
         if (jsInteropClassName != null) {
-          nativeData.jsInteropClassNames[element] = jsInteropClassName;
+          nativeData.jsInteropClasses[element] = jsInteropClassName;
         }
         String nativeClassTagInfo =
             decoder.getString(NATIVE_CLASS_TAG_INFO, isOptional: true);
@@ -147,7 +153,7 @@ class JavaScriptBackendDeserializer implements DeserializerPlugin {
         String jsInteropMemberName =
             decoder.getString(JS_INTEROP_MEMBER_NAME, isOptional: true);
         if (jsInteropMemberName != null) {
-          nativeData.jsInteropMemberNames[element] = jsInteropMemberName;
+          nativeData.jsInteropMembers[element] = jsInteropMemberName;
         }
         String nativeMemberName =
             decoder.getString(NATIVE_MEMBER_NAME, isOptional: true);
@@ -225,10 +231,10 @@ class NativeBehaviorSerialization {
 
   /// Returns a list of the names of the [SpecialType]s in [types].
   static List<String> filterSpecialTypes(List types) {
-    return types
-        .where((type) => getTypeKind(type) == SPECIAL_TYPE)
-        .map((SpecialType type) => type.name)
-        .toList();
+    return types.where((type) => getTypeKind(type) == SPECIAL_TYPE).map((t) {
+      SpecialType type = t;
+      return type.name;
+    }).toList();
   }
 
   static void serializeNativeBehavior(
@@ -266,7 +272,7 @@ class NativeBehaviorSerialization {
         .addAll(decoder.getTypes(DART_TYPES_RETURNED, isOptional: true));
     behavior.typesReturned.addAll(decoder
         .getElements(THIS_TYPES_RETURNED, isOptional: true)
-        .map((element) => element.thisType)
+        .map((dynamic element) => element.thisType)
         .toList());
     behavior.typesReturned.addAll(decoder
         .getStrings(SPECIAL_TYPES_RETURNED, isOptional: true)
@@ -276,7 +282,7 @@ class NativeBehaviorSerialization {
         .addAll(decoder.getTypes(DART_TYPES_INSTANTIATED, isOptional: true));
     behavior.typesInstantiated.addAll(decoder
         .getElements(THIS_TYPES_INSTANTIATED, isOptional: true)
-        .map((element) => element.thisType)
+        .map((dynamic element) => element.thisType)
         .toList());
     behavior.typesInstantiated.addAll(decoder
         .getStrings(SPECIAL_TYPES_INSTANTIATED, isOptional: true)

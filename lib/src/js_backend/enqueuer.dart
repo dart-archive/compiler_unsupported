@@ -6,16 +6,13 @@ library dart2js.js.enqueue;
 
 import 'dart:collection' show Queue;
 
-import '../common/codegen.dart' show CodegenWorkItem;
 import '../common/tasks.dart' show CompilerTask;
 import '../common/work.dart' show WorkItem;
 import '../common.dart';
-import '../elements/resolution_types.dart'
-    show ResolutionDartType, ResolutionInterfaceType;
-import '../elements/elements.dart' show MemberElement;
+import '../common_elements.dart' show ElementEnvironment;
 import '../elements/entities.dart';
+import '../elements/types.dart';
 import '../enqueue.dart';
-import '../js_backend/backend.dart' show JavaScriptBackend;
 import '../options.dart';
 import '../universe/world_builder.dart';
 import '../universe/use.dart'
@@ -51,7 +48,7 @@ class CodegenEnqueuer extends EnqueuerImpl {
   final Queue<WorkItem> _queue = new Queue<WorkItem>();
 
   /// All declaration elements that have been processed by codegen.
-  final Set<Entity> _processedEntities = new Set<Entity>();
+  final Set<MemberEntity> _processedEntities = new Set<MemberEntity>();
 
   static const ImpactUseCase IMPACT_USE =
       const ImpactUseCase('CodegenEnqueuer');
@@ -69,8 +66,7 @@ class CodegenEnqueuer extends EnqueuerImpl {
   @override
   void checkQueueIsEmpty() {
     if (_queue.isNotEmpty) {
-      throw new SpannableAssertionFailure(
-          _queue.first.element, "$name queue is not empty.");
+      failedAt(_queue.first.element, "$name queue is not empty.");
     }
   }
 
@@ -86,8 +82,7 @@ class CodegenEnqueuer extends EnqueuerImpl {
     if (workItem == null) return;
 
     if (queueIsClosed) {
-      throw new SpannableAssertionFailure(
-          entity, "Codegen work list is closed. Trying to add $entity");
+      failedAt(entity, "Codegen work list is closed. Trying to add $entity");
     }
 
     applyImpact(listener.registerUsedElement(entity));
@@ -100,7 +95,7 @@ class CodegenEnqueuer extends EnqueuerImpl {
         impactSource, worldImpact, _impactVisitor, impactUse);
   }
 
-  void _registerInstantiatedType(ResolutionInterfaceType type,
+  void _registerInstantiatedType(InterfaceType type,
       {bool mirrorUsage: false, bool nativeUsage: false}) {
     task.measure(() {
       _worldBuilder.registerTypeInstantiation(type, _applyClassUse,
@@ -109,14 +104,15 @@ class CodegenEnqueuer extends EnqueuerImpl {
     });
   }
 
-  bool checkNoEnqueuedInvokedInstanceMethods() {
-    return strategy.checkEnqueuerConsistency(this);
+  bool checkNoEnqueuedInvokedInstanceMethods(
+      ElementEnvironment elementEnvironment) {
+    return strategy.checkEnqueuerConsistency(this, elementEnvironment);
   }
 
   void checkClass(ClassEntity cls) {
     _worldBuilder.processClassMembers(cls, (MemberEntity member, useSet) {
       if (useSet.isNotEmpty) {
-        throw new SpannableAssertionFailure(member,
+        failedAt(member,
             'Unenqueued use of $member: ${useSet.iterable(MemberUse.values)}');
       }
     });
@@ -174,7 +170,7 @@ class CodegenEnqueuer extends EnqueuerImpl {
   }
 
   void processTypeUse(TypeUse typeUse) {
-    ResolutionDartType type = typeUse.type;
+    DartType type = typeUse.type;
     switch (typeUse.kind) {
       case TypeUseKind.INSTANTIATION:
         _registerInstantiatedType(type);
@@ -209,13 +205,14 @@ class CodegenEnqueuer extends EnqueuerImpl {
     });
   }
 
-  void _registerIsCheck(ResolutionDartType type) {
+  void _registerIsCheck(DartType type) {
     _worldBuilder.registerIsCheck(type);
   }
 
-  void _registerClosurizedMember(MemberElement element) {
+  void _registerClosurizedMember(FunctionEntity element) {
     assert(element.isInstanceMember);
     applyImpact(listener.registerClosurizedMember(element));
+    _worldBuilder.registerClosurizedMember(element);
   }
 
   void forEach(void f(WorkItem work)) {
@@ -230,7 +227,7 @@ class CodegenEnqueuer extends EnqueuerImpl {
           _processedEntities.add(work.element);
         }
       }
-      List recents = _recentClasses.toList(growable: false);
+      List<ClassEntity> recents = _recentClasses.toList(growable: false);
       _recentClasses.clear();
       _recentConstants = false;
       if (!_onQueueEmpty(recents)) _recentClasses.addAll(recents);
@@ -259,35 +256,8 @@ class CodegenEnqueuer extends EnqueuerImpl {
   ImpactUseCase get impactUse => IMPACT_USE;
 
   @override
-  Iterable<Entity> get processedEntities => _processedEntities;
+  Iterable<MemberEntity> get processedEntities => _processedEntities;
 
   @override
   Iterable<ClassEntity> get processedClasses => _worldBuilder.processedClasses;
-}
-
-/// Builder that creates the work item necessary for the code generation of a
-/// [MemberElement].
-class CodegenWorkItemBuilder extends WorkItemBuilder {
-  JavaScriptBackend _backend;
-  CompilerOptions _options;
-
-  CodegenWorkItemBuilder(this._backend, this._options);
-
-  @override
-  WorkItem createWorkItem(MemberElement element) {
-    assert(invariant(element, element.isDeclaration));
-    // Don't generate code for foreign elements.
-    if (_backend.isForeign(element)) return null;
-    if (element.isAbstract) return null;
-
-    // Codegen inlines field initializers. It only needs to generate
-    // code for checked setters.
-    if (element.isField && element.isInstanceMember) {
-      if (!_options.enableTypeAssertions ||
-          element.enclosingElement.isClosure) {
-        return null;
-      }
-    }
-    return new CodegenWorkItem(_backend, element);
-  }
 }

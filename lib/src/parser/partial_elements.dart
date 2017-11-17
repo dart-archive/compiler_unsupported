@@ -35,15 +35,15 @@ import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart'
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart' as Tokens show EOF_TOKEN;
 import '../tree/tree.dart';
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/parser.dart'
-    show ClassMemberParser, Listener, Parser, ParserError;
+    show ClassMemberParser, Listener, MemberKind, Parser, ParserError;
 import 'member_listener.dart' show MemberListener;
 import 'node_listener.dart' show NodeListener;
 
 class ClassElementParser extends ClassMemberParser {
   ClassElementParser(Listener listener) : super(listener);
 
-  Token parseFormalParameters(Token token, {bool inFunctionType: false}) {
-    return skipFormalParameters(token);
+  Token parseFormalParameters(Token token, MemberKind kind) {
+    return skipFormalParameters(token, kind);
   }
 }
 
@@ -85,8 +85,8 @@ abstract class PartialFunctionMixin implements BaseFunctionElementX {
   bool get hasNode => cachedNode != null;
 
   FunctionExpression get node {
-    assert(invariant(this, cachedNode != null,
-        message: "Node has not been computed for $this."));
+    assert(cachedNode != null,
+        failedAt(this, "Node has not been computed for $this."));
     return cachedNode;
   }
 
@@ -95,8 +95,10 @@ abstract class PartialFunctionMixin implements BaseFunctionElementX {
     parseFunction(Parser p) {
       if (isClassMember && modifiers.isFactory) {
         p.parseFactoryMethod(beginToken);
+      } else if (isClassMember) {
+        p.parseMember(beginToken);
       } else {
-        p.parseFunction(beginToken, getOrSet);
+        p.parseTopLevelMember(p.syntheticPreviousToken(beginToken));
       }
     }
 
@@ -137,6 +139,7 @@ abstract class PartialFunctionElement
   PartialFunctionElement copyWithEnclosing(Element enclosing);
 }
 
+// ignore: STRONG_MODE_INVALID_METHOD_OVERRIDE_FROM_BASE
 class PartialMethodElement extends MethodElementX
     with PartialElement, PartialFunctionMixin
     implements PartialFunctionElement {
@@ -159,6 +162,7 @@ class PartialMethodElement extends MethodElementX
   }
 }
 
+// ignore: STRONG_MODE_INVALID_METHOD_OVERRIDE_FROM_BASE
 class PartialGetterElement extends GetterElementX
     with PartialElement, PartialFunctionMixin
     implements GetterElement, PartialFunctionElement {
@@ -184,6 +188,7 @@ class PartialGetterElement extends GetterElementX
   }
 }
 
+// ignore: STRONG_MODE_INVALID_METHOD_OVERRIDE_FROM_BASE
 class PartialSetterElement extends SetterElementX
     with PartialElement, PartialFunctionMixin
     implements SetterElement, PartialFunctionElement {
@@ -326,7 +331,7 @@ class PartialMetadataAnnotation extends MetadataAnnotationX
   Node parseNode(ParsingContext parsing) {
     if (cachedNode != null) return cachedNode;
     var metadata = parse(parsing, annotatedElement, declarationSite,
-        (p) => p.parseMetadata(beginToken));
+        (p) => p.parseMetadata(p.syntheticPreviousToken(beginToken)));
     if (metadata is Metadata) {
       cachedNode = metadata.expression;
       return cachedNode;
@@ -339,7 +344,7 @@ class PartialMetadataAnnotation extends MetadataAnnotationX
   bool get hasNode => cachedNode != null;
 
   Node get node {
-    assert(invariant(this, hasNode));
+    assert(hasNode, failedAt(this));
     return cachedNode;
   }
 }
@@ -369,8 +374,8 @@ class PartialClassElement extends ClassElementX with PartialElement {
   bool get hasNode => cachedNode != null;
 
   ClassNode get node {
-    assert(invariant(this, cachedNode != null,
-        message: "Node has not been computed for $this."));
+    assert(cachedNode != null,
+        failedAt(this, "Node has not been computed for $this."));
     return cachedNode;
   }
 
@@ -386,9 +391,10 @@ class PartialClassElement extends ClassElementX with PartialElement {
           Token token = parser.parseTopLevelDeclaration(beginToken);
           assert(identical(token, endToken.next));
           cachedNode = listener.popNode();
-          assert(invariant(
-              reporter.spanFromToken(beginToken), listener.nodes.isEmpty,
-              message: "Non-empty listener stack: ${listener.nodes}"));
+          assert(
+              listener.nodes.isEmpty,
+              failedAt(reporter.spanFromToken(beginToken),
+                  "Non-empty listener stack: ${listener.nodes}"));
         } on ParserError {
           // TODO(ahe): Often, a ParserError is thrown while parsing the class
           // body. This means that the stack actually contains most of the

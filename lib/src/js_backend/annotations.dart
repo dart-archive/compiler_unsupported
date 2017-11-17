@@ -4,82 +4,62 @@
 
 library js_backend.backend.annotations;
 
-import '../common.dart';
-import '../compiler.dart' show Compiler;
+import '../common_elements.dart' show CommonElements, ElementEnvironment;
 import '../constants/values.dart';
-import '../elements/elements.dart';
-import 'backend.dart';
+import '../elements/entities.dart';
 
-/// Handling of special annotations for tests.
-class Annotations {
-  static final Uri PACKAGE_EXPECT =
-      new Uri(scheme: 'package', path: 'expect/expect.dart');
+/// Returns `true` if inlining is disabled for [element].
+bool noInline(ElementEnvironment elementEnvironment,
+    CommonElements commonElements, MemberEntity element) {
+  if (_hasAnnotation(
+      elementEnvironment, element, commonElements.metaNoInlineClass)) {
+    return true;
+  }
+  if (_hasAnnotation(
+      elementEnvironment, element, commonElements.expectNoInlineClass)) {
+    // TODO(floitsch): restrict to elements from the test directory.
+    return true;
+  }
+  return _hasAnnotation(
+      elementEnvironment, element, commonElements.noInlineClass);
+}
 
-  final Compiler compiler;
+/// Returns `true` if inlining is requested for [element].
+bool tryInline(ElementEnvironment elementEnvironment,
+    CommonElements commonElements, MemberEntity element) {
+  if (_hasAnnotation(
+      elementEnvironment, element, commonElements.metaTryInlineClass)) {
+    return true;
+  }
+  return false;
+}
 
-  ClassElement expectNoInlineClass;
-  ClassElement expectTrustTypeAnnotationsClass;
-  ClassElement expectAssumeDynamicClass;
+/// Returns `true` if parameter and returns types should be trusted for
+/// [element].
+bool trustTypeAnnotations(ElementEnvironment elementEnvironment,
+    CommonElements commonElements, MemberEntity element) {
+  return _hasAnnotation(elementEnvironment, element,
+      commonElements.expectTrustTypeAnnotationsClass);
+}
 
-  JavaScriptBackend get backend => compiler.backend;
+/// Returns `true` if inference of parameter types is disabled for [element].
+bool assumeDynamic(ElementEnvironment elementEnvironment,
+    CommonElements commonElements, MemberEntity element) {
+  return _hasAnnotation(
+      elementEnvironment, element, commonElements.expectAssumeDynamicClass);
+}
 
-  DiagnosticReporter get reporter => compiler.reporter;
-
-  Annotations(this.compiler);
-
-  void onLibraryLoaded(LibraryElement library) {
-    if (library.canonicalUri == PACKAGE_EXPECT) {
-      expectNoInlineClass = library.find('NoInline');
-      expectTrustTypeAnnotationsClass = library.find('TrustTypeAnnotations');
-      expectAssumeDynamicClass = library.find('AssumeDynamic');
-      if (expectNoInlineClass == null ||
-          expectTrustTypeAnnotationsClass == null ||
-          expectAssumeDynamicClass == null) {
-        // This is not the package you're looking for.
-        expectNoInlineClass = null;
-        expectTrustTypeAnnotationsClass = null;
-        expectAssumeDynamicClass = null;
+/// Returns `true` if [element] is annotated with [annotationClass].
+bool _hasAnnotation(ElementEnvironment elementEnvironment, MemberEntity element,
+    ClassEntity annotationClass) {
+  if (annotationClass == null) return false;
+  for (ConstantValue value in elementEnvironment.getMemberMetadata(element)) {
+    if (value.isConstructedObject) {
+      ConstructedConstantValue constructedConstant = value;
+      if (constructedConstant.type.element == annotationClass) {
+        return true;
       }
     }
   }
-
-  /// Returns `true` if inlining is disabled for [element].
-  bool noInline(Element element) {
-    if (_hasAnnotation(element, expectNoInlineClass)) {
-      // TODO(floitsch): restrict to elements from the test directory.
-      return true;
-    }
-    return _hasAnnotation(element, backend.helpers.noInlineClass);
-  }
-
-  /// Returns `true` if parameter and returns types should be trusted for
-  /// [element].
-  bool trustTypeAnnotations(Element element) {
-    return _hasAnnotation(element, expectTrustTypeAnnotationsClass);
-  }
-
-  /// Returns `true` if inference of parameter types is disabled for [element].
-  bool assumeDynamic(Element element) {
-    return _hasAnnotation(element, expectAssumeDynamicClass);
-  }
-
-  /// Returns `true` if [element] is annotated with [annotationClass].
-  bool _hasAnnotation(Element element, ClassElement annotationClass) {
-    if (annotationClass == null) return false;
-    return reporter.withCurrentElement(element, () {
-      for (MetadataAnnotation metadata in element.metadata) {
-        assert(invariant(metadata, metadata.constant != null,
-            message: "Unevaluated metadata constant."));
-        ConstantValue value =
-            compiler.constants.getConstantValue(metadata.constant);
-        if (value.isConstructedObject) {
-          ConstructedConstantValue constructedConstant = value;
-          if (constructedConstant.type.element == annotationClass) {
-            return true;
-          }
-        }
-      }
-      return false;
-    });
-  }
+  return false;
 }

@@ -8,16 +8,30 @@ import 'dart:_js_helper' show patch, checkNum;
 import 'dart:typed_data' show ByteData;
 
 @patch
+T min<T extends num>(T a, T b) => JS(
+    'returns:num;depends:none;effects:none;gvn:true',
+    r'Math.min(#, #)',
+    checkNum(a),
+    checkNum(b));
+
+@patch
+T max<T extends num>(T a, T b) => JS(
+    'returns:num;depends:none;effects:none;gvn:true',
+    r'Math.max(#, #)',
+    checkNum(a),
+    checkNum(b));
+
+@patch
 double sqrt(num x) => JS('num', r'Math.sqrt(#)', checkNum(x));
 
 @patch
-double sin(num x) => JS('num', r'Math.sin(#)', checkNum(x));
+double sin(num radians) => JS('num', r'Math.sin(#)', checkNum(radians));
 
 @patch
-double cos(num x) => JS('num', r'Math.cos(#)', checkNum(x));
+double cos(num radians) => JS('num', r'Math.cos(#)', checkNum(radians));
 
 @patch
-double tan(num x) => JS('num', r'Math.tan(#)', checkNum(x));
+double tan(num radians) => JS('num', r'Math.tan(#)', checkNum(radians));
 
 @patch
 double acos(num x) => JS('num', r'Math.acos(#)', checkNum(x));
@@ -65,21 +79,21 @@ class _JSRandom implements Random {
 
   int nextInt(int max) {
     if (max <= 0 || max > _POW2_32) {
-      throw new RangeError("max must be in range 0 < max ≤ 2^32, was $max");
+      throw new RangeError('max must be in range 0 < max ≤ 2^32, was $max');
     }
-    return JS("int", "(Math.random() * #) >>> 0", max);
+    return JS('int', '(Math.random() * #) >>> 0', max);
   }
 
   /**
    * Generates a positive random floating point value uniformly distributed on
    * the range from 0.0, inclusive, to 1.0, exclusive.
    */
-  double nextDouble() => JS("double", "Math.random()");
+  double nextDouble() => JS('double', 'Math.random()');
 
   /**
    * Generates a random boolean value.
    */
-  bool nextBool() => JS("bool", "Math.random() < 0.5");
+  bool nextBool() => JS('bool', 'Math.random() < 0.5');
 }
 
 class _Random implements Random {
@@ -201,7 +215,7 @@ class _Random implements Random {
 
   int nextInt(int max) {
     if (max <= 0 || max > _POW2_32) {
-      throw new RangeError("max must be in range 0 < max ≤ 2^32, was $max");
+      throw new RangeError('max must be in range 0 < max ≤ 2^32, was $max');
     }
     if ((max & (max - 1)) == 0) {
       // Fast case for powers of two.
@@ -238,20 +252,20 @@ class _JSSecureRandom implements Random {
   final _buffer = new ByteData(8);
 
   _JSSecureRandom() {
-    var crypto = JS("", "self.crypto");
+    var crypto = JS('', 'self.crypto');
     if (crypto != null) {
-      var getRandomValues = JS("", "#.getRandomValues", crypto);
+      var getRandomValues = JS('', '#.getRandomValues', crypto);
       if (getRandomValues != null) {
         return;
       }
     }
     throw new UnsupportedError(
-        "No source of cryptographically secure random numbers available.");
+        'No source of cryptographically secure random numbers available.');
   }
 
   /// Fill _buffer from [start] to `start + length` with random bytes.
   void _getRandomBytes(int start, int length) {
-    JS("void", "crypto.getRandomValues(#)",
+    JS('void', 'crypto.getRandomValues(#)',
         _buffer.buffer.asUint8List(start, length));
   }
 
@@ -282,7 +296,7 @@ class _JSSecureRandom implements Random {
 
   int nextInt(int max) {
     if (max <= 0 || max > _POW2_32) {
-      throw new RangeError("max must be in range 0 < max ≤ 2^32, was $max");
+      throw new RangeError('max must be in range 0 < max ≤ 2^32, was $max');
     }
     int byteCount = 1;
     if (max > 0xFF) {

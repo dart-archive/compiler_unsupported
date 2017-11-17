@@ -4,9 +4,11 @@
 
 library fasta.scanner.recover;
 
+import '../../scanner/token.dart' show TokenType;
+
 import '../fasta_codes.dart'
     show
-        FastaCode,
+        Code,
         codeAsciiControlCharacter,
         codeEncoding,
         codeExpectedHexDigit,
@@ -18,13 +20,11 @@ import '../fasta_codes.dart'
         codeUnterminatedComment,
         codeUnterminatedString;
 
-import 'token.dart' show StringToken, SymbolToken, Token;
+import '../../scanner/token.dart' show Token;
+
+import 'token.dart' show StringToken;
 
 import 'error_token.dart' show NonAsciiIdentifierToken, ErrorToken;
-
-import 'precedence.dart' as Precedence;
-
-import 'precedence.dart' show PrecedenceInfo;
 
 /// Recover from errors in [tokens]. The original sources are provided as
 /// [bytes]. [lineStarts] are the beginning character offsets of lines, and
@@ -86,13 +86,13 @@ Token defaultRecoveryStrategy(
     // [errorTail] ends. This is the case for "b" above.
     bool append = false;
     if (goodTail != null) {
-      if (goodTail.info == Precedence.IDENTIFIER_INFO &&
+      if (goodTail.type == TokenType.IDENTIFIER &&
           goodTail.charEnd == first.charOffset) {
         prepend = true;
       }
     }
     Token next = errorTail.next;
-    if (next.info == Precedence.IDENTIFIER_INFO &&
+    if (next.type == TokenType.IDENTIFIER &&
         errorTail.charOffset + 1 == next.charOffset) {
       append = true;
     }
@@ -123,28 +123,25 @@ Token defaultRecoveryStrategy(
       next = next.next;
     }
     String value = new String.fromCharCodes(codeUnits);
-    return synthesizeToken(charOffset, value, Precedence.IDENTIFIER_INFO)
+    return synthesizeToken(charOffset, value, TokenType.IDENTIFIER)
       ..next = next;
   }
 
   recoverExponent() {
-    return synthesizeToken(errorTail.charOffset, "NaN", Precedence.DOUBLE_INFO)
-      ..next = errorTail.next;
+    return errorTail.next;
   }
 
   recoverString() {
-    // TODO(ahe): Improve this.
-    return skipToEof(errorTail);
+    return errorTail.next;
   }
 
   recoverHexDigit() {
-    return synthesizeToken(errorTail.charOffset, "-1", Precedence.INT_INFO)
+    return synthesizeToken(errorTail.charOffset, "0", TokenType.INT)
       ..next = errorTail.next;
   }
 
   recoverStringInterpolation() {
-    // TODO(ahe): Improve this.
-    return skipToEof(errorTail);
+    return errorTail.next;
   }
 
   recoverComment() {
@@ -154,32 +151,31 @@ Token defaultRecoveryStrategy(
 
   recoverUnmatched() {
     // TODO(ahe): Try to use top-level keywords (such as `class`, `typedef`,
-    // and `enum`) and identation to recover.
+    // and `enum`) and indentation to recover.
     return errorTail.next;
   }
 
   for (Token current = tokens; !current.isEof; current = current.next) {
-    if (current is ErrorToken) {
+    while (current is ErrorToken) {
       ErrorToken first = current;
       Token next = current;
-      bool treatAsWhitespace = false;
       do {
         current = next;
         if (errorTail == null) {
           error = next;
         } else {
           errorTail.next = next;
-          next.previousToken = errorTail;
+          next.previous = errorTail;
         }
         errorTail = next;
         next = next.next;
       } while (next is ErrorToken && first.errorCode == next.errorCode);
 
-      FastaCode code = first.errorCode;
+      Code code = first.errorCode;
       if (code == codeEncoding ||
           code == codeNonAsciiWhitespace ||
           code == codeAsciiControlCharacter) {
-        treatAsWhitespace = true;
+        current = errorTail.next;
       } else if (code == codeNonAsciiIdentifier) {
         current = recoverIdentifier(first);
         assert(current.next != null);
@@ -202,36 +198,34 @@ Token defaultRecoveryStrategy(
         current = recoverUnmatched();
         assert(current.next != null);
       } else {
-        treatAsWhitespace = true;
+        current = errorTail.next;
       }
-      if (treatAsWhitespace) continue;
     }
     if (goodTail == null) {
       good = current;
     } else {
       goodTail.next = current;
-      current.previousToken = goodTail;
+      current.previous = goodTail;
     }
     beforeGoodTail = goodTail;
     goodTail = current;
   }
 
-  error.previousToken = new SymbolToken.eof(-1)..next = error;
+  error.previous = new Token.eof(-1)..next = error;
   Token tail;
   if (good != null) {
     errorTail.next = good;
-    good.previousToken = errorTail;
+    good.previous = errorTail;
     tail = goodTail;
   } else {
     tail = errorTail;
   }
-  if (!tail.isEof)
-    tail.next = new SymbolToken.eof(tail.end)..previousToken = tail;
+  if (!tail.isEof) tail.next = new Token.eof(tail.end)..previous = tail;
   return error;
 }
 
-Token synthesizeToken(int charOffset, String value, PrecedenceInfo info) {
-  return new StringToken.fromString(info, value, charOffset);
+Token synthesizeToken(int charOffset, String value, TokenType type) {
+  return new StringToken.fromString(type, value, charOffset);
 }
 
 Token skipToEof(Token token) {
@@ -249,4 +243,17 @@ String closeBraceFor(String openBrace) {
     '<': '>',
     r'${': '}',
   }[openBrace];
+}
+
+String closeQuoteFor(String openQuote) {
+  return const {
+    '"': '"',
+    "'": "'",
+    '"""': '"""',
+    "'''": "'''",
+    'r"': '"',
+    "r'": "'",
+    'r"""': '"""',
+    "r'''": "'''",
+  }[openQuote];
 }
