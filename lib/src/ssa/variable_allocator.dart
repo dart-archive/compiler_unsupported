@@ -3,7 +3,6 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../common.dart';
-import '../compiler.dart' show Compiler;
 import '../js_backend/js_backend.dart';
 import 'nodes.dart';
 
@@ -215,8 +214,7 @@ class SsaLiveIntervalBuilder extends HBaseVisitor {
   void visitGraph(HGraph graph) {
     visitPostDominatorTree(graph);
     if (!liveInstructions[graph.entry].isEmpty) {
-      throw new SpannableAssertionFailure(
-          CURRENT_ELEMENT_SPANNABLE, 'LiveIntervalBuilder.');
+      failedAt(CURRENT_ELEMENT_SPANNABLE, 'LiveIntervalBuilder.');
     }
   }
 
@@ -244,7 +242,7 @@ class SsaLiveIntervalBuilder extends HBaseVisitor {
   // When looking for the checkedInstructionOrNonGenerateAtUseSite of t3 we must
   // return t2.
   HInstruction checkedInstructionOrNonGenerateAtUseSite(HCheck check) {
-    var checked = check.checkedInput;
+    dynamic checked = check.checkedInput;
     while (checked is HCheck) {
       HInstruction next = checked.checkedInput;
       if (generateAtUseSite.contains(next)) break;
@@ -558,7 +556,12 @@ class VariableNamer {
     }
 
     if (instruction.sourceElement != null) {
-      name = allocateWithHint(instruction.sourceElement.name);
+      if (instruction.sourceElement.name != null) {
+        name = allocateWithHint(instruction.sourceElement.name);
+      } else {
+        // Source element is synthesized and has no name.
+        name = allocateTemporary();
+      }
     } else {
       // We could not find an element for the instruction. If the
       // instruction is used by a phi, try to use the name of the phi.

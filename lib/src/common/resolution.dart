@@ -8,7 +8,7 @@ import '../common.dart';
 import '../compile_time_constants.dart';
 import '../constants/expressions.dart' show ConstantExpression;
 import '../constants/values.dart' show ConstantValue;
-import '../common_elements.dart' show CommonElements;
+import '../common_elements.dart' show CommonElements, ElementEnvironment;
 import '../elements/resolution_types.dart' show ResolutionDartType, Types;
 import '../elements/elements.dart'
     show
@@ -55,8 +55,8 @@ class _ResolutionWorkItem extends WorkItem implements ResolutionWorkItem {
   _ResolutionWorkItem(this.resolution, this.element);
 
   WorldImpact run() {
-    assert(invariant(element, !_isAnalyzed,
-        message: 'Element ${element} has already been analyzed'));
+    assert(!_isAnalyzed,
+        failedAt(element, 'Element ${element} has already been analyzed'));
     WorldImpact impact = resolution.computeWorldImpact(element);
     _isAnalyzed = true;
     return impact;
@@ -72,15 +72,9 @@ class ResolutionImpact extends WorldImpact {
   Iterable<String> get constSymbolNames => const <String>[];
   Iterable<ConstantExpression> get constantLiterals =>
       const <ConstantExpression>[];
+  Iterable<ClassEntity> get seenClasses => const <ClassEntity>[];
 
   Iterable<dynamic> get nativeData => const <dynamic>[];
-}
-
-/// Interface for the accessing the front-end analysis.
-// TODO(johnniwinther): Find a better name for this.
-abstract class Frontend {
-  /// Returns the [ResolutionImpact] for [element].
-  ResolutionImpact getResolutionImpact(Element element);
 }
 
 /// Interface defining target-specific behavior for resolution.
@@ -126,9 +120,10 @@ abstract class Target {
 }
 
 // TODO(johnniwinther): Rename to `Resolver` or `ResolverContext`.
-abstract class Resolution implements Frontend {
+abstract class Resolution {
   ParsingContext get parsingContext;
   DiagnosticReporter get reporter;
+  ElementEnvironment get elementEnvironment;
   CommonElements get commonElements;
   Types get types;
   Target get target;
@@ -150,7 +145,6 @@ abstract class Resolution implements Frontend {
 
   void resolveTypedef(TypedefElement typdef);
   void resolveClass(ClassElement cls);
-  void registerClass(ClassElement cls);
   void resolveMetadataAnnotation(MetadataAnnotation metadataAnnotation);
   FunctionSignature resolveSignature(FunctionElement function);
   ResolutionDartType resolveTypeAnnotation(
@@ -182,26 +176,26 @@ abstract class Resolution implements Frontend {
   ResolvedAst getResolvedAst(ExecutableElement element);
 
   /// Returns `true` if the [ResolutionImpact] for [element] is cached.
-  bool hasResolutionImpact(Element element);
+  bool hasResolutionImpact(MemberElement element);
 
   /// Returns the precomputed [ResolutionImpact] for [element].
-  ResolutionImpact getResolutionImpact(Element element);
+  ResolutionImpact getResolutionImpact(MemberElement element);
 
   /// Returns the [ResolvedAst] for [element], computing it if necessary.
-  ResolvedAst computeResolvedAst(Element element);
+  ResolvedAst computeResolvedAst(MemberElement element);
 
   /// Returns the precomputed [WorldImpact] for [element].
-  WorldImpact getWorldImpact(Element element);
+  WorldImpact getWorldImpact(MemberElement element);
 
   /// Computes the [WorldImpact] for [element].
-  WorldImpact computeWorldImpact(Element element);
+  WorldImpact computeWorldImpact(MemberElement element);
 
   WorldImpact transformResolutionImpact(
-      Element element, ResolutionImpact resolutionImpact);
+      MemberElement element, ResolutionImpact resolutionImpact);
 
   /// Removes the [WorldImpact] for [element] from the resolution cache. Later
   /// calls to [getWorldImpact] or [computeWorldImpact] returns an empty impact.
-  void uncacheWorldImpact(Element element);
+  void uncacheWorldImpact(MemberElement element);
 
   /// Removes the [WorldImpact]s for all [Element]s in the resolution cache. ,
   /// Later calls to [getWorldImpact] or [computeWorldImpact] returns an empty
@@ -211,6 +205,13 @@ abstract class Resolution implements Frontend {
   /// Returns `true` if [value] is the top-level [proxy] annotation from the
   /// core library.
   bool isProxyConstant(ConstantValue value);
+
+  // TODO(het): Remove this once we move to the kernel-based frontend. This is
+  // an escape hatch for types that can't be added to an impact. For example,
+  // resolving a method signature will register the classes seen in the
+  // signature.
+  @deprecated
+  void registerClass(ClassEntity cls);
 }
 
 /// A container of commonly used dependencies for tasks that involve parsing.

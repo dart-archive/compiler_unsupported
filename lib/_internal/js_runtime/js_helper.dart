@@ -309,6 +309,7 @@ class JSInvocationMirror implements Invocation {
   var /* String or Symbol */ _memberName;
   final String _internalName;
   final int _kind;
+  final List<Type> _typeArguments;
   final List _arguments;
   final List _namedArgumentNames;
   /** Map from argument name to index in _arguments. */
@@ -337,6 +338,11 @@ class JSInvocationMirror implements Invocation {
   bool get isGetter => _kind == GETTER;
   bool get isSetter => _kind == SETTER;
   bool get isAccessor => _kind != METHOD;
+
+  List<Type> get typeArguments {
+    // UNIMPLEMENTED
+    return const <Type>[];
+  }
 
   List get positionalArguments {
     if (isGetter) return const [];
@@ -368,7 +374,7 @@ class JSInvocationMirror implements Invocation {
     var name = _internalName;
     var arguments = _arguments;
     var interceptedNames = JS_EMBEDDED_GLOBAL('', INTERCEPTED_NAMES);
-    bool isIntercepted = JS("bool",
+    bool isIntercepted = JS('bool',
         'Object.prototype.hasOwnProperty.call(#, #)', interceptedNames, name);
     if (isIntercepted) {
       receiver = interceptor;
@@ -443,7 +449,7 @@ class CachedInvocation {
       this.cachedInterceptor);
 
   bool get isNoSuchMethod => false;
-  bool get isGetterStub => JS("bool", "!!#.\$getterStub", jsFunction);
+  bool get isGetterStub => JS('bool', '!!#.\$getterStub', jsFunction);
 
   /// Applies [jsFunction] to [victim] with [arguments].
   /// Users of this class must take care to check the arguments first.
@@ -455,7 +461,7 @@ class CachedInvocation {
       arguments = [victim]..addAll(arguments);
       if (cachedInterceptor != null) receiver = cachedInterceptor;
     }
-    return JS("var", "#.apply(#, #)", jsFunction, receiver, arguments);
+    return JS('var', '#.apply(#, #)', jsFunction, receiver, arguments);
   }
 }
 
@@ -508,7 +514,7 @@ class CachedCatchAllInvocation extends CachedInvocation {
     for (int i = providedArgumentCount; i < fullParameterCount; i++) {
       arguments.add(getMetadata(info.defaultValue(i)));
     }
-    return JS("var", "#.apply(#, #)", jsFunction, receiver, arguments);
+    return JS('var', '#.apply(#, #)', jsFunction, receiver, arguments);
   }
 }
 
@@ -1050,7 +1056,7 @@ class Primitives {
 
   static String flattenString(String str) {
     return JS('returns:String;depends:none;effects:none;throws:never;gvn:true',
-        "#.charCodeAt(0) == 0 ? # : #", str, str, str);
+        '#.charCodeAt(0) == 0 ? # : #', str, str, str);
   }
 
   static String getTimeZoneName(DateTime receiver) {
@@ -1085,15 +1091,16 @@ class Primitives {
     //       (Opera): Wed Nov 20 2013 11:03:38 GMT+0100
     match = JS('JSArray|Null', r'/(?:GMT|UTC)[+-]\d{4}/.exec(#.toString())', d);
     if (match != null) return match[0];
-    return "";
+    return '';
   }
 
   static int getTimeZoneOffsetInMinutes(DateTime receiver) {
     // Note that JS and Dart disagree on the sign of the offset.
-    return -JS('int', r'#.getTimezoneOffset()', lazyAsJsDate(receiver));
+    // Subtract to avoid -0.0
+    return 0 - JS('int', r'#.getTimezoneOffset()', lazyAsJsDate(receiver));
   }
 
-  static valueFromDecomposedDate(
+  static int valueFromDecomposedDate(
       years, month, day, hours, minutes, seconds, milliseconds, isUtc) {
     final int MAX_MILLISECONDS_SINCE_EPOCH = 8640000000000000;
     checkInt(years);
@@ -1105,6 +1112,14 @@ class Primitives {
     checkInt(milliseconds);
     checkBool(isUtc);
     var jsMonth = month - 1;
+    // The JavaScript Date constructor 'corrects' year NN to 19NN. Sidestep that
+    // correction by adjusting years out of that range and compensating with an
+    // adjustment of months. This hack should not be sensitive to leap years but
+    // use 400 just in case.
+    if (0 <= years && years < 100) {
+      years += 400;
+      jsMonth -= 400 * 12;
+    }
     var value;
     if (isUtc) {
       value = JS('num', r'Date.UTC(#, #, #, #, #, #, #)', years, jsMonth, day,
@@ -1118,18 +1133,7 @@ class Primitives {
         value > MAX_MILLISECONDS_SINCE_EPOCH) {
       return null;
     }
-    if (years <= 0 || years < 100) return patchUpY2K(value, years, isUtc);
-    return value;
-  }
-
-  static patchUpY2K(value, years, isUtc) {
-    var date = JS('', r'new Date(#)', value);
-    if (isUtc) {
-      JS('num', r'#.setUTCFullYear(#)', date, years);
-    } else {
-      JS('num', r'#.setFullYear(#)', date, years);
-    }
-    return JS('num', r'#.valueOf()', date);
+    return JS('int', '#', value);
   }
 
   // Lazily keep a JS Date stored in the JS object.
@@ -1144,43 +1148,74 @@ class Primitives {
   // The getters for date and time parts below add a positive integer to ensure
   // that the result is really an integer, because the JavaScript implementation
   // may return -0.0 instead of 0.
+  //
+  // They are marked as @NoThrows() because `receiver` comes from a receiver of
+  // a method on DateTime (i.e. is not `null`).
 
+  // TODO(sra): These methods are GVN-able. dart2js should implement an
+  // annotation for that.
+
+  // TODO(sra): These methods often occur in groups (e.g. day, month and
+  // year). Is it possible to factor them so that the `Date` is visible and can
+  // be GVN-ed without a lot of code bloat?
+
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getYear(DateTime receiver) {
     return (receiver.isUtc)
         ? JS('int', r'(#.getUTCFullYear() + 0)', lazyAsJsDate(receiver))
         : JS('int', r'(#.getFullYear() + 0)', lazyAsJsDate(receiver));
   }
 
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getMonth(DateTime receiver) {
     return (receiver.isUtc)
         ? JS('JSUInt31', r'#.getUTCMonth() + 1', lazyAsJsDate(receiver))
         : JS('JSUInt31', r'#.getMonth() + 1', lazyAsJsDate(receiver));
   }
 
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getDay(DateTime receiver) {
     return (receiver.isUtc)
         ? JS('JSUInt31', r'(#.getUTCDate() + 0)', lazyAsJsDate(receiver))
         : JS('JSUInt31', r'(#.getDate() + 0)', lazyAsJsDate(receiver));
   }
 
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getHours(DateTime receiver) {
     return (receiver.isUtc)
         ? JS('JSUInt31', r'(#.getUTCHours() + 0)', lazyAsJsDate(receiver))
         : JS('JSUInt31', r'(#.getHours() + 0)', lazyAsJsDate(receiver));
   }
 
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getMinutes(DateTime receiver) {
     return (receiver.isUtc)
         ? JS('JSUInt31', r'(#.getUTCMinutes() + 0)', lazyAsJsDate(receiver))
         : JS('JSUInt31', r'(#.getMinutes() + 0)', lazyAsJsDate(receiver));
   }
 
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getSeconds(DateTime receiver) {
     return (receiver.isUtc)
         ? JS('JSUInt31', r'(#.getUTCSeconds() + 0)', lazyAsJsDate(receiver))
         : JS('JSUInt31', r'(#.getSeconds() + 0)', lazyAsJsDate(receiver));
   }
 
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getMilliseconds(DateTime receiver) {
     return (receiver.isUtc)
         ? JS(
@@ -1188,6 +1223,9 @@ class Primitives {
         : JS('JSUInt31', r'(#.getMilliseconds() + 0)', lazyAsJsDate(receiver));
   }
 
+  @NoSideEffects()
+  @NoThrows()
+  @NoInline()
   static getWeekday(DateTime receiver) {
     int weekday = (receiver.isUtc)
         ? JS('int', r'#.getUTCDay() + 0', lazyAsJsDate(receiver))
@@ -1404,7 +1442,7 @@ class Primitives {
         return functionNoSuchMethod(function, arguments, namedArguments);
       }
 
-      int defaultsLength = JS('int', "#.length", defaultValues);
+      int defaultsLength = JS('int', '#.length', defaultValues);
       int maxArguments = requiredParameterCount + defaultsLength;
       if (argumentCount > maxArguments) {
         // The function expects fewer arguments.
@@ -1690,7 +1728,7 @@ Error diagnoseRangeError(start, end, length) {
     }
   }
   // The above should always match, but if it does not, use the following.
-  return new ArgumentError.value(end, "end");
+  return new ArgumentError.value(end, 'end');
 }
 
 stringLastIndexOfUnchecked(receiver, element, start) =>
@@ -1707,6 +1745,7 @@ checkNull(object) {
   return object;
 }
 
+@NoInline()
 checkNum(value) {
   if (value is! num) throw argumentErrorValue(value);
   return value;
@@ -1776,6 +1815,10 @@ throwExpression(ex) {
 
 throwRuntimeError(message) {
   throw new RuntimeError(message);
+}
+
+throwUnsupportedError(message) {
+  throw new UnsupportedError(message);
 }
 
 throwAbstractClassInstantiationError(className) {
@@ -1976,7 +2019,7 @@ class TypeErrorDecoder {
     // have been escaped already), as we will soon be inserting
     // regular expression syntax that we want interpreted by RegExp.
     List<String> match =
-        JS('JSExtendableArray|Null', r"#.match(/\\\$[a-zA-Z]+\\\$/g)", message);
+        JS('JSExtendableArray|Null', r'#.match(/\\\$[a-zA-Z]+\\\$/g)', message);
     if (match == null) match = [];
 
     // Find the positions within the substring matches of the error message
@@ -2210,7 +2253,7 @@ class ExceptionAndStackTrace {
  */
 unwrapException(ex) {
   /// If error implements Error, save [ex] in [error.$thrownJsError].
-  /// Otherwise, do nothing. Later, the stack trace can then be extraced from
+  /// Otherwise, do nothing. Later, the stack trace can then be extracted from
   /// [ex].
   saveStackTrace(error) {
     if (error is Error) {
@@ -2317,7 +2360,7 @@ unwrapException(ex) {
     // argument to a function that does not allow a range that includes that
     // number. Translate to a Dart ArgumentError with the same message.
     // TODO(sra): Translate to RangeError.
-    String message = tryStringifyException(ex);
+    message = tryStringifyException(ex);
     if (message is String) {
       message = JS('String', r'#.replace(/^RangeError:\s*/, "")', message);
     }
@@ -2383,7 +2426,7 @@ class _StackTrace implements StackTrace {
     String trace;
     if (JS('bool', '# !== null', _exception) &&
         JS('bool', 'typeof # === "object"', _exception)) {
-      trace = JS("String|Null", r"#.stack", _exception);
+      trace = JS('String|Null', r'#.stack', _exception);
     }
     return _trace = (trace == null) ? '' : trace;
   }
@@ -2743,13 +2786,13 @@ abstract class Closure implements Function {
     }
   }
 
-  static bool get isCsp => JS_GET_FLAG("USE_CONTENT_SECURITY_POLICY");
+  static bool get isCsp => JS_GET_FLAG('USE_CONTENT_SECURITY_POLICY');
 
   static forwardCallTo(receiver, function, bool isIntercepted) {
     if (isIntercepted) return forwardInterceptedCallTo(receiver, function);
     String stubName = JS('String|Null', '#.\$stubName', function);
     int arity = JS('int', '#.length', function);
-    var lookedUpFunction = JS("", "#[#]", receiver, stubName);
+    var lookedUpFunction = JS('', '#[#]', receiver, stubName);
     // The receiver[stubName] may not be equal to the function if we try to
     // forward to a super-method. Especially when we create a bound closure
     // of a super-call we need to make sure that we don't forward back to the
@@ -2881,8 +2924,8 @@ abstract class Closure implements Function {
     String receiverField = BoundClosure.receiverFieldName();
     String stubName = JS('String|Null', '#.\$stubName', function);
     int arity = JS('int', '#.length', function);
-    bool isCsp = JS_GET_FLAG("USE_CONTENT_SECURITY_POLICY");
-    var lookedUpFunction = JS("", "#[#]", receiver, stubName);
+    bool isCsp = JS_GET_FLAG('USE_CONTENT_SECURITY_POLICY');
+    var lookedUpFunction = JS('', '#[#]', receiver, stubName);
     // The receiver[stubName] may not be equal to the function if we try to
     // forward to a super-method. Especially when we create a bound closure
     // of a super-call we need to make sure that we don't forward back to the
@@ -2952,7 +2995,7 @@ class StaticClosure extends TearOffClosure {
   String toString() {
     String name =
         JS('String|Null', '#[#]', this, STATIC_FUNCTION_NAME_PROPERTY_NAME);
-    if (name == null) return "Closure of unknown static method";
+    if (name == null) return 'Closure of unknown static method';
     return "Closure '$name'";
   }
 }
@@ -3138,7 +3181,7 @@ class Returns {
  * This example declares a Dart field + getter + setter called `$dom_title` that
  * corresponds to the JavaScript property `title`.
  *
- *     class Docmument native "*Foo" {
+ *     class Document native "*Foo" {
  *       @JSName('title')
  *       String $dom_title;
  *     }
@@ -3383,11 +3426,6 @@ listSuperNativeTypeCast(value, property) {
   propertyTypeCastError(value, property);
 }
 
-voidTypeCheck(value) {
-  if (value == null) return value;
-  throw new TypeErrorImplementation(value, 'void');
-}
-
 extractFunctionTypeObjectFrom(o) {
   var interceptor = getInterceptor(o);
   var signatureName = JS_GET_NAME(JsGetName.SIGNATURE_NAME);
@@ -3496,7 +3534,7 @@ class CastErrorImplementation extends Error implements CastError {
 
 class FallThroughErrorImplementation extends FallThroughError {
   FallThroughErrorImplementation();
-  String toString() => "Switch case fall-through.";
+  String toString() => 'Switch case fall-through.';
 }
 
 /**
@@ -3554,7 +3592,7 @@ void throwCyclicInit(String staticName) {
 class RuntimeError extends Error {
   final message;
   RuntimeError(this.message);
-  String toString() => "RuntimeError: $message";
+  String toString() => 'RuntimeError: $message';
 }
 
 class DeferredNotLoadedError extends Error implements NoSuchMethodError {
@@ -3563,7 +3601,7 @@ class DeferredNotLoadedError extends Error implements NoSuchMethodError {
   DeferredNotLoadedError(this.libraryName);
 
   String toString() {
-    return "Deferred library $libraryName was not loaded.";
+    return 'Deferred library $libraryName was not loaded.';
   }
 }
 
@@ -3574,7 +3612,7 @@ class UnimplementedNoSuchMethodError extends Error
 
   UnimplementedNoSuchMethodError(this._message);
 
-  String toString() => "Unsupported operation: $_message";
+  String toString() => 'Unsupported operation: $_message';
 }
 
 /**
@@ -3584,13 +3622,13 @@ class UnimplementedNoSuchMethodError extends Error
  */
 int random64() {
   // TODO(lrn): Use a secure random source.
-  int int32a = JS("int", "(Math.random() * 0x100000000) >>> 0");
-  int int32b = JS("int", "(Math.random() * 0x100000000) >>> 0");
+  int int32a = JS('int', '(Math.random() * 0x100000000) >>> 0');
+  int int32b = JS('int', '(Math.random() * 0x100000000) >>> 0');
   return int32a + int32b * 0x100000000;
 }
 
 String jsonEncodeNative(String string) {
-  return JS("String", "JSON.stringify(#)", string);
+  return JS('String', 'JSON.stringify(#)', string);
 }
 
 /**
@@ -3615,6 +3653,9 @@ LoadLibraryFunctionType _loadLibraryWrapper(String loadId) {
 final Map<String, Future<Null>> _loadingLibraries = <String, Future<Null>>{};
 final Set<String> _loadedLibraries = new Set<String>();
 
+/// Events used to diagnose failures from deferred loading requests.
+final List<String> _eventLog = <String>[];
+
 typedef void DeferredLoadCallback();
 
 // Function that will be called every time a new deferred import is loaded.
@@ -3625,27 +3666,47 @@ Future<Null> loadDeferredLibrary(String loadId) {
   // list of hashes. These are stored in the app-global scope.
   var urisMap = JS_EMBEDDED_GLOBAL('', DEFERRED_LIBRARY_URIS);
   List<String> uris = JS('JSExtendableArray|Null', '#[#]', urisMap, loadId);
+  if (uris == null) return new Future.value(null);
+
   var hashesMap = JS_EMBEDDED_GLOBAL('', DEFERRED_LIBRARY_HASHES);
   List<String> hashes = JS('JSExtendableArray|Null', '#[#]', hashesMap, loadId);
-  if (uris == null) return new Future.value(null);
-  // The indices into `uris` and `hashes` that we want to load.
-  List<int> indices = new List.generate(uris.length, (i) => i);
+
+  List<String> urisToLoad = <String>[];
+
   var isHunkLoaded = JS_EMBEDDED_GLOBAL('', IS_HUNK_LOADED);
-  var isHunkInitialized = JS_EMBEDDED_GLOBAL('', IS_HUNK_INITIALIZED);
-  // Filter away indices for hunks that have already been loaded.
-  List<int> indicesToLoad = indices
-      .where((int i) => !JS('bool', '#(#)', isHunkLoaded, hashes[i]))
-      .toList();
-  return Future
-      .wait(indicesToLoad.map((int i) => _loadHunk(uris[i])))
-      .then((_) {
+  for (int i = 0; i < uris.length; ++i) {
+    if (JS('bool', '#(#)', isHunkLoaded, hashes[i])) continue;
+    urisToLoad.add(uris[i]);
+  }
+
+  return Future.wait(urisToLoad.map(_loadHunk)).then((_) {
     // Now all hunks have been loaded, we run the needed initializers.
-    List<int> indicesToInitialize = indices
-        .where((int i) => !JS('bool', '#(#)', isHunkInitialized, hashes[i]))
-        .toList(); // Load the needed hunks.
-    for (int i in indicesToInitialize) {
-      var initializer = JS_EMBEDDED_GLOBAL('', INITIALIZE_LOADED_HUNK);
-      JS('void', '#(#)', initializer, hashes[i]);
+    var isHunkInitialized = JS_EMBEDDED_GLOBAL('', IS_HUNK_INITIALIZED);
+    var initializer = JS_EMBEDDED_GLOBAL('', INITIALIZE_LOADED_HUNK);
+    for (int i = 0; i < hashes.length; ++i) {
+      // It is possible for a hash to be repeated. This happens when two
+      // different parts both end up empty. Checking in the loop rather than
+      // pre-filtering prevents duplicate hashes leading to duplicated
+      // initializations.
+      // TODO(29572): Merge small parts.
+      // TODO(29635): Remove duplicate parts from tables and output files.
+      var uri = uris[i];
+      var hash = hashes[i];
+      if (JS('bool', '#(#)', isHunkInitialized, hash)) {
+        _eventLog.add(' - already initialized: $uri ($hash)');
+        continue;
+      }
+      // On strange scenarios, e.g. if js encounters parse errors, we might get
+      // an "success" callback on the script load but the hunk will be null.
+      if (JS('bool', '#(#)', isHunkLoaded, hash)) {
+        _eventLog.add(' - initialize: $uri ($hash)');
+        JS('void', '#(#)', initializer, hash);
+      } else {
+        _eventLog.add(' - missing hunk: $uri ($hash)');
+        throw new DeferredLoadException("Loading ${uris[i]} failed: "
+            "the code with hash '${hash}' was not loaded.\n"
+            "event log:\n${_eventLog.join("\n")}\n");
+      }
     }
     bool updated = _loadedLibraries.add(loadId);
     if (updated && deferredLoadHook != null) {
@@ -3656,7 +3717,9 @@ Future<Null> loadDeferredLibrary(String loadId) {
 
 Future<Null> _loadHunk(String hunkName) {
   Future<Null> future = _loadingLibraries[hunkName];
+  _eventLog.add(' - _loadHunk: $hunkName');
   if (future != null) {
+    _eventLog.add('reuse: $hunkName');
     return future.then((_) => null);
   }
 
@@ -3664,23 +3727,29 @@ Future<Null> _loadHunk(String hunkName) {
 
   int index = uri.lastIndexOf('/');
   uri = '${uri.substring(0, index + 1)}$hunkName';
+  _eventLog.add(' - download: $hunkName from $uri');
 
   var deferredLibraryLoader = JS('', 'self.dartDeferredLibraryLoader');
   Completer<Null> completer = new Completer<Null>();
 
   void success() {
+    _eventLog.add(' - download success: $hunkName');
     completer.complete(null);
   }
 
-  void failure([error, StackTrace stackTrace]) {
+  void failure(error, String context, StackTrace stackTrace) {
+    _eventLog.add(' - download failed: $hunkName (context: $context)');
     _loadingLibraries[hunkName] = null;
-    completer.completeError(
-        new DeferredLoadException("Loading $uri failed: $error"), stackTrace);
+    stackTrace ??= StackTrace.current;
+    completer.completeError(new DeferredLoadException(
+          'Loading $uri failed: $error\n'
+          'event log:\n${_eventLog.join("\n")}\n'), stackTrace);
   }
 
   var jsSuccess = convertDartClosureToJS(success, 0);
   var jsFailure = convertDartClosureToJS((error) {
-    failure(unwrapException(error), getTraceFromException(error));
+    failure(unwrapException(error), 'js-failure-wrapper',
+        getTraceFromException(error));
   }, 1);
 
   if (JS('bool', 'typeof # === "function"', deferredLibraryLoader)) {
@@ -3688,7 +3757,7 @@ Future<Null> _loadHunk(String hunkName) {
       JS('void', '#(#, #, #)', deferredLibraryLoader, uri, jsSuccess,
           jsFailure);
     } catch (error, stackTrace) {
-      failure(error, stackTrace);
+      failure(error, "invoking dartDeferredLibraryLoader hook", stackTrace);
     }
   } else if (isWorker()) {
     // We are in a web worker. Load the code with an XMLHttpRequest.
@@ -3706,8 +3775,9 @@ Future<Null> _loadHunk(String hunkName) {
         '#.addEventListener("load", #, false)',
         xhr,
         convertDartClosureToJS((event) {
-          if (JS('int', '#.status', xhr) != 200) {
-            failure("");
+          int status = JS('int', '#.status', xhr);
+          if (status != 200) {
+            failure('Request status: $status', 'worker xhr', null);
           }
           String code = JS('String', '#.responseText', xhr);
           try {
@@ -3716,12 +3786,16 @@ Future<Null> _loadHunk(String hunkName) {
             JS('void', '(new Function(#))()', code);
             success();
           } catch (error, stackTrace) {
-            failure(error, stackTrace);
+            failure(error, 'evaluating the code in worker xhr', stackTrace);
           }
         }, 1));
 
-    JS('void', '#.addEventListener("error", #, false)', xhr, failure);
-    JS('void', '#.addEventListener("abort", #, false)', xhr, failure);
+    JS('void', '#.addEventListener("error", #, false)', xhr, (e) {
+      failure(e, 'xhr error handler', null);
+    });
+    JS('void', '#.addEventListener("abort", #, false)', xhr, (e) {
+      failure(e, 'xhr abort handler', null);
+    });
     JS('void', '#.send()', xhr);
   } else {
     // We are in a dom-context.
@@ -3768,10 +3842,14 @@ class _AssertionError extends AssertionError {
 // unneeded code.
 class _UnreachableError extends AssertionError {
   _UnreachableError();
-  String toString() => "Assertion failed: Reached dead code";
+  String toString() => 'Assertion failed: Reached dead code';
 }
 
 @NoInline()
 void assertUnreachable() {
   throw new _UnreachableError();
 }
+
+// Hook to register new global object if necessary.
+// This is currently a no-op in dart2js.
+void registerGlobalObject(object) {}

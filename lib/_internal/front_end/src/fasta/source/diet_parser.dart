@@ -4,36 +4,39 @@
 
 library fasta.diet_parser;
 
-import '../fasta_codes.dart' show codeExpectedOpenParens;
+import '../../scanner/token.dart' show Token;
 
-import '../parser/class_member_parser.dart' show ClassMemberParser;
+import '../fasta_codes.dart' show messageExpectedOpenParens;
 
-import '../parser/listener.dart' show Listener;
-
-import '../parser/parser.dart' show optional;
-
-import '../scanner/token.dart' show BeginGroupToken, Token;
+import '../parser.dart'
+    show ClassMemberParser, Listener, MemberKind, closeBraceTokenFor, optional;
 
 // TODO(ahe): Move this to parser package.
 class DietParser extends ClassMemberParser {
   DietParser(Listener listener) : super(listener);
 
-  Token parseFormalParameters(Token token, {bool inFunctionType: false}) {
-    return skipFormals(token);
+  Token parseFormalParameters(Token token, MemberKind kind) {
+    return skipFormals(token, kind);
   }
 
-  Token skipFormals(Token token) {
+  // TODO(brianwilkerson): Move this method to Parser, and, if possible, merge
+  // it with skipFormalParameters.
+  Token skipFormals(Token token, MemberKind kind) {
+    // TODO(brianwilkerson): Accept the last consumed token.
     listener.beginOptionalFormalParameters(token);
     if (!optional('(', token)) {
       if (optional(';', token)) {
-        reportRecoverableErrorCode(token, codeExpectedOpenParens);
+        reportRecoverableError(token, messageExpectedOpenParens);
+        listener.endFormalParameters(0, token, token, kind);
+        // TODO(brianwilkerson): Until this method accepts the last consumed
+        // token, this returns the wrong token (it should be the token before
+        // `token`).
         return token;
       }
-      return reportUnexpectedToken(token).next;
+      return reportUnexpectedToken(token);
     }
-    BeginGroupToken beginGroupToken = token;
-    Token endToken = beginGroupToken.endGroup;
-    listener.endFormalParameters(0, token, endToken);
-    return endToken.next;
+    Token closeBrace = closeBraceTokenFor(token);
+    listener.endFormalParameters(0, token, closeBrace, kind);
+    return closeBrace;
   }
 }

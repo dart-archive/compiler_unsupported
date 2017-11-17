@@ -11,6 +11,7 @@ import '../common/resolution.dart';
 import '../compiler.dart';
 import '../elements/resolution_types.dart';
 import '../elements/elements.dart';
+import '../elements/entities.dart';
 import '../script.dart';
 import '../serialization/impact_serialization.dart';
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart';
@@ -88,8 +89,8 @@ class ResolutionDeserializerSystem extends DeserializerSystem {
   @override
   WorldImpact computeWorldImpact(Element element) {
     ResolutionImpact resolutionImpact = getResolutionImpact(element);
-    assert(invariant(element, resolutionImpact != null,
-        message: 'No impact found for $element (${element.library})'));
+    assert(resolutionImpact != null,
+        failedAt(element, 'No impact found for $element (${element.library})'));
     if (element is ExecutableElement) {
       getResolvedAst(element);
     }
@@ -100,7 +101,7 @@ class ResolutionDeserializerSystem extends DeserializerSystem {
           // TODO(johnniwinther): Find a cleaner way to do this. Maybe
           // `Feature.LAZY_FIELD` of the resolution impact should be used
           // instead.
-          _compiler.backend.constants.registerLazyStatic(element);
+          _compiler.backend.constants.registerLazyStatic(field);
         }
       }
     }
@@ -108,7 +109,8 @@ class ResolutionDeserializerSystem extends DeserializerSystem {
   }
 
   @override
-  bool isDeserialized(Element element) {
+  bool isDeserialized(Entity entity) {
+    Element element = entity;
     return deserializedLibraries.contains(element.library);
   }
 }
@@ -160,8 +162,11 @@ class CompilationDeserializerSystem extends ResolutionDeserializerSystem {
       ClassElement superclass = constructor.enclosingClass.superclass;
       ConstructorElement superclassConstructor =
           superclass.lookupConstructor(constructor.name);
-      assert(invariant(element, superclassConstructor != null,
-          message: "Superclass constructor '${constructor.name}' called from "
+      assert(
+          superclassConstructor != null,
+          failedAt(
+              element,
+              "Superclass constructor '${constructor.name}' called from "
               "${element} not found in ${superclass}."));
       // TODO(johnniwinther): Compute callStructure. Currently not used.
       CallStructure callStructure;
@@ -258,12 +263,12 @@ class ResolvedAstSerializerPlugin extends SerializerPlugin {
 
   @override
   void onElement(Element element, ObjectEncoder createEncoder(String tag)) {
-    assert(invariant(element, element.isDeclaration,
-        message: "Element $element must be the declaration"));
+    assert(element.isDeclaration,
+        failedAt(element, "Element $element must be the declaration"));
     if (element.isError) return;
     if (element is MemberElement) {
-      assert(invariant(element, resolution.hasResolvedAst(element),
-          message: "Element $element must have a resolved ast"));
+      assert(resolution.hasResolvedAst(element),
+          failedAt(element, "Element $element must have a resolved ast"));
       ResolvedAst resolvedAst = resolution.getResolvedAst(element);
       ObjectEncoder objectEncoder = createEncoder(RESOLVED_AST_TAG);
       new ResolvedAstSerializer(
@@ -299,8 +304,8 @@ class ResolvedAstDeserializerPlugin extends DeserializerPlugin {
       ResolvedAstDeserializer.deserialize(element.memberContext, decoder,
           parsingContext, findToken, nativeDataDeserializer);
       _decoderMap.remove(element);
-      assert(invariant(element, element.hasResolvedAst,
-          message: "ResolvedAst not computed for $element."));
+      assert(element.hasResolvedAst,
+          failedAt(element, "ResolvedAst not computed for $element."));
       return element.resolvedAst;
     }
     return null;

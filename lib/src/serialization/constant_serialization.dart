@@ -6,10 +6,16 @@ library dart2js.serialization.constants;
 
 import '../constants/constructors.dart';
 import '../constants/expressions.dart';
-import '../elements/resolution_types.dart';
 import '../elements/elements.dart'
-    show ConstructorElement, FieldElement, LocalVariableElement, MethodElement;
-import '../resolution/operators.dart';
+    show
+        ConstructorElement,
+        FieldElement,
+        LocalVariableElement,
+        MethodElement,
+        ImportElement;
+import '../elements/entities.dart' show FieldEntity;
+import '../elements/operators.dart';
+import '../elements/resolution_types.dart';
 import '../universe/call_structure.dart' show CallStructure;
 import 'keys.dart';
 import 'serialization.dart';
@@ -184,7 +190,7 @@ class ConstantSerializer
 
   @override
   void visitDeferred(DeferredConstantExpression exp, ObjectEncoder encoder) {
-    encoder.setElement(Key.PREFIX, exp.prefix);
+    encoder.setElement(Key.IMPORT, exp.import as ImportElement);
     encoder.setConstant(Key.EXPRESSION, exp.expression);
   }
 }
@@ -291,7 +297,7 @@ class ConstantDeserializer {
       case ConstantExpressionKind.DEFERRED:
         return new DeferredConstantExpression(
             decoder.getConstant(Key.EXPRESSION),
-            decoder.getElement(Key.PREFIX));
+            decoder.getElement(Key.IMPORT) as ImportElement);
       case ConstantExpressionKind.SYNTHETIC:
     }
     throw new UnsupportedError("Unexpected constant kind: ${kind} in $decoder");
@@ -325,7 +331,8 @@ class ConstantConstructorSerializer
       defaults.setConstant('$key', e);
     });
     ListEncoder fields = encoder.createList(Key.FIELDS);
-    constructor.fieldMap.forEach((FieldElement f, ConstantExpression e) {
+    constructor.fieldMap.forEach((FieldEntity _f, ConstantExpression e) {
+      FieldElement f = _f;
       ObjectEncoder fieldSerializer = fields.createObject();
       fieldSerializer.setElement(Key.FIELD, f);
       fieldSerializer.setConstant(Key.CONSTANT, e);
@@ -354,6 +361,12 @@ class ConstantConstructorSerializer
     });
     encoder.setConstant(Key.CONSTRUCTOR, constructor.thisConstructorInvocation);
   }
+
+  @override
+  void visitErroneous(
+      ErroneousConstantConstructor constructor, ObjectEncoder arg) {
+    throw new UnsupportedError("ConstantConstructorSerializer.visitErroneous");
+  }
 }
 
 /// Utility class for deserializing [ConstantConstructor]s.
@@ -366,6 +379,7 @@ class ConstantConstructorDeserializer {
   /// needs deserialization. The [ObjectDecoder] ensures that any [Element],
   /// [ResolutionDartType], and [ConstantExpression] that the deserialized
   /// [ConstantConstructor] depends upon are available.
+  // ignore: MISSING_RETURN
   static ConstantConstructor deserialize(ObjectDecoder decoder) {
     ConstantConstructorKind kind =
         decoder.getEnum(Key.KIND, ConstantConstructorKind.values);
@@ -421,6 +435,9 @@ class ConstantConstructorDeserializer {
       case ConstantConstructorKind.REDIRECTING_FACTORY:
         return new RedirectingFactoryConstantConstructor(
             readConstructorInvocation());
+      case ConstantConstructorKind.ERRONEOUS:
+        throw new UnsupportedError(
+            'Unsupported constant constructor kind: $kind');
     }
   }
 }

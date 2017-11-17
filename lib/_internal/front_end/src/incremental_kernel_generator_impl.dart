@@ -3,144 +3,284 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:convert';
 
-import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/dart/ast/standard_resolution_map.dart';
-import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/error/error.dart';
-import 'package:analyzer/src/generated/engine.dart';
-import 'package:analyzer/src/generated/source.dart';
+import 'package:compiler_unsupported/_internal/front_end/byte_store.dart';
 import 'package:compiler_unsupported/_internal/front_end/incremental_kernel_generator.dart';
-import 'package:compiler_unsupported/_internal/front_end/incremental_resolved_ast_generator.dart';
+import 'package:compiler_unsupported/_internal/front_end/src/base/performance_logger.dart';
 import 'package:compiler_unsupported/_internal/front_end/src/base/processed_options.dart';
-import 'package:compiler_unsupported/_internal/front_end/src/base/source.dart';
-import 'package:compiler_unsupported/_internal/front_end/src/incremental_resolved_ast_generator_impl.dart';
-import 'package:analyzer/src/kernel/loader.dart';
-import 'package:compiler_unsupported/_internal/kernel/kernel.dart' hide Source;
-
-dynamic unimplemented() {
-  // TODO(paulberry): get rid of this.
-  throw new UnimplementedError();
-}
-
-DartOptions _convertOptions(ProcessedOptions options) {
-  // TODO(paulberry): make sure options.compileSdk is handled correctly.
-  return new DartOptions(
-      strongMode: true, // TODO(paulberry): options.strongMode,
-      sdk: null, // TODO(paulberry): _uriToPath(options.sdkRoot, options),
-      sdkSummary:
-          null, // TODO(paulberry): options.compileSdk ? null : _uriToPath(options.sdkSummary, options),
-      packagePath:
-          null, // TODO(paulberry): _uriToPath(options.packagesFileUri, options),
-      declaredVariables: null // TODO(paulberry): options.declaredVariables
-      );
-}
+import 'package:compiler_unsupported/_internal/front_end/src/byte_store/protected_file_byte_store.dart';
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/uri_translator.dart';
+import 'package:compiler_unsupported/_internal/front_end/src/incremental/file_state.dart';
+import 'package:compiler_unsupported/_internal/front_end/src/incremental/kernel_driver.dart';
+import 'package:compiler_unsupported/_internal/kernel/kernel.dart';
+import 'package:meta/meta.dart';
 
 /// Implementation of [IncrementalKernelGenerator].
+///
+/// TODO(scheglov) Update the documentation.
 ///
 /// Theory of operation: an instance of [IncrementalResolvedAstGenerator] is
 /// used to obtain resolved ASTs, and these are fed into kernel code generation
 /// logic.
-///
-/// Note that the kernel doesn't expect to take resolved ASTs as a direct input;
-/// it expects to request resolved ASTs from an [AnalysisContext].  To deal with
-/// this, we create [_AnalysisContextProxy] which returns the resolved ASTs when
-/// requested.  TODO(paulberry): Make this unnecessary.
 class IncrementalKernelGeneratorImpl implements IncrementalKernelGenerator {
-  final IncrementalResolvedAstGenerator _resolvedAstGenerator;
-  final ProcessedOptions _options;
+  static const MSG_PENDING_COMPUTE =
+      'A computeDelta() invocation is still executing.';
 
-  IncrementalKernelGeneratorImpl(Uri source, ProcessedOptions options)
-      : _resolvedAstGenerator =
-            new IncrementalResolvedAstGeneratorImpl(source, options),
-        _options = options;
+  static const MSG_NO_LAST_DELTA =
+      'The last delta has been already accepted or rejected.';
 
-  @override
-  Future<DeltaProgram> computeDelta(
-      {Future<Null> watch(Uri uri, bool used)}) async {
-    var deltaLibraries = await _resolvedAstGenerator.computeDelta();
-    var kernelOptions = _convertOptions(_options);
-    var packages = null; // TODO(paulberry)
-    var kernels = <Uri, Program>{};
-    for (Uri uri in deltaLibraries.newState.keys) {
-      // The kernel generation code doesn't currently support building a kernel
-      // directly from resolved ASTs--it wants to query an analysis context.  So
-      // we provide it with a proxy analysis context that feeds it the resolved
-      // ASTs.
-      var strongMode = true; // TODO(paulberry): set this correctly
-      var analysisOptions = new _AnalysisOptionsProxy(strongMode);
-      var context =
-          new _AnalysisContextProxy(deltaLibraries.newState, analysisOptions);
-      var program = new Program();
-      var loader =
-          new DartLoader(program, kernelOptions, packages, context: context);
-      loader.loadLibrary(uri);
-      kernels[uri] = program;
-      // TODO(paulberry) rework watch invocation to eliminate race condition,
-      // include part source files, and prevent watch from being a bottleneck
-      if (watch != null) await watch(uri, true);
+  static const MSG_HAS_LAST_DELTA =
+      'The last delta must be either accepted or rejected.';
+
+  /// The logger to report compilation progress.
+  final PerformanceLog _logger;
+
+  /// The [ByteStore] used to cache results.
+  final ByteStore _byteStore;
+
+  /// The URI of the program entry point.
+  final Uri _entryPoint;
+
+  /// The function to notify when files become used or unused, or `null`.
+  final WatchUsedFilesFn _watchFn;
+
+  /// Whether we the generator is configured to use SDK outline.
+  bool _hasSdkOutlineBytes;
+
+  /// The [KernelDriver] that is used to compute kernels.
+  KernelDriver _driver;
+
+  /// Whether [computeDelta] is executing.
+  bool _isComputeDeltaExecuting = false;
+
+  /// The current signatures for libraries.
+  final Map<Uri, String> _currentSignatures = {};
+
+  /// The signatures for libraries produced by the last [computeDelta], or
+  /// `null` if the last delta was either accepted or rejected.
+  Map<Uri, String> _lastSignatures;
+
+  /// The object that provides additional information for tests.
+  _TestView _testView;
+
+  IncrementalKernelGeneratorImpl(ProcessedOptions options,
+      UriTranslator uriTranslator, List<int> sdkOutlineBytes, this._entryPoint,
+      {WatchUsedFilesFn watch})
+      : _logger = options.logger,
+        _byteStore = options.byteStore,
+        _watchFn = watch {
+    _hasSdkOutlineBytes = sdkOutlineBytes != null;
+    _testView = new _TestView(this);
+
+    Future<Null> onFileAdded(Uri uri) {
+      if (_watchFn != null) {
+        return _watchFn(uri, true);
+      }
+      return new Future.value();
     }
-    // TODO(paulberry) invoke watch with used=false for each unused source
-    return new DeltaProgram(kernels);
+
+    _driver = new KernelDriver(options, uriTranslator,
+        sdkOutlineBytes: sdkOutlineBytes, fileAddedFn: onFileAdded);
+  }
+
+  /// Return the object that provides additional information for tests.
+  @visibleForTesting
+  _TestView get test => _testView;
+
+  @override
+  void acceptLastDelta() {
+    _throwIfNoLastDelta();
+    _updateProtectedFileByteStore();
+    _currentSignatures.addAll(_lastSignatures);
+    _lastSignatures = null;
   }
 
   @override
-  void invalidate(String path) => _resolvedAstGenerator.invalidate(path);
+  Future<DeltaProgram> computeDelta() {
+    if (_isComputeDeltaExecuting) {
+      throw new StateError(MSG_PENDING_COMPUTE);
+    }
 
-  @override
-  void invalidateAll() => _resolvedAstGenerator.invalidateAll();
-}
+    if (_lastSignatures != null) {
+      throw new StateError(MSG_HAS_LAST_DELTA);
+    }
+    _lastSignatures = {};
 
-class _AnalysisContextProxy implements AnalysisContext {
-  final Map<Uri, Map<Uri, CompilationUnit>> _resolvedLibraries;
+    _isComputeDeltaExecuting = true;
 
-  @override
-  final _SourceFactoryProxy sourceFactory = new _SourceFactoryProxy();
+    return _logger.runAsync('Compute delta', () async {
+      try {
+        KernelSequenceResult kernelResult =
+            await _driver.getKernelSequence(_entryPoint);
+        List<LibraryCycleResult> results = kernelResult.results;
 
-  @override
-  final AnalysisOptions analysisOptions;
+        // Exclude the SDK cycle if was not compiled.
+        if (_hasSdkOutlineBytes) {
+          results.removeWhere((cycle) => cycle.signature == '<sdk>');
+        }
 
-  _AnalysisContextProxy(this._resolvedLibraries, this.analysisOptions);
+        // The file graph might have changed, perform GC.
+        await _gc();
 
-  List<AnalysisError> computeErrors(Source source) {
-    // TODO(paulberry): do we need to return errors sometimes?
-    return [];
+        // The set of affected library cycles (have different signatures).
+        final affectedLibraryCycles = new Set<LibraryCycle>();
+        for (LibraryCycleResult result in results) {
+          for (Library library in result.kernelLibraries) {
+            Uri uri = library.importUri;
+            if (_currentSignatures[uri] != result.signature) {
+              _lastSignatures[uri] = result.signature;
+              affectedLibraryCycles.add(result.cycle);
+            }
+          }
+        }
+
+        // The set of affected library cycles (have different signatures),
+        // or libraries that import or export affected libraries (so VM might
+        // have inlined some code from affected libraries into them).
+        final vmRequiredLibraryCycles = new Set<LibraryCycle>();
+
+        void gatherVmRequiredLibraryCycles(LibraryCycle cycle) {
+          if (vmRequiredLibraryCycles.add(cycle)) {
+            cycle.directUsers.forEach(gatherVmRequiredLibraryCycles);
+          }
+        }
+
+        affectedLibraryCycles.forEach(gatherVmRequiredLibraryCycles);
+
+        // Add required libraries.
+        Program program = new Program(nameRoot: kernelResult.nameRoot);
+        for (LibraryCycleResult result in results) {
+          if (vmRequiredLibraryCycles.contains(result.cycle)) {
+            program.uriToSource.addAll(result.uriToSource);
+            for (Library library in result.kernelLibraries) {
+              program.libraries.add(library);
+              library.parent = program;
+            }
+          }
+        }
+
+        // Set the main method.
+        if (program.libraries.isNotEmpty) {
+          for (Library library in results.last.kernelLibraries) {
+            if (library.importUri == _entryPoint) {
+              program.mainMethod = library.procedures.firstWhere(
+                  (procedure) => procedure.name.name == 'main',
+                  orElse: () => null);
+              break;
+            }
+          }
+        }
+
+        var stateString = _ExternalState.asString(_lastSignatures);
+        return new DeltaProgram(stateString, program);
+      } finally {
+        _isComputeDeltaExecuting = false;
+      }
+    });
   }
 
-  LibraryElement computeLibraryElement(Source source) {
-    assert(_resolvedLibraries.containsKey(source.uri));
-    return resolutionMap
-        .elementDeclaredByCompilationUnit(
-            _resolvedLibraries[source.uri][source.uri])
-        .library;
+  @override
+  void invalidate(Uri uri) {
+    _driver.invalidate(uri);
   }
 
-  noSuchMethod(Invocation invocation) => unimplemented();
+  @override
+  void rejectLastDelta() {
+    _throwIfNoLastDelta();
+    _lastSignatures = null;
+  }
 
-  CompilationUnit resolveCompilationUnit(
-      Source unitSource, LibraryElement library) {
-    var unit = _resolvedLibraries[library.source.uri][unitSource.uri];
-    assert(unit != null);
-    return unit;
+  @override
+  void reset() {
+    _currentSignatures.clear();
+    _lastSignatures = null;
+  }
+
+  @override
+  void setState(String state) {
+    if (_isComputeDeltaExecuting) {
+      throw new StateError(MSG_PENDING_COMPUTE);
+    }
+    var signatures = _ExternalState.fromString(state);
+    _currentSignatures.clear();
+    _currentSignatures.addAll(signatures);
+  }
+
+  /// Find files which are not referenced from the entry point and report
+  /// them to the watch function.
+  Future<Null> _gc() async {
+    var removedFiles = _driver.fsState.gc(_entryPoint);
+    if (removedFiles.isNotEmpty && _watchFn != null) {
+      for (var removedFile in removedFiles) {
+        await _watchFn(removedFile.fileUri, false);
+      }
+    }
+  }
+
+  /// Throw [StateError] if [_lastSignatures] is `null`, i.e. there is no
+  /// last delta - it either has not been computed yet, or has been already
+  /// accepted or rejected.
+  void _throwIfNoLastDelta() {
+    if (_isComputeDeltaExecuting) {
+      throw new StateError(MSG_PENDING_COMPUTE);
+    }
+    if (_lastSignatures == null) {
+      throw new StateError(MSG_NO_LAST_DELTA);
+    }
+  }
+
+  /// If [ProtectedFileByteStore] is used, update the protected keys.
+  void _updateProtectedFileByteStore() {
+    ByteStore byteStore = this._byteStore;
+    if (byteStore is ProtectedFileByteStore) {
+      // Compute the set of added and removed ByteStore keys.
+      // We use knowledge about KernelDriver implementation details.
+      var addedKeys = new Set<String>();
+      var removedKeys = new Set<String>();
+      for (var lastUri in _lastSignatures.keys) {
+        var currentSignature = _currentSignatures[lastUri];
+        var lastSignature = _lastSignatures[lastUri];
+        addedKeys.add('$lastSignature.kernel');
+        if (currentSignature != null && lastSignature != null) {
+          removedKeys.add('$currentSignature.kernel');
+        }
+      }
+
+      byteStore.updateProtectedKeys(
+          add: addedKeys.toList(), remove: removedKeys.toList());
+    }
   }
 }
 
-class _AnalysisOptionsProxy implements AnalysisOptions {
-  final bool strongMode;
+class _ExternalState {
+  /// Return the JSON encoding of the [signatures].
+  static String asString(Map<Uri, String> signatures) {
+    var json = <String, String>{};
+    signatures.forEach((uri, signature) {
+      json[uri.toString()] = signature;
+    });
+    return JSON.encode(json);
+  }
 
-  _AnalysisOptionsProxy(this.strongMode);
-
-  noSuchMethod(Invocation invocation) => unimplemented();
+  /// Decode the given JSON [state] into the program state.
+  static Map<Uri, String> fromString(String state) {
+    var signatures = <Uri, String>{};
+    Map<String, String> json = JSON.decode(state);
+    json.forEach((uriStr, signature) {
+      var uri = Uri.parse(uriStr);
+      signatures[uri] = signature;
+    });
+    return signatures;
+  }
 }
 
-class _SourceFactoryProxy implements SourceFactory {
-  Source forUri2(Uri absoluteUri) => new _SourceProxy(absoluteUri);
+@visibleForTesting
+class _TestView {
+  final IncrementalKernelGeneratorImpl _generator;
 
-  noSuchMethod(Invocation invocation) => unimplemented();
-}
+  _TestView(this._generator);
 
-class _SourceProxy extends BasicSource {
-  _SourceProxy(Uri uri) : super(uri);
-
-  noSuchMethod(Invocation invocation) => unimplemented();
+  /// The [KernelDriver] that is used to actually compile.
+  KernelDriver get driver => _generator._driver;
 }

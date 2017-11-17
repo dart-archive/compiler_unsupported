@@ -4,18 +4,17 @@
 
 import '../closure.dart';
 import '../common.dart';
-import '../common/backend_api.dart' show BackendClasses;
+import '../common_elements.dart' show CommonElements;
 import '../compiler.dart' show Compiler;
 import '../constants/constant_system.dart';
 import '../constants/values.dart';
-import '../elements/elements.dart' show JumpTarget, LabelDefinition;
 import '../elements/entities.dart';
+import '../elements/jumps.dart';
 import '../elements/types.dart';
 import '../io/source_information.dart';
 import '../js/js.dart' as js;
 import '../js_backend/js_backend.dart';
 import '../native/native.dart' as native;
-import '../tree/dartstring.dart' as ast;
 import '../types/constants.dart' show computeTypeMask;
 import '../types/types.dart';
 import '../universe/selector.dart' show Selector;
@@ -38,6 +37,7 @@ abstract class HVisitor<R> {
   R visitConstant(HConstant node);
   R visitContinue(HContinue node);
   R visitCreate(HCreate node);
+  R visitCreateBox(HCreateBox node);
   R visitDivide(HDivide node);
   R visitExit(HExit node);
   R visitExitTry(HExitTry node);
@@ -105,30 +105,78 @@ abstract class HVisitor<R> {
 
 abstract class HGraphVisitor {
   visitDominatorTree(HGraph graph) {
-    void visitBasicBlockAndSuccessors(HBasicBlock block) {
-      visitBasicBlock(block);
-      List dominated = block.dominatedBlocks;
-      for (int i = 0; i < dominated.length; i++) {
-        visitBasicBlockAndSuccessors(dominated[i]);
-      }
-    }
+    // Recursion free version of:
+    //
+    //     void visitBasicBlockAndSuccessors(HBasicBlock block) {
+    //       visitBasicBlock(block);
+    //       List dominated = block.dominatedBlocks;
+    //       for (int i = 0; i < dominated.length; i++) {
+    //         visitBasicBlockAndSuccessors(dominated[i]);
+    //       }
+    //     }
+    //     visitBasicBlockAndSuccessors(graph.entry);
 
-    visitBasicBlockAndSuccessors(graph.entry);
+    _Frame frame = new _Frame(null);
+    frame.block = graph.entry;
+    frame.index = 0;
+
+    visitBasicBlock(frame.block);
+
+    while (frame != null) {
+      HBasicBlock block = frame.block;
+      int index = frame.index;
+      if (index < block.dominatedBlocks.length) {
+        frame.index = index + 1;
+        frame = frame.next ??= new _Frame(frame);
+        frame.block = block.dominatedBlocks[index];
+        frame.index = 0;
+        visitBasicBlock(frame.block);
+        continue;
+      }
+      frame = frame.previous;
+    }
   }
 
   visitPostDominatorTree(HGraph graph) {
-    void visitBasicBlockAndSuccessors(HBasicBlock block) {
-      List dominated = block.dominatedBlocks;
-      for (int i = dominated.length - 1; i >= 0; i--) {
-        visitBasicBlockAndSuccessors(dominated[i]);
+    // Recusion free version of:
+    //
+    //     void visitBasicBlockAndSuccessors(HBasicBlock block) {
+    //       List dominated = block.dominatedBlocks;
+    //       for (int i = dominated.length - 1; i >= 0; i--) {
+    //         visitBasicBlockAndSuccessors(dominated[i]);
+    //       }
+    //       visitBasicBlock(block);
+    //     }
+    //     visitBasicBlockAndSuccessors(graph.entry);
+
+    _Frame frame = new _Frame(null);
+    frame.block = graph.entry;
+    frame.index = frame.block.dominatedBlocks.length;
+
+    while (frame != null) {
+      HBasicBlock block = frame.block;
+      int index = frame.index;
+      if (index > 0) {
+        frame.index = index - 1;
+        frame = frame.next ??= new _Frame(frame);
+        frame.block = block.dominatedBlocks[index - 1];
+        frame.index = frame.block.dominatedBlocks.length;
+        continue;
       }
       visitBasicBlock(block);
+      frame = frame.previous;
     }
-
-    visitBasicBlockAndSuccessors(graph.entry);
   }
 
   visitBasicBlock(HBasicBlock block);
+}
+
+class _Frame {
+  final _Frame previous;
+  _Frame next;
+  HBasicBlock block;
+  int index;
+  _Frame(this.previous);
 }
 
 abstract class HInstructionVisitor extends HGraphVisitor {
@@ -225,14 +273,15 @@ class HGraph {
 
   HConstant addDeferredConstant(
       ConstantValue constant,
-      Entity prefix,
+      ImportEntity import,
       SourceInformation sourceInformation,
       Compiler compiler,
       ClosedWorld closedWorld) {
     // TODO(sigurdm,johnniwinther): These deferred constants should be created
     // by the constant evaluator.
-    ConstantValue wrapper = new DeferredConstantValue(constant, prefix);
-    compiler.deferredLoadTask.registerConstantDeferredUse(wrapper, prefix);
+    ConstantValue wrapper = new DeferredConstantValue(constant, import);
+    compiler.backend.outputUnitData
+        .registerConstantDeferredUse(wrapper, import);
     return addConstant(wrapper, closedWorld,
         sourceInformation: sourceInformation);
   }
@@ -245,7 +294,7 @@ class HGraph {
     return addConstant(closedWorld.constantSystem.createDouble(d), closedWorld);
   }
 
-  HConstant addConstantString(ast.DartString str, ClosedWorld closedWorld) {
+  HConstant addConstantString(String str, ClosedWorld closedWorld) {
     return addConstant(
         closedWorld.constantSystem.createString(str), closedWorld);
   }
@@ -347,6 +396,7 @@ class HBaseVisitor extends HGraphVisitor implements HVisitor {
   visitCheck(HCheck node) => visitInstruction(node);
   visitConstant(HConstant node) => visitInstruction(node);
   visitCreate(HCreate node) => visitInstruction(node);
+  visitCreateBox(HCreateBox node) => visitInstruction(node);
   visitDivide(HDivide node) => visitBinaryArithmetic(node);
   visitExit(HExit node) => visitControlFlow(node);
   visitExitTry(HExitTry node) => visitControlFlow(node);
@@ -818,6 +868,8 @@ class HBasicBlock extends HInstructionList {
     } while (other != null && other.id >= id);
     return dominatesCache[other] = false;
   }
+
+  toString() => 'HBasicBlock($id)';
 }
 
 abstract class HInstruction implements Spannable {
@@ -962,78 +1014,79 @@ abstract class HInstruction implements Spannable {
   }
 
   bool canBePrimitiveNumber(ClosedWorld closedWorld) {
-    BackendClasses backendClasses = closedWorld.backendClasses;
+    CommonElements commonElements = closedWorld.commonElements;
     // TODO(sra): It should be possible to test only jsDoubleClass and
     // jsUInt31Class, since all others are superclasses of these two.
     return containsType(
-            instructionType, backendClasses.numClass, closedWorld) ||
-        containsType(instructionType, backendClasses.intClass, closedWorld) ||
+            instructionType, commonElements.jsNumberClass, closedWorld) ||
+        containsType(instructionType, commonElements.jsIntClass, closedWorld) ||
         containsType(
-            instructionType, backendClasses.positiveIntClass, closedWorld) ||
+            instructionType, commonElements.jsPositiveIntClass, closedWorld) ||
         containsType(
-            instructionType, backendClasses.uint32Class, closedWorld) ||
+            instructionType, commonElements.jsUInt32Class, closedWorld) ||
         containsType(
-            instructionType, backendClasses.uint31Class, closedWorld) ||
-        containsType(instructionType, backendClasses.doubleClass, closedWorld);
+            instructionType, commonElements.jsUInt31Class, closedWorld) ||
+        containsType(
+            instructionType, commonElements.jsDoubleClass, closedWorld);
   }
 
   bool canBePrimitiveBoolean(ClosedWorld closedWorld) {
     return containsType(
-        instructionType, closedWorld.backendClasses.boolClass, closedWorld);
+        instructionType, closedWorld.commonElements.jsBoolClass, closedWorld);
   }
 
   bool canBePrimitiveArray(ClosedWorld closedWorld) {
-    BackendClasses backendClasses = closedWorld.backendClasses;
+    CommonElements commonElements = closedWorld.commonElements;
     return containsType(
-            instructionType, backendClasses.listClass, closedWorld) ||
+            instructionType, commonElements.jsArrayClass, closedWorld) ||
         containsType(
-            instructionType, backendClasses.fixedListClass, closedWorld) ||
-        containsType(
-            instructionType, backendClasses.growableListClass, closedWorld) ||
-        containsType(
-            instructionType, backendClasses.constListClass, closedWorld);
+            instructionType, commonElements.jsFixedArrayClass, closedWorld) ||
+        containsType(instructionType, commonElements.jsExtendableArrayClass,
+            closedWorld) ||
+        containsType(instructionType, commonElements.jsUnmodifiableArrayClass,
+            closedWorld);
   }
 
   bool isIndexablePrimitive(ClosedWorld closedWorld) {
     return instructionType.containsOnlyString(closedWorld) ||
-        isInstanceOf(instructionType, closedWorld.backendClasses.indexableClass,
-            closedWorld);
+        isInstanceOf(instructionType,
+            closedWorld.commonElements.jsIndexableClass, closedWorld);
   }
 
   bool isFixedArray(ClosedWorld closedWorld) {
-    BackendClasses backendClasses = closedWorld.backendClasses;
+    CommonElements commonElements = closedWorld.commonElements;
     // TODO(sra): Recognize the union of these types as well.
     return containsOnlyType(
-            instructionType, backendClasses.fixedListClass, closedWorld) ||
-        containsOnlyType(
-            instructionType, backendClasses.constListClass, closedWorld);
+            instructionType, commonElements.jsFixedArrayClass, closedWorld) ||
+        containsOnlyType(instructionType,
+            commonElements.jsUnmodifiableArrayClass, closedWorld);
   }
 
   bool isExtendableArray(ClosedWorld closedWorld) {
     return containsOnlyType(instructionType,
-        closedWorld.backendClasses.growableListClass, closedWorld);
+        closedWorld.commonElements.jsExtendableArrayClass, closedWorld);
   }
 
   bool isMutableArray(ClosedWorld closedWorld) {
     return isInstanceOf(instructionType,
-        closedWorld.backendClasses.mutableListClass, closedWorld);
+        closedWorld.commonElements.jsMutableArrayClass, closedWorld);
   }
 
   bool isReadableArray(ClosedWorld closedWorld) {
     return isInstanceOf(
-        instructionType, closedWorld.backendClasses.listClass, closedWorld);
+        instructionType, closedWorld.commonElements.jsArrayClass, closedWorld);
   }
 
   bool isMutableIndexable(ClosedWorld closedWorld) {
     return isInstanceOf(instructionType,
-        closedWorld.backendClasses.mutableIndexableClass, closedWorld);
+        closedWorld.commonElements.jsMutableIndexableClass, closedWorld);
   }
 
   bool isArray(ClosedWorld closedWorld) => isReadableArray(closedWorld);
 
   bool canBePrimitiveString(ClosedWorld closedWorld) {
     return containsType(
-        instructionType, closedWorld.backendClasses.stringClass, closedWorld);
+        instructionType, closedWorld.commonElements.jsStringClass, closedWorld);
   }
 
   bool isInteger(ClosedWorld closedWorld) {
@@ -1043,25 +1096,25 @@ abstract class HInstruction implements Spannable {
 
   bool isUInt32(ClosedWorld closedWorld) {
     return !instructionType.isNullable &&
-        isInstanceOf(instructionType, closedWorld.backendClasses.uint32Class,
+        isInstanceOf(instructionType, closedWorld.commonElements.jsUInt32Class,
             closedWorld);
   }
 
   bool isUInt31(ClosedWorld closedWorld) {
     return !instructionType.isNullable &&
-        isInstanceOf(instructionType, closedWorld.backendClasses.uint31Class,
+        isInstanceOf(instructionType, closedWorld.commonElements.jsUInt31Class,
             closedWorld);
   }
 
   bool isPositiveInteger(ClosedWorld closedWorld) {
     return !instructionType.isNullable &&
         isInstanceOf(instructionType,
-            closedWorld.backendClasses.positiveIntClass, closedWorld);
+            closedWorld.commonElements.jsPositiveIntClass, closedWorld);
   }
 
   bool isPositiveIntegerOrNull(ClosedWorld closedWorld) {
     return isInstanceOf(instructionType,
-        closedWorld.backendClasses.positiveIntClass, closedWorld);
+        closedWorld.commonElements.jsPositiveIntClass, closedWorld);
   }
 
   bool isIntegerOrNull(ClosedWorld closedWorld) {
@@ -1159,8 +1212,8 @@ abstract class HInstruction implements Spannable {
   // These methods should be overwritten by instructions that
   // participate in global value numbering.
   int typeCode() => HInstruction.UNDEFINED_TYPECODE;
-  bool typeEquals(HInstruction other) => false;
-  bool dataEquals(HInstruction other) => false;
+  bool typeEquals(covariant HInstruction other) => false;
+  bool dataEquals(covariant HInstruction other) => false;
 
   accept(HVisitor visitor);
 
@@ -1229,60 +1282,9 @@ abstract class HInstruction implements Spannable {
     removeFromList(oldInput.usedBy, this);
   }
 
-  // Compute the set of users of this instruction that is dominated by
-  // [other]. If [other] is a user of [this], it is included in the
-  // returned set.
-  Setlet<HInstruction> dominatedUsers(HInstruction other) {
-    // Keep track of all instructions that we have to deal with later
-    // and count the number of them that are in the current block.
-    Setlet<HInstruction> users = new Setlet<HInstruction>();
-    int usersInCurrentBlock = 0;
-
-    // Run through all the users and see if they are dominated or
-    // potentially dominated by [other].
-    HBasicBlock otherBlock = other.block;
-    for (int i = 0, length = usedBy.length; i < length; i++) {
-      HInstruction current = usedBy[i];
-      HBasicBlock currentBlock = current.block;
-      if (otherBlock.dominates(currentBlock)) {
-        if (identical(currentBlock, otherBlock)) usersInCurrentBlock++;
-        users.add(current);
-      }
-    }
-
-    // Run through all the phis in the same block as [other] and remove them
-    // from the users set.
-    if (usersInCurrentBlock > 0) {
-      for (HPhi phi = otherBlock.phis.first; phi != null; phi = phi.next) {
-        if (users.contains(phi)) {
-          users.remove(phi);
-          if (--usersInCurrentBlock == 0) break;
-        }
-      }
-    }
-
-    // Run through all the instructions before [other] and remove them
-    // from the users set.
-    if (usersInCurrentBlock > 0) {
-      HInstruction current = otherBlock.first;
-      while (!identical(current, other)) {
-        if (users.contains(current)) {
-          users.remove(current);
-          if (--usersInCurrentBlock == 0) break;
-        }
-        current = current.next;
-      }
-    }
-
-    return users;
-  }
-
   void replaceAllUsersDominatedBy(
       HInstruction cursor, HInstruction newInstruction) {
-    Setlet<HInstruction> users = dominatedUsers(cursor);
-    for (HInstruction user in users) {
-      user.changeUse(this, newInstruction);
-    }
+    DominatedUses.of(this, cursor).replaceWith(newInstruction);
   }
 
   void moveBefore(HInstruction other) {
@@ -1340,8 +1342,9 @@ abstract class HInstruction implements Spannable {
     assert(!type.isTypeVariable);
     assert(type.treatAsRaw || type.isFunctionType);
     if (type.isDynamic) return this;
+    if (type.isVoid) return this;
     if (type == closedWorld.commonElements.objectType) return this;
-    if (type.isVoid || type.isFunctionType || type.isMalformed) {
+    if (type.isFunctionType || type.isMalformed) {
       return new HTypeConversion(
           type, kind, closedWorld.commonMasks.dynamicType, this);
     }
@@ -1366,6 +1369,138 @@ abstract class HInstruction implements Spannable {
    */
   bool hasSameLoopHeaderAs(HInstruction other) {
     return block.enclosingLoopHeader == other.block.enclosingLoopHeader;
+  }
+}
+
+/// The set of uses of [source] that are dominated by [dominator].
+class DominatedUses {
+  final HInstruction _source;
+
+  // Two list of matching length holding (instruction, input-index) pairs for
+  // the dominated uses.
+  final List<HInstruction> _instructions = <HInstruction>[];
+  final List<int> _indexes = <int>[];
+
+  DominatedUses._(this._source);
+
+  /// The uses of [source] that are dominated by [dominator].
+  ///
+  /// The uses by [dominator] are included in the result, unless
+  /// [excludeDominator] is `true`, so `true` selects uses following
+  /// [dominator].
+  ///
+  /// The uses include the in-edges of a HPhi node that corresponds to a
+  /// dominated block. (There can be many such edges on a single phi at the exit
+  /// of a loop with many break statements).  If [excludePhiOutEdges] is `true`
+  /// then these edge uses are not included.
+  static of(HInstruction source, HInstruction dominator,
+      {bool excludeDominator: false, bool excludePhiOutEdges: false}) {
+    return new DominatedUses._(source)
+      .._compute(source, dominator, excludeDominator, excludePhiOutEdges);
+  }
+
+  bool get isEmpty => _instructions.isEmpty;
+  bool get isNotEmpty => !isEmpty;
+
+  /// Changes all the uses in the set to [newInstruction].
+  void replaceWith(HInstruction newInstruction) {
+    assert(!identical(newInstruction, _source));
+    if (isEmpty) return;
+    for (int i = 0; i < _instructions.length; i++) {
+      HInstruction user = _instructions[i];
+      int index = _indexes[i];
+      HInstruction oldInstruction = user.inputs[index];
+      assert(
+          identical(oldInstruction, _source),
+          'Input ${index} of ${user} changed.'
+          '\n  Found: ${oldInstruction}\n  Expected: ${_source}');
+      user.inputs[index] = newInstruction;
+      oldInstruction.usedBy.remove(user);
+      newInstruction.usedBy.add(user);
+    }
+  }
+
+  bool get isSingleton => _instructions.length == 1;
+
+  HInstruction get single => _instructions.single;
+
+  void _addUse(HInstruction user, int inputIndex) {
+    _instructions.add(user);
+    _indexes.add(inputIndex);
+  }
+
+  void _compute(HInstruction source, HInstruction dominator,
+      bool excludeDominator, bool excludePhiOutEdges) {
+    // Keep track of all instructions that we have to deal with later and count
+    // the number of them that are in the current block.
+    Set<HInstruction> users = new Setlet<HInstruction>();
+    Set<HInstruction> seen = new Setlet<HInstruction>();
+    int usersInCurrentBlock = 0;
+
+    HBasicBlock dominatorBlock = dominator.block;
+
+    // Run through all the users and see if they are dominated, or potentially
+    // dominated, or partially dominated by [dominator]. It is easier to
+    // de-duplicate [usedBy] and process all inputs of an instruction than to
+    // track the repeated elements of usedBy and match them up by index.
+    for (HInstruction current in source.usedBy) {
+      if (!seen.add(current)) continue;
+      HBasicBlock currentBlock = current.block;
+      if (dominatorBlock.dominates(currentBlock)) {
+        users.add(current);
+        if (identical(currentBlock, dominatorBlock)) usersInCurrentBlock++;
+      } else if (!excludePhiOutEdges && current is HPhi) {
+        // A non-dominated HPhi.
+        // See if there a dominated edge into the phi. The input must be
+        // [source] and the position must correspond to a dominated block.
+        List<HBasicBlock> predecessors = currentBlock.predecessors;
+        for (int i = 0; i < predecessors.length; i++) {
+          if (current.inputs[i] != source) continue;
+          HBasicBlock predecessor = predecessors[i];
+          if (dominatorBlock.dominates(predecessor)) {
+            _addUse(current, i);
+          }
+        }
+      }
+    }
+
+    // Run through all the phis in the same block as [dominator] and remove them
+    // from the users set. These come before [dominator].
+    // TODO(sra): Could we simply not add them in the first place?
+    if (usersInCurrentBlock > 0) {
+      for (HPhi phi = dominatorBlock.phis.first; phi != null; phi = phi.next) {
+        if (users.remove(phi)) {
+          if (--usersInCurrentBlock == 0) break;
+        }
+      }
+    }
+
+    // Run through all the instructions before [dominator] and remove them from
+    // the users set.
+    if (usersInCurrentBlock > 0) {
+      HInstruction current = dominatorBlock.first;
+      while (!identical(current, dominator)) {
+        if (users.contains(current)) {
+          // TODO(29302): Use 'user.remove(current)' as the condition.
+          users.remove(current);
+          if (--usersInCurrentBlock == 0) break;
+        }
+        current = current.next;
+      }
+      if (excludeDominator) {
+        users.remove(dominator);
+      }
+    }
+
+    // Convert users into a list of (user, input-index) uses.
+    for (HInstruction user in users) {
+      var inputs = user.inputs;
+      for (int i = 0; i < inputs.length; i++) {
+        if (inputs[i] == source) {
+          _addUse(user, i);
+        }
+      }
+    }
   }
 }
 
@@ -1494,15 +1629,8 @@ class HCreate extends HInstruction {
   /// the closure class.
   FunctionEntity callMethod;
 
-  /// If this node creates a closure class, [closure] is the closurized local
-  /// function.
-  Local localFunction;
-
   HCreate(this.element, List<HInstruction> inputs, TypeMask type,
-      {this.instantiatedTypes,
-      this.hasRtiInput: false,
-      this.callMethod,
-      this.localFunction})
+      {this.instantiatedTypes, this.hasRtiInput: false, this.callMethod})
       : super(inputs, type);
 
   bool get isAllocation => true;
@@ -1515,6 +1643,17 @@ class HCreate extends HInstruction {
   accept(HVisitor visitor) => visitor.visitCreate(this);
 
   String toString() => 'HCreate($element, ${instantiatedTypes})';
+}
+
+// Allocates a box to hold mutated captured variables.
+class HCreateBox extends HInstruction {
+  HCreateBox(TypeMask type) : super(<HInstruction>[], type);
+
+  bool get isAllocation => true;
+
+  accept(HVisitor visitor) => visitor.visitCreateBox(this);
+
+  String toString() => 'HCreateBox()';
 }
 
 abstract class HInvoke extends HInstruction {
@@ -1550,11 +1689,11 @@ abstract class HInvokeDynamic extends HInvoke {
   HInvokeDynamic(Selector selector, this.mask, this.element,
       List<HInstruction> inputs, TypeMask type,
       [bool isIntercepted = false])
-      : super(inputs, type),
-        this.selector = selector,
+      : this.selector = selector,
         specializer = isIntercepted
             ? InvokeDynamicSpecializer.lookupSpecializer(selector)
-            : const InvokeDynamicSpecializer();
+            : const InvokeDynamicSpecializer(),
+        super(inputs, type);
   toString() => 'invoke dynamic: selector=$selector, mask=$mask';
   HInstruction get receiver => inputs[0];
   HInstruction getDartReceiver(ClosedWorld closedWorld) {
@@ -2367,6 +2506,9 @@ class HThis extends HParameterValue {
   HThis(ThisLocal element, TypeMask type) : super(element, type);
 
   ThisLocal get sourceElement => super.sourceElement;
+  void set sourceElement(covariant ThisLocal local) {
+    super.sourceElement = local;
+  }
 
   accept(HVisitor visitor) => visitor.visitThis(this);
 
@@ -2853,8 +2995,8 @@ class HTypeConversion extends HCheck {
   HTypeConversion.withTypeRepresentation(this.typeExpression, this.kind,
       TypeMask type, HInstruction input, HInstruction typeRepresentation)
       : checkedType = type,
-        super(<HInstruction>[input, typeRepresentation], type),
-        receiverTypeCheckSelector = null {
+        receiverTypeCheckSelector = null,
+        super(<HInstruction>[input, typeRepresentation], type) {
     assert(!typeExpression.isTypedef);
     sourceElement = input.sourceElement;
   }
@@ -2862,8 +3004,8 @@ class HTypeConversion extends HCheck {
   HTypeConversion.viaMethodOnType(this.typeExpression, this.kind, TypeMask type,
       HInstruction reifiedType, HInstruction input)
       : checkedType = type,
-        super(<HInstruction>[reifiedType, input], type),
-        receiverTypeCheckSelector = null {
+        receiverTypeCheckSelector = null,
+        super(<HInstruction>[reifiedType, input], type) {
     // This form is currently used only for function types.
     assert(typeExpression.isFunctionType);
     assert(kind == CHECKED_MODE_CHECK || kind == CAST_TYPE_CHECK);
@@ -2918,7 +3060,7 @@ class HTypeConversion extends HCheck {
 /// The [HTypeKnown] instruction marks a value with a refined type.
 class HTypeKnown extends HCheck {
   TypeMask knownType;
-  bool _isMovable;
+  final bool _isMovable;
 
   HTypeKnown.pinned(TypeMask knownType, HInstruction input)
       : this.knownType = knownType,
@@ -2937,6 +3079,8 @@ class HTypeKnown extends HCheck {
   bool isJsStatement() => false;
   bool isControlFlow() => false;
   bool canThrow() => false;
+
+  bool get isPinned => inputs.length == 1;
 
   HInstruction get witness => inputs.length == 2 ? inputs[1] : null;
 
@@ -3391,6 +3535,7 @@ class HTypeInfoExpression extends HInstruction {
 
   String toString() => 'HTypeInfoExpression($kindAsString, $dartType)';
 
+  // ignore: MISSING_RETURN
   String get kindAsString {
     switch (kind) {
       case TypeInfoExpressionKind.COMPLETE:

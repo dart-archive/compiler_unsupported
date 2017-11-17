@@ -21,13 +21,16 @@ class FrequencyBasedNamer extends Namer
   final String getterPrefix = 'g';
   final String setterPrefix = 's';
   final String callPrefix = ''; // this will create function names $<n>
+  String get requiredParameterField => r'$R';
+  String get defaultValuesField => r'$D';
+  String get operatorSignature => r'$S';
 
   jsAst.Name get staticsPropertyName =>
       _staticsPropertyName ??= getFreshName(instanceScope, 'static');
 
-  FrequencyBasedNamer(BackendHelpers helpers, NativeData nativeData,
+  FrequencyBasedNamer(
       ClosedWorld closedWorld, CodegenWorldBuilder codegenWorldBuilder)
-      : super(helpers, nativeData, closedWorld, codegenWorldBuilder) {
+      : super(closedWorld, codegenWorldBuilder) {
     fieldRegistry = new _FieldNamingRegistry(this);
   }
 
@@ -64,7 +67,7 @@ class FrequencyBasedNamer extends Namer
   }
 
   @override
-  jsAst.Name instanceFieldPropertyName(FieldElement element) {
+  jsAst.Name instanceFieldPropertyName(FieldEntity element) {
     jsAst.Name proposed = _minifiedInstanceFieldPropertyName(element);
     if (proposed != null) {
       return proposed;

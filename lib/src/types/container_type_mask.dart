@@ -7,14 +7,14 @@ part of masks;
 /// A [ContainerTypeMask] is a [TypeMask] for a specific allocation
 /// site of a container (currently only List) that will get specialized
 /// once the [TypeGraphInferrer] phase finds an element type for it.
-class ContainerTypeMask extends ForwardingTypeMask {
+class ContainerTypeMask<T> extends ForwardingTypeMask {
   final TypeMask forwardTo;
 
   // The [Node] where this type mask was created.
-  final Node allocationNode;
+  final T allocationNode;
 
   // The [Entity] where this type mask was created.
-  final Entity allocationElement;
+  final MemberEntity allocationElement;
 
   // The element type of this container.
   final TypeMask elementType;
@@ -28,13 +28,13 @@ class ContainerTypeMask extends ForwardingTypeMask {
   TypeMask nullable() {
     return isNullable
         ? this
-        : new ContainerTypeMask(forwardTo.nullable(), allocationNode,
+        : new ContainerTypeMask<T>(forwardTo.nullable(), allocationNode,
             allocationElement, elementType, length);
   }
 
   TypeMask nonNullable() {
     return isNullable
-        ? new ContainerTypeMask(forwardTo.nonNullable(), allocationNode,
+        ? new ContainerTypeMask<T>(forwardTo.nonNullable(), allocationNode,
             allocationElement, elementType, length)
         : this;
   }
@@ -56,7 +56,7 @@ class ContainerTypeMask extends ForwardingTypeMask {
     return forwardIntersection.isNullable ? nullable() : nonNullable();
   }
 
-  TypeMask union(other, ClosedWorld closedWorld) {
+  TypeMask union(dynamic other, ClosedWorld closedWorld) {
     if (this == other) {
       return this;
     } else if (equalsDisregardNull(other)) {
@@ -70,7 +70,7 @@ class ContainerTypeMask extends ForwardingTypeMask {
           elementType.union(other.elementType, closedWorld);
       int newLength = (length == other.length) ? length : null;
       TypeMask newForwardTo = forwardTo.union(other.forwardTo, closedWorld);
-      return new ContainerTypeMask(
+      return new ContainerTypeMask<T>(
           newForwardTo,
           allocationNode == other.allocationNode ? allocationNode : null,
           allocationElement == other.allocationElement

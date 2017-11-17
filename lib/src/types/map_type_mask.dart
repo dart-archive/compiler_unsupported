@@ -9,14 +9,14 @@ part of masks;
  * site of a map (currently only internal Map class) that will get specialized
  * once the [TypeGraphInferrer] phase finds a key and/or value type for it.
  */
-class MapTypeMask extends ForwardingTypeMask {
+class MapTypeMask<T> extends ForwardingTypeMask {
   final TypeMask forwardTo;
 
   // The [Node] where this type mask was created.
-  final Node allocationNode;
+  final T allocationNode;
 
-  // The [Entity] where this type mask was created.
-  final Entity allocationElement;
+  // The [MemberEntity] where this type mask was created.
+  final MemberEntity allocationElement;
 
   // The value type of this map.
   final TypeMask valueType;
@@ -59,7 +59,7 @@ class MapTypeMask extends ForwardingTypeMask {
     return forwardIntersection.isNullable ? nullable() : nonNullable();
   }
 
-  TypeMask union(other, ClosedWorld closedWorld) {
+  TypeMask union(dynamic other, ClosedWorld closedWorld) {
     if (this == other) {
       return this;
     } else if (equalsDisregardNull(other)) {
@@ -81,7 +81,7 @@ class MapTypeMask extends ForwardingTypeMask {
       // doesn't need the compiler.
       assert(other.keyType ==
           new TypeMask.nonNullExact(
-              closedWorld.backendClasses.stringClass, closedWorld));
+              closedWorld.commonElements.jsStringClass, closedWorld));
       TypeMask newKeyType = keyType.union(other.keyType, closedWorld);
       TypeMask newValueType =
           other.typeMap.values.fold(keyType, (p, n) => p.union(n, closedWorld));

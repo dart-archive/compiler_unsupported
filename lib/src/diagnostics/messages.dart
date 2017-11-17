@@ -16,7 +16,8 @@ library dart2js.messages;
 
 import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart' show ErrorToken, Token;
 import 'generated/shared_messages.dart' as shared_messages;
-import 'invariant.dart' show invariant;
+import '../constants/expressions.dart' show ConstantExpression;
+import 'invariant.dart' show failedAt;
 import 'spannable.dart' show CURRENT_ELEMENT_SPANNABLE;
 
 const DONT_KNOW_HOW_TO_FIX = "Computer says no!";
@@ -155,6 +156,7 @@ enum MessageKind {
   FORIN_NOT_ASSIGNABLE,
   FORMAL_DECLARED_CONST,
   FORMAL_DECLARED_STATIC,
+  FROM_ENVIRONMENT_MUST_BE_CONST,
   FUNCTION_TYPE_FORMAL_WITH_DEFAULT,
   FUNCTION_WITH_INITIALIZER,
   GENERIC,
@@ -200,13 +202,32 @@ enum MessageKind {
   INVALID_AWAIT,
   INVALID_AWAIT_FOR,
   INVALID_AWAIT_FOR_IN,
+  INVALID_BOOL_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE,
   INVALID_BREAK,
   INVALID_CASE_DEFAULT,
+  INVALID_CONSTANT_ADD_TYPES,
+  INVALID_CONSTANT_BINARY_INT_TYPE,
+  INVALID_CONSTANT_BINARY_NUM_TYPE,
+  INVALID_CONSTANT_BINARY_PRIMITIVE_TYPE,
+  INVALID_CONSTANT_COMPLEMENT_TYPE,
+  INVALID_CONSTANT_CONDITIONAL_TYPE,
+  INVALID_CONSTANT_CONSTRUCTOR,
+  INVALID_CONSTANT_INDEX,
+  INVALID_CONSTANT_INTERPOLATION_TYPE,
+  INVALID_CONSTANT_NEGATE_TYPE,
+  INVALID_CONSTANT_NOT_TYPE,
+  INVALID_CONSTANT_NUM_ADD_TYPE,
+  INVALID_CONSTANT_STRING_ADD_TYPE,
+  INVALID_CONSTANT_STRING_LENGTH_TYPE,
   INVALID_CONSTRUCTOR_ARGUMENTS,
   INVALID_CONSTRUCTOR_NAME,
   INVALID_CONTINUE,
   INVALID_FOR_IN,
+  INVALID_FROM_ENVIRONMENT_NAME_TYPE,
   INVALID_INITIALIZER,
+  INVALID_INT_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE,
+  INVALID_LOGICAL_AND_OPERAND_TYPE,
+  INVALID_LOGICAL_OR_OPERAND_TYPE,
   INVALID_METADATA,
   INVALID_METADATA_GENERIC,
   INVALID_OVERRIDDEN_FIELD,
@@ -226,6 +247,7 @@ enum MessageKind {
   INVALID_PARAMETER,
   INVALID_RECEIVER_IN_INITIALIZER,
   INVALID_SOURCE_FILE_LOCATION,
+  INVALID_STRING_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE,
   INVALID_SYMBOL,
   INVALID_INLINE_FUNCTION_TYPE,
   INVALID_SYNC_MODIFIER,
@@ -349,7 +371,7 @@ enum MessageKind {
   PRIVATE_ACCESS,
   PRIVATE_IDENTIFIER,
   PRIVATE_NAMED_PARAMETER,
-  READ_SCRIPT_ERROR,
+  READ_URI_ERROR,
   READ_SELF_ERROR,
   REDIRECTING_CONSTRUCTOR_CYCLE,
   REDIRECTING_CONSTRUCTOR_HAS_BODY,
@@ -399,10 +421,10 @@ enum MessageKind {
   UNIMPLEMENTED_SETTER,
   UNIMPLEMENTED_SETTER_ONE,
   UNMATCHED_TOKEN,
-  UNRECOGNIZED_VERSION_OF_LOOKUP_MAP,
   UNSUPPORTED_BANG_EQ_EQ,
   UNSUPPORTED_EQ_EQ_EQ,
   UNSUPPORTED_LITERAL_SYMBOL,
+  UNSUPPORTED_OPERATOR,
   UNSUPPORTED_PREFIX_PLUS,
   MISSING_EXPRESSION_IN_THROW,
   UNTERMINATED_COMMENT,
@@ -427,7 +449,7 @@ enum MessageKind {
 /// A message template for an error, warning, hint or info message generated
 /// by the compiler. Each template is associated with a [MessageKind] that
 /// uniquely identifies the message template.
-// TODO(johnnniwinther): For Infos, consider adding a reference to the
+// TODO(johnniwinther): For Infos, consider adding a reference to the
 // error/warning/hint that they belong to.
 class MessageTemplate {
   final MessageKind kind;
@@ -1077,6 +1099,13 @@ main() => new C(0);"""
               MessageKind.CONST_CONSTRUCTOR_WITH_NONFINAL_FIELDS_CONSTRUCTOR,
               "This const constructor is not allowed due to "
               "non-final fields."),
+
+      MessageKind.FROM_ENVIRONMENT_MUST_BE_CONST: const MessageTemplate(
+          MessageKind.FROM_ENVIRONMENT_MUST_BE_CONST,
+          "#{className}.fromEnvironment can only be used as a "
+          "const constructor.",
+          howToFix: "Try replacing `new` with `const`.",
+          examples: const ["main() { new bool.fromEnvironment('X'); }"]),
 
       MessageKind.INITIALIZING_FORMAL_NOT_ALLOWED: const MessageTemplate(
           MessageKind.INITIALIZING_FORMAL_NOT_ALLOWED,
@@ -2094,9 +2123,8 @@ part of lib.foo;
           "both '#{canonicalUri1}' and '#{canonicalUri2}'."),
 
       // This is used as an exception.
-      MessageKind.INVALID_SOURCE_FILE_LOCATION: const MessageTemplate(
-          MessageKind.INVALID_SOURCE_FILE_LOCATION,
-          '''
+      MessageKind.INVALID_SOURCE_FILE_LOCATION:
+          const MessageTemplate(MessageKind.INVALID_SOURCE_FILE_LOCATION, '''
 Invalid offset (#{offset}) in source map.
 File: #{fileName}
 Length: #{length}'''),
@@ -2396,8 +2424,8 @@ main() => A.A = 1;
           const MessageTemplate(
               MessageKind
                   .JS_OBJECT_LITERAL_CONSTRUCTOR_WITH_POSITIONAL_ARGUMENTS,
-              "Parameter '#{parameter}' in anonymous js-interop class '#{cls}' "
-              "object literal constructor is positional instead of named."
+              "Some parameters in anonymous js-interop class '#{cls}' "
+              "object literal constructor are positional instead of named."
               ".",
               howToFix: "Make all arguments in external factory object literal "
                   "constructors named.",
@@ -2445,6 +2473,10 @@ main() => A.A = 1;
           MessageKind.UNSUPPORTED_BANG_EQ_EQ,
           "'!==' is not an operator. "
           "Did you mean '#{lhs} != #{rhs}' or '!identical(#{lhs}, #{rhs})'?"),
+
+      MessageKind.UNSUPPORTED_OPERATOR: const MessageTemplate(
+          MessageKind.UNSUPPORTED_OPERATOR,
+          "'#{operator}' is not an operator. "),
 
       MessageKind.UNSUPPORTED_PREFIX_PLUS: const MessageTemplate(
           MessageKind.UNSUPPORTED_PREFIX_PLUS, "'+' is not a prefix operator. ",
@@ -2605,8 +2637,8 @@ main() {}
 """
           ]),
 
-      MessageKind.READ_SCRIPT_ERROR: const MessageTemplate(
-          MessageKind.READ_SCRIPT_ERROR, "Can't read '#{uri}' (#{exception}).",
+      MessageKind.READ_URI_ERROR: const MessageTemplate(
+          MessageKind.READ_URI_ERROR, "Can't read '#{uri}' (#{exception}).",
           // Don't know how to fix since the underlying error is unknown.
           howToFix: DONT_KNOW_HOW_TO_FIX,
           examples: const [
@@ -3199,9 +3231,8 @@ main() => new A();
           MessageKind.COMPILER_CRASHED,
           "The compiler crashed when compiling this element."),
 
-      MessageKind.PLEASE_REPORT_THE_CRASH: const MessageTemplate(
-          MessageKind.PLEASE_REPORT_THE_CRASH,
-          '''
+      MessageKind.PLEASE_REPORT_THE_CRASH:
+          const MessageTemplate(MessageKind.PLEASE_REPORT_THE_CRASH, '''
 The compiler is broken.
 
 When compiling the above element, the compiler crashed. It is not
@@ -3400,14 +3431,6 @@ main() => new A().foo = 0;"""
             """
 main() async {
  var await;
-}""",
-            """
-main() async* {
- var yield;
-}""",
-            """
-main() sync* {
- var yield;
 }"""
           ]),
 
@@ -3500,6 +3523,121 @@ part of test.main;
 """,
             }
           ]),
+      MessageKind.INVALID_CONSTANT_CONDITIONAL_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_CONDITIONAL_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid constant condition. "
+          "Must be a value of type 'bool'."),
+
+      MessageKind.INVALID_CONSTANT_INTERPOLATION_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_INTERPOLATION_TYPE,
+          "`#{constant}` of type '#{type}' is not valid in constant string "
+          "interpolation. Must be a value of type 'bool', 'int', 'double', "
+          "or 'String'."),
+
+      MessageKind.INVALID_CONSTANT_BINARY_PRIMITIVE_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_BINARY_PRIMITIVE_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant binary #{operator} expression. Must be a value of type "
+          "'bool', 'int', 'double', 'String', or 'Null'."),
+
+      MessageKind.INVALID_CONSTANT_STRING_ADD_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_STRING_ADD_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant binary + expression on 'String'. Must be a value of type "
+          "'String'."),
+
+      MessageKind.INVALID_CONSTANT_STRING_LENGTH_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_STRING_LENGTH_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand for a "
+          ".length expression. Must be a value of type 'String'."),
+
+      MessageKind.INVALID_CONSTANT_NUM_ADD_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_NUM_ADD_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant binary + expression on 'num'. Must be a value of type "
+          "'int' or 'double'."),
+
+      MessageKind.INVALID_CONSTANT_ADD_TYPES: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_ADD_TYPES,
+          "`#{leftConstant}` of type '#{leftType}' and "
+          "`#{rightConstant}` of type '#{rightType}' are not valid operands "
+          "of a constant binary + expression. Must both be either of "
+          "type 'String', or of types 'int' or 'double'."),
+
+      MessageKind.INVALID_CONSTANT_BINARY_NUM_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_BINARY_NUM_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant binary #{operator} expression. Must be a value of type "
+          "'int' or 'double'."),
+
+      MessageKind.INVALID_CONSTANT_BINARY_INT_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_BINARY_INT_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant binary #{operator} expression. Must be a value of type "
+          "'int'."),
+
+      MessageKind.INVALID_CONSTANT_NOT_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_NOT_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant unary #{operator} expression. Must be a value of type "
+          "'bool'."),
+
+      MessageKind.INVALID_CONSTANT_NEGATE_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_NEGATE_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant unary #{operator} expression. Must be a value of type "
+          "'int' or 'double'."),
+
+      MessageKind.INVALID_CONSTANT_COMPLEMENT_TYPE: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_COMPLEMENT_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid operand of a "
+          "constant unary #{operator} expression. Must be a value of type "
+          "'int'."),
+
+      MessageKind.INVALID_CONSTANT_INDEX: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_INDEX,
+          "Index expressions are not allowed in constant expressions."),
+
+      MessageKind.INVALID_FROM_ENVIRONMENT_NAME_TYPE: const MessageTemplate(
+          MessageKind.INVALID_FROM_ENVIRONMENT_NAME_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid environment name "
+          "constant. Must be a value of type 'String'."),
+
+      MessageKind.INVALID_BOOL_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE:
+          const MessageTemplate(
+              MessageKind.INVALID_BOOL_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE,
+              "`#{constant}` of type '#{type}' is not a valid "
+              "`bool.fromEnvironment` default value constant. "
+              "Must be a value of type 'bool' or `null`."),
+
+      MessageKind.INVALID_INT_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE:
+          const MessageTemplate(
+              MessageKind.INVALID_INT_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE,
+              "`#{constant}` of type '#{type}' is not a valid "
+              "`int.fromEnvironment` default value constant. "
+              "Must be a value of type 'int' or `null`."),
+
+      MessageKind.INVALID_STRING_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE:
+          const MessageTemplate(
+              MessageKind.INVALID_STRING_FROM_ENVIRONMENT_DEFAULT_VALUE_TYPE,
+              "`#{constant}` of type '#{type}' is not a valid "
+              "`String.fromEnvironment` default value constant. "
+              "Must be a value of type 'String' or `null`."),
+
+      MessageKind.INVALID_LOGICAL_AND_OPERAND_TYPE: const MessageTemplate(
+          MessageKind.INVALID_LOGICAL_AND_OPERAND_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid logical and operand. "
+          "Must be a value of type 'bool'."),
+
+      MessageKind.INVALID_LOGICAL_OR_OPERAND_TYPE: const MessageTemplate(
+          MessageKind.INVALID_LOGICAL_OR_OPERAND_TYPE,
+          "`#{constant}` of type '#{type}' is not a valid logical and operand. "
+          "Must be a value of type 'bool'."),
+
+      MessageKind.INVALID_CONSTANT_CONSTRUCTOR: const MessageTemplate(
+          MessageKind.INVALID_CONSTANT_CONSTRUCTOR,
+          "Constructor '#{constructorName}' is not a valid constant "
+          "constructor."),
 
       //////////////////////////////////////////////////////////////////////////////
       // Patch errors start.
@@ -3709,11 +3847,6 @@ $MIRRORS_NOT_SUPPORTED_BY_BACKEND_PADDING#{importChain}"""),
           "more code and prevents the compiler from doing some optimizations.",
           howToFix: "Consider removing this 'noSuchMethod' implementation."),
 
-      MessageKind.UNRECOGNIZED_VERSION_OF_LOOKUP_MAP: const MessageTemplate(
-          MessageKind.UNRECOGNIZED_VERSION_OF_LOOKUP_MAP,
-          "Unsupported version of package:lookup_map.",
-          howToFix: DONT_KNOW_HOW_TO_FIX),
-
       MessageKind.DUPLICATE_SERIALIZED_LIBRARY: const MessageTemplate(
           MessageKind.DUPLICATE_SERIALIZED_LIBRARY,
           "Library '#{libraryUri}' found in both '#{sourceUri1}' and "
@@ -3762,11 +3895,11 @@ class Message {
       arguments.forEach((key, value) {
         message = message.replaceAll('#{${key}}', convertToString(value));
       });
-      assert(invariant(
-          CURRENT_ELEMENT_SPANNABLE,
+      assert(
           kind == MessageKind.GENERIC ||
               !message.contains(new RegExp(r'#\{.+\}')),
-          message: 'Missing arguments in error message: "$message"'));
+          failedAt(CURRENT_ELEMENT_SPANNABLE,
+              'Missing arguments in error message: "$message"'));
       if (!terse && template.hasHowToFix) {
         String howToFix = template.howToFix;
         arguments.forEach((key, value) {
@@ -3792,9 +3925,11 @@ class Message {
   static String convertToString(value) {
     if (value is ErrorToken) {
       // Shouldn't happen.
-      return value.assertionMessage;
+      return value.assertionMessage.message;
     } else if (value is Token) {
       value = value.lexeme;
+    } else if (value is ConstantExpression) {
+      value = value.toDartText();
     }
     return '$value';
   }

@@ -10,8 +10,11 @@ import '../core_types.dart';
 import '../type_environment.dart';
 import '../library_index.dart';
 
-Program transformProgram(Program program, {List<ProgramRoot> programRoots}) {
-  new TreeShaker(program, programRoots: programRoots).transform(program);
+Program transformProgram(
+    CoreTypes coreTypes, ClassHierarchy hierarchy, Program program,
+    {List<ProgramRoot> programRoots}) {
+  new TreeShaker(coreTypes, hierarchy, program, programRoots: programRoots)
+      .transform(program);
   return program;
 }
 
@@ -88,9 +91,9 @@ class ProgramRoot {
 //
 // TODO(asgerf): Tree shake unused instance fields.
 class TreeShaker {
-  final Program program;
-  final ClassHierarchy hierarchy;
   final CoreTypes coreTypes;
+  final ClosedWorldClassHierarchy hierarchy;
+  final Program program;
   final bool strongMode;
   final List<ProgramRoot> programRoots;
 
@@ -124,7 +127,7 @@ class TreeShaker {
   /// Map from used members (regardless of host) to a summary object describing
   /// how the member invokes other members on `this`.
   ///
-  /// The summary object is a heterogenous list containing the [Member]s that
+  /// The summary object is a heterogeneous list containing the [Member]s that
   /// are invoked using `super` and the [Name]s that are dispatched on `this`.
   ///
   /// Names that are dispatched as a setter are preceded by the
@@ -167,13 +170,9 @@ class TreeShaker {
   /// the mirrors library.
   bool get forceShaking => programRoots != null && programRoots.isNotEmpty;
 
-  TreeShaker(Program program,
-      {ClassHierarchy hierarchy,
-      CoreTypes coreTypes,
-      bool strongMode: false,
-      List<ProgramRoot> programRoots})
-      : this._internal(program, hierarchy ?? new ClassHierarchy(program),
-            coreTypes ?? new CoreTypes(program), strongMode, programRoots);
+  TreeShaker(CoreTypes coreTypes, ClassHierarchy hierarchy, Program program,
+      {bool strongMode: false, List<ProgramRoot> programRoots})
+      : this._internal(coreTypes, hierarchy, program, strongMode, programRoots);
 
   bool isMemberBodyUsed(Member member) {
     return _usedMembers.containsKey(member);
@@ -208,10 +207,9 @@ class TreeShaker {
     new _TreeShakingTransformer(this).transform(program);
   }
 
-  TreeShaker._internal(this.program, ClassHierarchy hierarchy, this.coreTypes,
+  TreeShaker._internal(this.coreTypes, this.hierarchy, this.program,
       this.strongMode, this.programRoots)
-      : this.hierarchy = hierarchy,
-        this._dispatchedNames = new List<Set<Name>>(hierarchy.classes.length),
+      : this._dispatchedNames = new List<Set<Name>>(hierarchy.classes.length),
         this._usedMembersWithHost =
             new List<Set<Member>>(hierarchy.classes.length),
         this._classRetention = new List<ClassRetention>.filled(
@@ -222,7 +220,7 @@ class TreeShaker {
         new _ExternalTypeVisitor(this, isContravariant: true);
     _invariantVisitor = new _ExternalTypeVisitor(this,
         isCovariant: true, isContravariant: true);
-    _mirrorsLibrary = coreTypes.tryGetLibrary('dart:mirrors');
+    _mirrorsLibrary = coreTypes.mirrorsLibrary;
     try {
       _build();
     } on _UsingMirrorsException {
@@ -239,7 +237,7 @@ class TreeShaker {
       _addInstantiatedExternalSubclass(coreTypes.listClass);
       _addInstantiatedExternalSubclass(coreTypes.stringClass);
     }
-    _addDispatchedName(hierarchy.rootClass, new Name('noSuchMethod'));
+    _addDispatchedName(coreTypes.objectClass, new Name('noSuchMethod'));
     _addPervasiveUses();
     _addUsedMember(null, program.mainMethod);
     if (programRoots != null) {
@@ -446,7 +444,7 @@ class TreeShaker {
       Class class_ = root.getClass(table);
 
       // This is a class which will be instantiated by non-Dart code (whether it
-      // has a valid generative construtor or not).
+      // has a valid generative constructor or not).
       _addInstantiatedClass(class_);
 
       // We keep all the constructors of externally instantiated classes.
@@ -1054,6 +1052,10 @@ class _ExternalTypeVisitor extends DartTypeVisitor {
         visitInvariant(typeArgument);
       }
     }
+  }
+
+  visitTypedefType(TypedefType node) {
+    throw 'TypedefType is not implemented in tree shaker';
   }
 
   visitFunctionType(FunctionType node) {

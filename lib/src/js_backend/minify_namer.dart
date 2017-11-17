@@ -12,9 +12,8 @@ class MinifyNamer extends Namer
         _MinifiedFieldNamer,
         _MinifyConstructorBodyNamer,
         _MinifiedOneShotInterceptorNamer {
-  MinifyNamer(BackendHelpers helpers, NativeData nativeData,
-      ClosedWorld closedWorld, CodegenWorldBuilder codegenWorldBuilder)
-      : super(helpers, nativeData, closedWorld, codegenWorldBuilder) {
+  MinifyNamer(ClosedWorld closedWorld, CodegenWorldBuilder codegenWorldBuilder)
+      : super(closedWorld, codegenWorldBuilder) {
     reserveBackendNames();
     fieldRegistry = new _FieldNamingRegistry(this);
   }
@@ -28,6 +27,9 @@ class MinifyNamer extends Namer
   final String getterPrefix = 'g';
   final String setterPrefix = 's';
   final String callPrefix = ''; // this will create function names $<n>
+  String get requiredParameterField => r'$R';
+  String get defaultValuesField => r'$D';
+  String get operatorSignature => r'$S';
 
   final ALPHABET_CHARACTERS = 52; // a-zA-Z.
   final ALPHANUMERIC_CHARACTERS = 62; // a-zA-Z0-9.
@@ -292,7 +294,7 @@ class MinifyNamer extends Namer
   }
 
   @override
-  jsAst.Name instanceFieldPropertyName(FieldElement element) {
+  jsAst.Name instanceFieldPropertyName(FieldEntity element) {
     jsAst.Name proposed = _minifiedInstanceFieldPropertyName(element);
     if (proposed != null) {
       return proposed;
@@ -348,9 +350,9 @@ class _ConstructorBodyNamingScope {
     });
   }
 
-  String constructorBodyKeyFor(ConstructorBodyElement body) {
+  String constructorBodyKeyFor(ConstructorBodyEntity body) {
     int position = _constructors.indexOf(body.constructor);
-    assert(invariant(body, position >= 0, message: "constructor body missing"));
+    assert(position >= 0, failedAt(body, "constructor body missing"));
     return "@constructorBody@${_startIndex + position}";
   }
 }
@@ -360,7 +362,7 @@ abstract class _MinifyConstructorBodyNamer implements Namer {
       new Map<ClassElement, _ConstructorBodyNamingScope>();
 
   @override
-  jsAst.Name constructorBodyName(FunctionElement method) {
+  jsAst.Name constructorBodyName(ConstructorBodyEntity method) {
     _ConstructorBodyNamingScope scope = new _ConstructorBodyNamingScope(
         method.enclosingClass, _constructorBodyScopes);
     String key = scope.constructorBodyKeyFor(method);

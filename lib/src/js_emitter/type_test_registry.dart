@@ -4,59 +4,79 @@
 
 library dart2js.js_emitter.type_test_registry;
 
-import '../compiler.dart' show Compiler;
-import '../elements/resolution_types.dart'
+import '../common.dart';
+import '../common_elements.dart';
+import '../elements/entities.dart';
+import '../elements/types.dart';
+import '../js_backend/runtime_types.dart'
     show
-        ResolutionDartType,
-        ResolutionFunctionType,
-        ResolutionInterfaceType,
-        Types,
-        ResolutionTypeVariableType;
-import '../elements/elements.dart'
-    show ClassElement, Element, ElementKind, FunctionElement;
-import '../js_backend/js_backend.dart'
-    show JavaScriptBackend, RuntimeTypesSubstitutions, TypeChecks;
+        RuntimeTypesChecks,
+        RuntimeTypesChecksBuilder,
+        RuntimeTypesSubstitutions,
+        TypeChecks;
+import '../js_backend/mirrors_data.dart';
+import '../universe/world_builder.dart';
 import '../world.dart' show ClosedWorld;
 
 class TypeTestRegistry {
+  final ElementEnvironment _elementEnvironment;
+
   /**
-   * Raw ClassElement symbols occuring in is-checks and type assertions.  If the
+   * Raw ClassElement symbols occurring in is-checks and type assertions.  If the
    * program contains parameterized checks `x is Set<int>` and
    * `x is Set<String>` then the ClassElement `Set` will occur once in
    * [checkedClasses].
    */
-  Set<ClassElement> checkedClasses;
+  Set<ClassEntity> checkedClasses;
 
   /**
-   * The set of function types that checked, both explicity through tests of
+   * The set of function types that checked, both explicitly through tests of
    * typedefs and implicitly through type annotations in checked mode.
    */
-  Set<ResolutionFunctionType> checkedFunctionTypes;
+  Set<FunctionType> checkedFunctionTypes;
 
-  /// Initially contains all classes that need RTI. After
-  /// [computeNeededClasses]
-  /// this set only contains classes that are only used for RTI.
-  final Set<ClassElement> rtiNeededClasses = new Set<ClassElement>();
+  /// After [computeNeededClasses] this set only contains classes that are only
+  /// used for RTI.
+  Set<ClassEntity> _rtiNeededClasses;
 
-  Iterable<ClassElement> cachedClassesUsingTypeVariableTests;
+  Iterable<ClassEntity> cachedClassesUsingTypeVariableTests;
 
-  Iterable<ClassElement> get classesUsingTypeVariableTests {
+  Iterable<ClassEntity> get classesUsingTypeVariableTests {
     if (cachedClassesUsingTypeVariableTests == null) {
-      cachedClassesUsingTypeVariableTests = compiler
-          .codegenWorldBuilder.isChecks
-          .where((ResolutionDartType t) => t is ResolutionTypeVariableType)
-          .map((ResolutionTypeVariableType v) => v.element.enclosingClass)
-          .toList();
+      cachedClassesUsingTypeVariableTests = _codegenWorldBuilder.isChecks
+          .where((DartType t) =>
+              t is TypeVariableType && t.element.typeDeclaration is ClassEntity)
+          .map<ClassEntity>((DartType _v) {
+        TypeVariableType v = _v;
+        return v.element.typeDeclaration;
+      }).toList();
     }
     return cachedClassesUsingTypeVariableTests;
   }
 
-  final Compiler compiler;
-  final ClosedWorld closedWorld;
+  final CodegenWorldBuilder _codegenWorldBuilder;
+  final ClosedWorld _closedWorld;
 
-  TypeTestRegistry(this.compiler, this.closedWorld);
+  RuntimeTypesChecks _rtiChecks;
 
-  JavaScriptBackend get backend => compiler.backend;
+  TypeTestRegistry(
+      this._codegenWorldBuilder, this._closedWorld, this._elementEnvironment);
+
+  RuntimeTypesChecks get rtiChecks {
+    assert(
+        _rtiChecks != null,
+        failedAt(NO_LOCATION_SPANNABLE,
+            "RuntimeTypesChecks has not been computed yet."));
+    return _rtiChecks;
+  }
+
+  Iterable<ClassEntity> get rtiNeededClasses {
+    assert(
+        _rtiNeededClasses != null,
+        failedAt(NO_LOCATION_SPANNABLE,
+            "rtiNeededClasses has not been computed yet."));
+    return _rtiNeededClasses;
+  }
 
   /**
    * Returns the classes with constructors used as a 'holder' in
@@ -65,27 +85,30 @@ class TypeTestRegistry {
    * complete.  Not all classes will go away while constructors are referenced
    * from type substitutions.
    */
-  Set<ClassElement> computeClassesModifiedByEmitRuntimeTypeSupport() {
-    TypeChecks typeChecks = backend.rtiChecks.requiredChecks;
-    Set<ClassElement> result = new Set<ClassElement>();
-    for (ClassElement cls in typeChecks.classes) {
+  Set<ClassEntity> computeClassesModifiedByEmitRuntimeTypeSupport() {
+    TypeChecks typeChecks = rtiChecks.requiredChecks;
+    Set<ClassEntity> result = new Set<ClassEntity>();
+    for (ClassEntity cls in typeChecks.classes) {
       if (typeChecks[cls].isNotEmpty) result.add(cls);
     }
     return result;
   }
 
-  Set<ClassElement> computeRtiNeededClasses() {
-    void addClassWithSuperclasses(ClassElement cls) {
-      rtiNeededClasses.add(cls);
-      for (ClassElement superclass = cls.superclass;
+  void computeRtiNeededClasses(RuntimeTypesSubstitutions rtiSubstitutions,
+      MirrorsData mirrorsData, Iterable<MemberEntity> liveMembers) {
+    _rtiNeededClasses = new Set<ClassEntity>();
+
+    void addClassWithSuperclasses(ClassEntity cls) {
+      _rtiNeededClasses.add(cls);
+      for (ClassEntity superclass = _elementEnvironment.getSuperClass(cls);
           superclass != null;
-          superclass = superclass.superclass) {
-        rtiNeededClasses.add(superclass);
+          superclass = _elementEnvironment.getSuperClass(superclass)) {
+        _rtiNeededClasses.add(superclass);
       }
     }
 
-    void addClassesWithSuperclasses(Iterable<ClassElement> classes) {
-      for (ClassElement cls in classes) {
+    void addClassesWithSuperclasses(Iterable<ClassEntity> classes) {
+      for (ClassEntity cls in classes) {
         addClassWithSuperclasses(cls);
       }
     }
@@ -94,84 +117,79 @@ class TypeTestRegistry {
     //     argument checks.
     // TODO(karlklose): merge this case with 2 when unifying argument and
     // object checks.
-    RuntimeTypesSubstitutions rtiSubstitutions = backend.rtiSubstitutions;
-    backend.rtiChecks
+    rtiChecks
         .getRequiredArgumentClasses()
-        .forEach(addClassWithSuperclasses);
+        .forEach((e) => addClassWithSuperclasses(e));
 
     // 2.  Add classes that are referenced by substitutions in object checks and
     //     their superclasses.
     TypeChecks requiredChecks =
         rtiSubstitutions.computeChecks(rtiNeededClasses, checkedClasses);
-    Set<ClassElement> classesUsedInSubstitutions =
+    Set<ClassEntity> classesUsedInSubstitutions =
         rtiSubstitutions.getClassesUsedInSubstitutions(requiredChecks);
     addClassesWithSuperclasses(classesUsedInSubstitutions);
 
     // 3.  Add classes that contain checked generic function types. These are
     //     needed to store the signature encoding.
-    for (ResolutionFunctionType type in checkedFunctionTypes) {
-      ClassElement contextClass = Types.getClassContext(type);
+    for (FunctionType type in checkedFunctionTypes) {
+      ClassEntity contextClass = DartTypes.getClassContext(type);
       if (contextClass != null) {
-        rtiNeededClasses.add(contextClass);
+        _rtiNeededClasses.add(contextClass);
       }
     }
 
-    bool canTearOff(Element function) {
+    bool canTearOff(MemberEntity function) {
       if (!function.isFunction ||
           function.isConstructor ||
-          function.isAccessor) {
+          function.isGetter ||
+          function.isSetter) {
         return false;
       } else if (function.isInstanceMember) {
         if (!function.enclosingClass.isClosure) {
-          return compiler.codegenWorldBuilder
-              .hasInvokedGetter(function, closedWorld);
+          return _codegenWorldBuilder.hasInvokedGetter(function, _closedWorld);
         }
       }
       return false;
     }
 
-    bool canBeReflectedAsFunction(Element element) {
-      return element.kind == ElementKind.FUNCTION ||
-          element.kind == ElementKind.GETTER ||
-          element.kind == ElementKind.SETTER ||
-          element.kind == ElementKind.GENERATIVE_CONSTRUCTOR;
+    bool canBeReflectedAsFunction(MemberEntity element) {
+      return !element.isField;
     }
 
-    bool canBeReified(Element element) {
+    bool canBeReified(MemberEntity element) {
       return (canTearOff(element) ||
-          backend.mirrorsData.isAccessibleByReflection(element));
+          mirrorsData.isMemberAccessibleByReflection(element));
     }
 
     // Find all types referenced from the types of elements that can be
     // reflected on 'as functions'.
-    backend.generatedCode.keys.where((element) {
+    liveMembers.where((MemberEntity element) {
       return canBeReflectedAsFunction(element) && canBeReified(element);
-    }).forEach((FunctionElement function) {
-      ResolutionDartType type = function.type;
-      for (ClassElement cls in backend.rtiChecks.getReferencedClasses(type)) {
+    }).forEach((_function) {
+      FunctionEntity function = _function;
+      FunctionType type = _elementEnvironment.getFunctionType(function);
+      for (ClassEntity cls in _rtiChecks.getReferencedClasses(type)) {
         while (cls != null) {
-          rtiNeededClasses.add(cls);
-          cls = cls.superclass;
+          _rtiNeededClasses.add(cls);
+          cls = _elementEnvironment.getSuperClass(cls);
         }
       }
     });
-
-    return rtiNeededClasses;
   }
 
-  void computeRequiredTypeChecks() {
+  void computeRequiredTypeChecks(RuntimeTypesChecksBuilder rtiChecksBuilder) {
     assert(checkedClasses == null && checkedFunctionTypes == null);
 
-    backend.rtiChecksBuilder.registerImplicitChecks(
-        compiler.codegenWorldBuilder, classesUsingTypeVariableTests);
-    backend.finalizeRti();
+    rtiChecksBuilder.registerImplicitChecks(
+        _codegenWorldBuilder, classesUsingTypeVariableTests);
+    _rtiChecks = rtiChecksBuilder.computeRequiredChecks(_codegenWorldBuilder);
 
-    checkedClasses = new Set<ClassElement>();
-    checkedFunctionTypes = new Set<ResolutionFunctionType>();
-    compiler.codegenWorldBuilder.isChecks.forEach((ResolutionDartType t) {
-      if (t is ResolutionInterfaceType) {
+    checkedClasses = new Set<ClassEntity>();
+    checkedFunctionTypes = new Set<FunctionType>();
+    _codegenWorldBuilder.isChecks.forEach((DartType t) {
+      if (t is InterfaceType) {
         checkedClasses.add(t.element);
-      } else if (t is ResolutionFunctionType) {
+      } else if (t is FunctionType) {
         checkedFunctionTypes.add(t);
       }
     });

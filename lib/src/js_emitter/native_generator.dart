@@ -8,24 +8,24 @@ import 'package:compiler_unsupported/_internal/js_runtime/shared/embedded_names.
 
 import '../js/js.dart' as jsAst;
 import '../js/js.dart' show js;
-import '../js_backend/js_backend.dart' show JavaScriptBackend;
+import '../js_backend/backend_usage.dart' show BackendUsage;
 
 import 'model.dart';
 
 class NativeGenerator {
-  static bool needsIsolateAffinityTagInitialization(JavaScriptBackend backend) {
-    return backend.backendUsage.needToInitializeIsolateAffinityTag;
+  static bool needsIsolateAffinityTagInitialization(BackendUsage backendUsage) {
+    return backendUsage.needToInitializeIsolateAffinityTag;
   }
 
   /// Generates the code for isolate affinity tags.
   ///
-  /// Independently Dart programs on the same page must not interfer and
+  /// Independently Dart programs on the same page must not interfere and
   /// this code sets up the variables needed to guarantee that behavior.
   static jsAst.Statement generateIsolateAffinityTagInitialization(
-      JavaScriptBackend backend,
+      BackendUsage backendUsage,
       jsAst.Expression generateEmbeddedGlobalAccess(String global),
       jsAst.Expression internStringFunction) {
-    assert(backend.backendUsage.needToInitializeIsolateAffinityTag);
+    assert(backendUsage.needToInitializeIsolateAffinityTag);
 
     jsAst.Expression getIsolateTagAccess =
         generateEmbeddedGlobalAccess(embeddedNames.GET_ISOLATE_TAG);
@@ -34,8 +34,7 @@ class NativeGenerator {
     jsAst.Expression dispatchPropertyNameAccess =
         generateEmbeddedGlobalAccess(embeddedNames.DISPATCH_PROPERTY_NAME);
 
-    return js.statement(
-        '''
+    return js.statement('''
       !function() {
         var intern = #internStringFunction;
 
@@ -63,15 +62,14 @@ class NativeGenerator {
           #dispatchPropertyName = #getIsolateTag("dispatch_record");
         }
       }();
-    ''',
-        {
-          'initializeDispatchProperty':
-              backend.backendUsage.needToInitializeDispatchProperty,
-          'internStringFunction': internStringFunction,
-          'getIsolateTag': getIsolateTagAccess,
-          'isolateTag': isolateTagAccess,
-          'dispatchPropertyName': dispatchPropertyNameAccess
-        });
+    ''', {
+      'initializeDispatchProperty':
+          backendUsage.needToInitializeDispatchProperty,
+      'internStringFunction': internStringFunction,
+      'getIsolateTag': getIsolateTagAccess,
+      'isolateTag': isolateTagAccess,
+      'dispatchPropertyName': dispatchPropertyNameAccess
+    });
   }
 
   static String generateIsolateTagRoot() {
@@ -155,8 +153,7 @@ class NativeGenerator {
       jsAst.Expression leafTagsAccess) {
     jsAst.Expression subclassRead =
         subclassReadGenerator(js('subclasses[i]', []));
-    return js.statement(
-        '''
+    return js.statement('''
           // The native info looks like this:
           //
           // HtmlElement: {
@@ -204,15 +201,14 @@ class NativeGenerator {
               }
             }
           }
-    ''',
-        {
-          'info': infoAccess,
-          'constructor': constructorAccess,
-          'subclassRead': subclassRead,
-          'interceptorsByTagAccess': interceptorsByTagAccess,
-          'leafTagsAccess': leafTagsAccess,
-          'nativeSuperclassTagName': embeddedNames.NATIVE_SUPERCLASS_TAG_NAME,
-          'allowNativesSubclassing': true
-        });
+    ''', {
+      'info': infoAccess,
+      'constructor': constructorAccess,
+      'subclassRead': subclassRead,
+      'interceptorsByTagAccess': interceptorsByTagAccess,
+      'leafTagsAccess': leafTagsAccess,
+      'nativeSuperclassTagName': embeddedNames.NATIVE_SUPERCLASS_TAG_NAME,
+      'allowNativesSubclassing': true
+    });
   }
 }

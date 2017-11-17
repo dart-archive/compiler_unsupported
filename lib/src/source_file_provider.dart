@@ -5,7 +5,6 @@
 library source_file_provider;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -22,41 +21,80 @@ import 'util/uri_extras.dart';
 abstract class SourceFileProvider implements CompilerInput {
   bool isWindows = (Platform.operatingSystem == 'windows');
   Uri cwd = currentDirectory;
-  Map<Uri, SourceFile> sourceFiles = <Uri, SourceFile>{};
+  Map<Uri, api.Input> utf8SourceFiles = <Uri, api.Input>{};
+  Map<Uri, api.Input> binarySourceFiles = <Uri, api.Input>{};
   int dartCharactersRead = 0;
 
-  Future<String> readStringFromUri(Uri resourceUri) {
-    return readUtf8BytesFromUri(resourceUri).then(UTF8.decode);
-  }
+  Future<api.Input> readBytesFromUri(Uri resourceUri, api.InputKind inputKind) {
+    api.Input input;
+    switch (inputKind) {
+      case api.InputKind.utf8:
+        input = utf8SourceFiles[resourceUri];
+        break;
+      case api.InputKind.binary:
+        input = binarySourceFiles[resourceUri];
+        break;
+    }
+    if (input != null) return new Future.value(input);
 
-  Future<List<int>> readUtf8BytesFromUri(Uri resourceUri) {
     if (resourceUri.scheme == 'file') {
-      return _readFromFile(resourceUri);
+      return _readFromFile(resourceUri, inputKind);
     } else if (resourceUri.scheme == 'http' || resourceUri.scheme == 'https') {
-      return _readFromHttp(resourceUri);
+      return _readFromHttp(resourceUri, inputKind);
     } else {
       throw new ArgumentError("Unknown scheme in uri '$resourceUri'");
     }
   }
 
-  Future<List<int>> _readFromFile(Uri resourceUri) {
+  api.Input _readFromFileSync(Uri resourceUri, api.InputKind inputKind) {
     assert(resourceUri.scheme == 'file');
     List<int> source;
     try {
-      source = readAll(resourceUri.toFilePath());
+      source = readAll(resourceUri.toFilePath(),
+          zeroTerminated: inputKind == api.InputKind.utf8);
     } on FileSystemException catch (ex) {
       String message = ex.osError?.message;
       String detail = message != null ? ' ($message)' : '';
-      return new Future.error(
-          "Error reading '${relativizeUri(resourceUri)}' $detail");
+      throw "Error reading '${relativizeUri(resourceUri)}' $detail";
     }
     dartCharactersRead += source.length;
-    sourceFiles[resourceUri] = new CachingUtf8BytesSourceFile(
-        resourceUri, relativizeUri(resourceUri), source);
-    return new Future.value(source);
+    api.Input input;
+    switch (inputKind) {
+      case api.InputKind.utf8:
+        input = utf8SourceFiles[resourceUri] = new CachingUtf8BytesSourceFile(
+            resourceUri, relativizeUri(resourceUri), source);
+        break;
+      case api.InputKind.binary:
+        input =
+            binarySourceFiles[resourceUri] = new Binary(resourceUri, source);
+        break;
+    }
+    return input;
   }
 
-  Future<List<int>> _readFromHttp(Uri resourceUri) {
+  /// Read [resourceUri] directly as a UTF-8 file. If reading fails, `null` is
+  /// returned.
+  api.Input autoReadFromFile(Uri resourceUri) {
+    try {
+      return _readFromFileSync(resourceUri, InputKind.utf8);
+    } catch (e) {
+      // Silence the error. The [resourceUri] was not requested by the user and
+      // was only needed to give better error messages.
+    }
+    return null;
+  }
+
+  Future<api.Input> _readFromFile(Uri resourceUri, api.InputKind inputKind) {
+    api.Input input;
+    try {
+      input = _readFromFileSync(resourceUri, inputKind);
+    } catch (e) {
+      return new Future.error(e);
+    }
+    return new Future.value(input);
+  }
+
+  Future<api.Input> _readFromHttp(Uri resourceUri, api.InputKind inputKind) {
     assert(resourceUri.scheme == 'http');
     HttpClient client = new HttpClient();
     return client
@@ -80,9 +118,18 @@ abstract class SourceFileProvider implements CompilerInput {
         offset += contentPart.length;
       }
       dartCharactersRead += totalLength;
-      sourceFiles[resourceUri] = new CachingUtf8BytesSourceFile(
-          resourceUri, resourceUri.toString(), result);
-      return result;
+      api.Input input;
+      switch (inputKind) {
+        case api.InputKind.utf8:
+          input = utf8SourceFiles[resourceUri] = new CachingUtf8BytesSourceFile(
+              resourceUri, resourceUri.toString(), result);
+          break;
+        case api.InputKind.binary:
+          input =
+              binarySourceFiles[resourceUri] = new Binary(resourceUri, result);
+          break;
+      }
+      return input;
     });
   }
 
@@ -94,16 +141,27 @@ abstract class SourceFileProvider implements CompilerInput {
 
   relativizeUri(Uri uri) => relativize(cwd, uri, isWindows);
 
-  SourceFile getSourceFile(Uri resourceUri) {
-    return sourceFiles[resourceUri];
+  SourceFile getUtf8SourceFile(Uri resourceUri) {
+    return utf8SourceFiles[resourceUri];
+  }
+
+  Iterable<Uri> getSourceUris() {
+    Set<Uri> uris = new Set<Uri>();
+    uris.addAll(utf8SourceFiles.keys);
+    uris.addAll(binarySourceFiles.keys);
+    return uris;
   }
 }
 
-List<int> readAll(String filename) {
-  var file = (new File(filename)).openSync();
-  var length = file.lengthSync();
-  // +1 to have a 0 terminated list, see [Scanner].
-  var buffer = new Uint8List(length + 1);
+List<int> readAll(String filename, {bool zeroTerminated: true}) {
+  RandomAccessFile file = (new File(filename)).openSync();
+  int length = file.lengthSync();
+  int bufferLength = length;
+  if (zeroTerminated) {
+    // +1 to have a 0 terminated list, see [Scanner].
+    bufferLength++;
+  }
+  var buffer = new Uint8List(bufferLength);
   file.readIntoSync(buffer, 0, length);
   file.closeSync();
   return buffer;
@@ -112,10 +170,13 @@ List<int> readAll(String filename) {
 class CompilerSourceFileProvider extends SourceFileProvider {
   // TODO(johnniwinther): Remove this when no longer needed for the old compiler
   // API.
-  Future<List<int>> call(Uri resourceUri) => readFromUri(resourceUri);
+  Future<List<int>> call(Uri resourceUri) =>
+      readFromUri(resourceUri).then((input) => input.data);
 
   @override
-  Future readFromUri(Uri uri) => readUtf8BytesFromUri(uri);
+  Future<api.Input<List<int>>> readFromUri(Uri uri,
+          {InputKind inputKind: InputKind.utf8}) =>
+      readBytesFromUri(uri, inputKind);
 }
 
 class FormattingDiagnosticHandler implements CompilerDiagnostics {
@@ -126,6 +187,7 @@ class FormattingDiagnosticHandler implements CompilerDiagnostics {
   bool isAborting = false;
   bool enableColors = false;
   bool throwOnError = false;
+  bool autoReadFileUri = false;
   int throwOnErrorCount = 0;
   api.Diagnostic lastKind = null;
   int fatalCount = 0;
@@ -210,8 +272,19 @@ class FormattingDiagnosticHandler implements CompilerDiagnostics {
     if (uri == null) {
       print('${color(message)}');
     } else {
-      SourceFile file = provider.sourceFiles[uri];
-      if (file != null) {
+      api.Input file = provider.getUtf8SourceFile(uri);
+      if (file == null &&
+          autoReadFileUri &&
+          (uri.scheme == 'file' || !uri.isAbsolute) &&
+          uri.path.endsWith('.dart')) {
+        if (!uri.isAbsolute) {
+          uri = provider.cwd.resolveUri(uri);
+        }
+        // When reading from .dill files, the original source files haven't been
+        // loaded. Load the file if possible to provide a better error message.
+        file = provider.autoReadFromFile(uri);
+      }
+      if (file is SourceFile) {
         print(file.getLocationMessage(color(message), begin, end,
             colorize: color));
       } else {
@@ -243,7 +316,10 @@ class RandomAccessFileOutputProvider implements CompilerOutput {
   final MessageCallback onFailure;
 
   int totalCharactersWritten = 0;
-  List<String> allOutputFiles = new List<String>();
+  int totalCharactersWrittenPrimary = 0;
+  int totalCharactersWrittenJavaScript = 0;
+
+  List<String> allOutputFiles = <String>[];
 
   RandomAccessFileOutputProvider(this.out, this.sourceMapOut,
       {this.onInfo, this.onFailure, this.resolutionOutput});
@@ -340,8 +416,12 @@ class RandomAccessFileOutputProvider implements CompilerOutput {
 
     onDone() {
       output.closeSync();
+      totalCharactersWritten += charactersWritten;
       if (isPrimaryOutput) {
-        totalCharactersWritten += charactersWritten;
+        totalCharactersWrittenPrimary += charactersWritten;
+      }
+      if (type == OutputType.js || type == OutputType.jsPart) {
+        totalCharactersWrittenJavaScript += charactersWritten;
       }
     }
 
@@ -403,7 +483,8 @@ class BazelInputProvider extends SourceFileProvider {
   static _resolve(String path) => currentDirectory.resolve(path);
 
   @override
-  Future readFromUri(Uri uri) async {
+  Future<api.Input> readFromUri(Uri uri,
+      {InputKind inputKind: InputKind.utf8}) async {
     var resolvedUri = uri;
     var path = uri.path;
     if (path.startsWith('/bazel-root')) {
@@ -416,8 +497,15 @@ class BazelInputProvider extends SourceFileProvider {
         }
       }
     }
-    var result = await readUtf8BytesFromUri(resolvedUri);
-    sourceFiles[uri] = sourceFiles[resolvedUri];
+    api.Input result = await readBytesFromUri(resolvedUri, inputKind);
+    switch (inputKind) {
+      case InputKind.utf8:
+        utf8SourceFiles[uri] = utf8SourceFiles[resolvedUri];
+        break;
+      case InputKind.binary:
+        binarySourceFiles[uri] = binarySourceFiles[resolvedUri];
+        break;
+    }
     return result;
   }
 }

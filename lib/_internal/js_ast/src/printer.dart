@@ -4,7 +4,7 @@
 
 part of js_ast;
 
-typedef String Renamer(Name);
+typedef String Renamer(Name name);
 
 class JavaScriptPrintingOptions {
   final bool shouldCompressOutput;
@@ -59,6 +59,15 @@ class SimpleJavaScriptPrintingContext extends JavaScriptPrintingContext {
   }
 
   String getText() => buffer.toString();
+}
+
+String DebugPrint(Node node) {
+  JavaScriptPrintingOptions options = new JavaScriptPrintingOptions();
+  SimpleJavaScriptPrintingContext context =
+      new SimpleJavaScriptPrintingContext();
+  Printer printer = new Printer(options, context);
+  printer.visit(node);
+  return context.getText();
 }
 
 class Printer implements NodeVisitor {

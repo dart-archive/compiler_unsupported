@@ -8,7 +8,6 @@ import '../common.dart';
 import '../common_elements.dart';
 import '../elements/entities.dart';
 import '../elements/types.dart';
-import '../tree/dartstring.dart';
 import '../util/util.dart' show Hashing;
 
 enum ConstantValueKind {
@@ -31,20 +30,22 @@ enum ConstantValueKind {
 abstract class ConstantValueVisitor<R, A> {
   const ConstantValueVisitor();
 
-  R visitFunction(FunctionConstantValue constant, A arg);
-  R visitNull(NullConstantValue constant, A arg);
-  R visitInt(IntConstantValue constant, A arg);
-  R visitDouble(DoubleConstantValue constant, A arg);
-  R visitBool(BoolConstantValue constant, A arg);
-  R visitString(StringConstantValue constant, A arg);
-  R visitList(ListConstantValue constant, A arg);
-  R visitMap(MapConstantValue constant, A arg);
-  R visitConstructed(ConstructedConstantValue constant, A arg);
-  R visitType(TypeConstantValue constant, A arg);
-  R visitInterceptor(InterceptorConstantValue constant, A arg);
-  R visitSynthetic(SyntheticConstantValue constant, A arg);
-  R visitDeferred(DeferredConstantValue constant, A arg);
-  R visitNonConstant(NonConstantValue constant, A arg);
+  R visitFunction(covariant FunctionConstantValue constant, covariant A arg);
+  R visitNull(covariant NullConstantValue constant, covariant A arg);
+  R visitInt(covariant IntConstantValue constant, covariant A arg);
+  R visitDouble(covariant DoubleConstantValue constant, covariant A arg);
+  R visitBool(covariant BoolConstantValue constant, covariant A arg);
+  R visitString(covariant StringConstantValue constant, covariant A arg);
+  R visitList(covariant ListConstantValue constant, covariant A arg);
+  R visitMap(covariant MapConstantValue constant, covariant A arg);
+  R visitConstructed(
+      covariant ConstructedConstantValue constant, covariant A arg);
+  R visitType(covariant TypeConstantValue constant, covariant A arg);
+  R visitInterceptor(
+      covariant InterceptorConstantValue constant, covariant A arg);
+  R visitSynthetic(covariant SyntheticConstantValue constant, covariant A arg);
+  R visitDeferred(covariant DeferredConstantValue constant, covariant A arg);
+  R visitNonConstant(covariant NonConstantValue constant, covariant A arg);
 }
 
 abstract class ConstantValue {
@@ -126,10 +127,6 @@ class FunctionConstantValue extends ConstantValue {
 
   List<ConstantValue> getDependencies() => const <ConstantValue>[];
 
-  DartString toDartString() {
-    return new DartString.literal(element.name);
-  }
-
   DartType getType(CommonElements types) => type;
 
   int get hashCode => (17 * element.hashCode) & 0x7fffffff;
@@ -170,8 +167,6 @@ abstract class PrimitiveConstantValue extends ConstantValue {
   // Primitive constants don't have dependencies.
   List<ConstantValue> getDependencies() => const <ConstantValue>[];
 
-  DartString toDartString();
-
   /// This value in Dart syntax.
   String toDartText() => primitiveValue.toString();
 }
@@ -192,8 +187,6 @@ class NullConstantValue extends PrimitiveConstantValue {
 
   // The magic constant has no meaning. It is just a random value.
   int get hashCode => 785965825;
-
-  DartString toDartString() => const LiteralDartString("null");
 
   accept(ConstantValueVisitor visitor, arg) => visitor.visitNull(this, arg);
 
@@ -274,10 +267,6 @@ class IntConstantValue extends NumConstantValue {
 
   int get hashCode => primitiveValue & Hashing.SMI_MASK;
 
-  DartString toDartString() {
-    return new DartString.literal(primitiveValue.toString());
-  }
-
   accept(ConstantValueVisitor visitor, arg) => visitor.visitInt(this, arg);
 
   ConstantValueKind get kind => ConstantValueKind.INT;
@@ -338,10 +327,6 @@ class DoubleConstantValue extends NumConstantValue {
 
   int get hashCode => primitiveValue.hashCode;
 
-  DartString toDartString() {
-    return new DartString.literal(primitiveValue.toString());
-  }
-
   accept(ConstantValueVisitor visitor, arg) => visitor.visitDouble(this, arg);
 
   ConstantValueKind get kind => ConstantValueKind.DOUBLE;
@@ -385,8 +370,6 @@ class TrueConstantValue extends BoolConstantValue {
   // The magic constant is just a random value. It does not have any
   // significance.
   int get hashCode => 499;
-
-  DartString toDartString() => const LiteralDartString("true");
 }
 
 class FalseConstantValue extends BoolConstantValue {
@@ -405,24 +388,17 @@ class FalseConstantValue extends BoolConstantValue {
   // The magic constant is just a random value. It does not have any
   // significance.
   int get hashCode => 536555975;
-
-  DartString toDartString() => const LiteralDartString("false");
 }
 
 class StringConstantValue extends PrimitiveConstantValue {
-  final DartString primitiveValue;
+  final String primitiveValue;
 
   final int hashCode;
 
   // TODO(floitsch): cache StringConstants.
-  // TODO(floitsch): compute hashcode without calling toString() on the
-  // DartString.
-  StringConstantValue(DartString value)
+  StringConstantValue(String value)
       : this.primitiveValue = value,
-        this.hashCode = value.slowToString().hashCode;
-
-  StringConstantValue.fromString(String value)
-      : this(new DartString.literal(value));
+        this.hashCode = value.hashCode;
 
   bool get isString => true;
 
@@ -436,7 +412,7 @@ class StringConstantValue extends PrimitiveConstantValue {
         primitiveValue == otherString.primitiveValue;
   }
 
-  DartString toDartString() => primitiveValue;
+  String toDartString() => primitiveValue;
 
   int get length => primitiveValue.length;
 
@@ -445,7 +421,7 @@ class StringConstantValue extends PrimitiveConstantValue {
   ConstantValueKind get kind => ConstantValueKind.STRING;
 
   // TODO(johnniwinther): Ensure correct escaping.
-  String toDartText() => '"${primitiveValue.slowToString()}"';
+  String toDartText() => '"${primitiveValue}"';
 
   String toStructuredText() => 'StringConstant(${toDartText()})';
 }
@@ -734,19 +710,24 @@ class ConstructedConstantValue extends ObjectConstantValue {
 
   ConstantValueKind get kind => ConstantValueKind.CONSTRUCTED;
 
+  Iterable<FieldEntity> get _fieldsSortedByName {
+    return fields.keys.toList()..sort((a, b) => a.name.compareTo(b.name));
+  }
+
   String toDartText() {
     StringBuffer sb = new StringBuffer();
     sb.write(type.element.name);
     _unparseTypeArguments(sb);
     sb.write('(');
     int i = 0;
-    fields.forEach((FieldEntity field, ConstantValue value) {
+    for (FieldEntity field in _fieldsSortedByName) {
+      ConstantValue value = fields[field];
       if (i > 0) sb.write(',');
       sb.write(field.name);
       sb.write('=');
       sb.write(value.toDartText());
       i++;
-    });
+    }
     sb.write(')');
     return sb.toString();
   }
@@ -757,13 +738,14 @@ class ConstructedConstantValue extends ObjectConstantValue {
     sb.write(type);
     sb.write('(');
     int i = 0;
-    fields.forEach((FieldEntity field, ConstantValue value) {
+    for (FieldEntity field in _fieldsSortedByName) {
+      ConstantValue value = fields[field];
       if (i > 0) sb.write(',');
       sb.write(field.name);
       sb.write('=');
       sb.write(value.toStructuredText());
       i++;
-    });
+    }
     sb.write('))');
     return sb.toString();
   }
@@ -772,20 +754,20 @@ class ConstructedConstantValue extends ObjectConstantValue {
 /// A reference to a constant in another output unit.
 /// Used for referring to deferred constants.
 class DeferredConstantValue extends ConstantValue {
-  DeferredConstantValue(this.referenced, this.prefix);
+  DeferredConstantValue(this.referenced, this.import);
 
   final ConstantValue referenced;
-  final Entity prefix;
+  final ImportEntity import;
 
   bool get isReference => true;
 
   bool operator ==(other) {
     return other is DeferredConstantValue &&
         referenced == other.referenced &&
-        prefix == other.prefix;
+        import == other.import;
   }
 
-  get hashCode => (referenced.hashCode * 17 + prefix.hashCode) & 0x3fffffff;
+  get hashCode => (referenced.hashCode * 17 + import.hashCode) & 0x3fffffff;
 
   List<ConstantValue> getDependencies() => <ConstantValue>[referenced];
 

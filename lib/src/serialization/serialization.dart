@@ -4,8 +4,7 @@
 
 library dart2js.serialization;
 
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner/precedence.dart'
-    show PrecedenceInfo;
+import 'package:compiler_unsupported/_internal/front_end/src/scanner/token.dart' show TokenType;
 
 import '../common.dart';
 import '../common/resolution.dart';
@@ -27,8 +26,8 @@ final Map<String, String> canonicalNames = computeCanonicalNames();
 
 Map<String, String> computeCanonicalNames() {
   Map<String, String> result = <String, String>{};
-  for (PrecedenceInfo info in PrecedenceInfo.all) {
-    result[info.value] = info.value;
+  for (TokenType type in TokenType.all) {
+    result[type.value] = type.value;
   }
   return result;
 }
@@ -263,7 +262,7 @@ abstract class AbstractEncoder<K> {
 
 /// [ObjectDecoder] reads serialized values from a [Map] encoded from an
 /// [ObjectValue] where properties are stored using [Key] values as keys.
-class ObjectDecoder extends AbstractDecoder<Key> {
+class ObjectDecoder extends AbstractDecoder<dynamic, Key> {
   /// Creates an [ObjectDecoder] that decodes [map] into deserialized values
   /// using [deserializer] to create canonicalized values.
   ObjectDecoder(Deserializer deserializer, Map map) : super(deserializer, map);
@@ -274,14 +273,14 @@ class ObjectDecoder extends AbstractDecoder<Key> {
 
 /// [MapDecoder] reads serialized values from a [Map] encoded from an
 /// [MapValue] where entries are stored using [String] values as keys.
-class MapDecoder extends AbstractDecoder<String> {
+class MapDecoder extends AbstractDecoder<String, String> {
   /// Creates an [MapDecoder] that decodes [map] into deserialized values
   /// using [deserializer] to create canonicalized values.
   MapDecoder(Deserializer deserializer, Map<String, dynamic> map)
       : super(deserializer, map);
 
   @override
-  _getKeyValue(String key) => key;
+  String _getKeyValue(String key) => key;
 
   /// Applies [f] to every key in the decoded [Map].
   void forEachKey(f(String key)) {
@@ -314,9 +313,9 @@ class ListDecoder {
 }
 
 /// Abstract base implementation for [ObjectDecoder] and [MapDecoder].
-abstract class AbstractDecoder<K> {
+abstract class AbstractDecoder<M, K> {
   final Deserializer _deserializer;
-  final Map<K, dynamic> _map;
+  final Map<M, dynamic> _map;
 
   AbstractDecoder(this._deserializer, this._map) {
     assert(_deserializer != null);
@@ -325,7 +324,7 @@ abstract class AbstractDecoder<K> {
 
   /// Returns the value for [key] defined by the [SerializationDecoder] in used
   /// [_deserializer].
-  _getKeyValue(K key);
+  M _getKeyValue(K key);
 
   /// Returns `true` if [key] has an associated value in the decoded object.
   bool containsKey(K key) => _map.containsKey(_getKeyValue(key));
@@ -383,7 +382,7 @@ abstract class AbstractDecoder<K> {
   /// If no value is associated with [key], then if [isOptional] is `true`,
   /// and empty [List] is returned, otherwise an exception is thrown.
   List<Element> getElements(K key, {bool isOptional: false}) {
-    List list = _map[_getKeyValue(key)];
+    List<int> list = _map[_getKeyValue(key)];
     if (list == null) {
       if (isOptional) {
         return const [];
@@ -415,7 +414,7 @@ abstract class AbstractDecoder<K> {
   /// If no value is associated with [key], then if [isOptional] is `true`,
   /// and empty [List] is returned, otherwise an exception is thrown.
   List<ConstantExpression> getConstants(K key, {bool isOptional: false}) {
-    List list = _map[_getKeyValue(key)];
+    List<int> list = _map[_getKeyValue(key)];
     if (list == null) {
       if (isOptional) {
         return const [];
@@ -447,7 +446,7 @@ abstract class AbstractDecoder<K> {
   /// If no value is associated with [key], then if [isOptional] is `true`,
   /// and empty [List] is returned, otherwise an exception is thrown.
   List<ResolutionDartType> getTypes(K key, {bool isOptional: false}) {
-    List list = _map[_getKeyValue(key)];
+    List<int> list = _map[_getKeyValue(key)];
     if (list == null) {
       if (isOptional) {
         return const [];
@@ -733,13 +732,14 @@ class Serializer {
           ObjectEncoder encoder = new ObjectEncoder(this, dataObject.map);
           encoder.setUri(Key.URI, library.canonicalUri, library.canonicalUri);
         } else if (element.isConstructor) {
-          assert(invariant(
-              element,
+          assert(
               verifyElement(
                   element.enclosingClass.implementation
                       .lookupConstructor(element.name),
                   element),
-              message: "Element $element is not found as a "
+              failedAt(
+                  element,
+                  "Element $element is not found as a "
                   "constructor of ${element.enclosingClass.implementation}."));
           Value classId = _getElementId(element.enclosingClass);
           _elementMap[element] = dataObject = new DataObject(
@@ -749,12 +749,13 @@ class Serializer {
           encoder.setValue(Key.CLASS, classId);
           encoder.setString(Key.NAME, element.name);
         } else if (element.isClassMember) {
-          assert(invariant(
-              element,
+          assert(
               verifyElement(
                   element.enclosingClass.lookupLocalMember(element.name),
                   element),
-              message: "Element $element is not found as a "
+              failedAt(
+                  element,
+                  "Element $element is not found as a "
                   "class member of ${element.enclosingClass}."));
           Value classId = _getElementId(element.enclosingClass);
           _elementMap[element] = dataObject = new DataObject(
@@ -767,11 +768,12 @@ class Serializer {
             encoder.setBool(Key.GETTER, element.isGetter);
           }
         } else {
-          assert(invariant(
-              element,
+          assert(
               verifyElement(
                   element.library.implementation.find(element.name), element),
-              message: "Element $element is not found as a "
+              failedAt(
+                  element,
+                  "Element $element is not found as a "
                   "library member of ${element.library.implementation}."));
           Value libraryId = _getElementId(element.library);
           _elementMap[element] = dataObject = new DataObject(
@@ -939,7 +941,7 @@ class DeserializerPlugin {
   void onElement(Element element, ObjectDecoder getDecoder(String tag)) {}
 
   /// Called to deserialize custom data from [decoder].
-  dynamic onData(ObjectDecoder decoder) {}
+  dynamic onData(ObjectDecoder decoder) => null;
 }
 
 /// Context for parallel deserialization.

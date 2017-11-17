@@ -4,59 +4,57 @@
 
 library fasta.named_type_builder;
 
-import 'scope.dart' show Scope;
-
 import 'builder.dart'
     show
         Builder,
         InvalidTypeBuilder,
         PrefixBuilder,
+        QualifiedName,
+        Scope,
         TypeBuilder,
         TypeDeclarationBuilder;
 
 abstract class NamedTypeBuilder<T extends TypeBuilder, R> extends TypeBuilder {
-  final String name;
+  final Object name;
 
   final List<T> arguments;
 
   TypeDeclarationBuilder<T, R> builder;
 
-  NamedTypeBuilder(this.name, this.arguments, int charOffset, Uri fileUri)
-      : super(charOffset, fileUri);
+  NamedTypeBuilder(this.name, this.arguments);
 
-  InvalidTypeBuilder<T, R> buildInvalidType(String name);
+  InvalidTypeBuilder<T, R> buildInvalidType(int charOffset, Uri fileUri);
 
+  @override
   void bind(TypeDeclarationBuilder builder) {
-    this.builder = builder;
+    this.builder = builder?.origin;
   }
 
-  void resolveIn(Scope scope) {
-    Builder member = scope.lookup(name, charOffset, fileUri);
+  @override
+  void resolveIn(Scope scope, int charOffset, Uri fileUri) {
+    if (builder != null) return;
+    final name = this.name;
+    Builder member;
+    if (name is QualifiedName) {
+      var prefix = scope.lookup(name.prefix, charOffset, fileUri);
+      if (prefix is PrefixBuilder) {
+        member = prefix.lookup(name.suffix, name.charOffset, fileUri);
+      }
+    } else {
+      member = scope.lookup(name, charOffset, fileUri);
+    }
     if (member is TypeDeclarationBuilder) {
-      builder = member;
+      builder = member.origin;
       return;
     }
-    if (name.contains(".")) {
-      int index = name.lastIndexOf(".");
-      String first = name.substring(0, index);
-      String last = name.substring(name.lastIndexOf(".") + 1);
-      var prefix = scope.lookup(first, charOffset, fileUri);
-      if (prefix is PrefixBuilder) {
-        member = prefix.exports[last];
-      }
-      if (member is TypeDeclarationBuilder) {
-        builder = member;
-        return;
-      }
-    }
-    builder = buildInvalidType(name);
+    builder = buildInvalidType(charOffset, fileUri);
   }
 
   String get debugName => "NamedTypeBuilder";
 
   StringBuffer printOn(StringBuffer buffer) {
     buffer.write(name);
-    if (arguments == null) return buffer;
+    if (arguments?.isEmpty ?? true) return buffer;
     buffer.write("<");
     bool first = true;
     for (T t in arguments) {

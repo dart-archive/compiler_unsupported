@@ -4,24 +4,17 @@
 
 library dart2js.js_emitter.parameter_stub_generator;
 
-import '../closure.dart' show ClosureClassElement;
-import '../common.dart';
-import '../compiler.dart' show Compiler;
 import '../constants/values.dart';
-import '../elements/elements.dart'
-    show
-        ClassElement,
-        FunctionElement,
-        FunctionSignature,
-        MethodElement,
-        ParameterElement;
+import '../elements/entities.dart';
 import '../js/js.dart' as jsAst;
 import '../js/js.dart' show js;
-import '../js_backend/js_backend.dart'
-    show JavaScriptBackend, JavaScriptConstantCompiler, Namer;
+import '../js_backend/namer.dart' show Namer;
+import '../js_backend/native_data.dart';
+import '../js_backend/interceptor_data.dart';
 import '../universe/call_structure.dart' show CallStructure;
 import '../universe/selector.dart' show Selector;
-import '../universe/world_builder.dart' show SelectorConstraints;
+import '../universe/world_builder.dart'
+    show CodegenWorldBuilder, SelectorConstraints;
 import '../world.dart' show ClosedWorld;
 
 import 'model.dart';
@@ -31,20 +24,20 @@ import 'code_emitter_task.dart' show CodeEmitterTask, Emitter;
 class ParameterStubGenerator {
   static final Set<Selector> emptySelectorSet = new Set<Selector>();
 
-  final Namer namer;
-  final Compiler compiler;
-  final JavaScriptBackend backend;
-  final ClosedWorld closedWorld;
+  final CodeEmitterTask _emitterTask;
+  final Namer _namer;
+  final NativeData _nativeData;
+  final InterceptorData _interceptorData;
+  final CodegenWorldBuilder _codegenWorldBuilder;
+  final ClosedWorld _closedWorld;
 
-  ParameterStubGenerator(
-      this.compiler, this.namer, this.backend, this.closedWorld);
+  ParameterStubGenerator(this._emitterTask, this._namer, this._nativeData,
+      this._interceptorData, this._codegenWorldBuilder, this._closedWorld);
 
-  Emitter get emitter => backend.emitter.emitter;
-  CodeEmitterTask get emitterTask => backend.emitter;
-  DiagnosticReporter get reporter => compiler.reporter;
+  Emitter get _emitter => _emitterTask.emitter;
 
-  bool needsSuperGetter(FunctionElement element) =>
-      compiler.codegenWorldBuilder.methodsNeedingSuperGetter.contains(element);
+  bool needsSuperGetter(FunctionEntity element) =>
+      _codegenWorldBuilder.methodsNeedingSuperGetter.contains(element);
 
   /**
    * Generates stubs to handle invocation of methods with optional
@@ -63,26 +56,26 @@ class ParameterStubGenerator {
    * the input selector is non-null (and the member needs a stub).
    */
   ParameterStubMethod generateParameterStub(
-      MethodElement member, Selector selector, Selector callSelector) {
+      FunctionEntity member, Selector selector, Selector callSelector) {
     CallStructure callStructure = selector.callStructure;
-    FunctionSignature parameters = member.functionSignature;
+    ParameterStructure parameterStructure = member.parameterStructure;
     int positionalArgumentCount = callStructure.positionalArgumentCount;
-    if (positionalArgumentCount == parameters.parameterCount) {
+    if (positionalArgumentCount == parameterStructure.totalParameters) {
       assert(callStructure.isUnnamed);
       return null;
     }
-    if (parameters.optionalParametersAreNamed &&
-        callStructure.namedArgumentCount == parameters.optionalParameterCount) {
+    if (parameterStructure.namedParameters.isNotEmpty &&
+        callStructure.namedArgumentCount ==
+            parameterStructure.namedParameters.length) {
       // If the selector has the same number of named arguments as the element,
       // we don't need to add a stub. The call site will hit the method
       // directly.
       return null;
     }
-    JavaScriptConstantCompiler handler = backend.constants;
+
     List<String> names = callStructure.getOrderedNamedArguments();
 
-    bool isInterceptedMethod =
-        backend.interceptorData.isInterceptedMethod(member);
+    bool isInterceptedMethod = _interceptorData.isInterceptedMethod(member);
 
     // If the method is intercepted, we need to also pass the actual receiver.
     int extraArgumentCount = isInterceptedMethod ? 1 : 0;
@@ -96,7 +89,7 @@ class ParameterStubGenerator {
         new List<jsAst.Parameter>(selector.argumentCount + extraArgumentCount);
     // The arguments that will be passed to the real method.
     List<jsAst.Expression> argumentsBuffer = new List<jsAst.Expression>(
-        parameters.parameterCount + extraArgumentCount);
+        parameterStructure.totalParameters + extraArgumentCount);
 
     int count = 0;
     if (isInterceptedMethod) {
@@ -109,14 +102,15 @@ class ParameterStubGenerator {
     // Includes extra receiver argument when using interceptor convention
     int indexOfLastOptionalArgumentInParameters = optionalParameterStart - 1;
 
-    parameters.orderedForEachParameter((ParameterElement element) {
-      String jsName = backend.namer.safeVariableName(element.name);
+    _codegenWorldBuilder.forEachParameter(member,
+        (_, String name, ConstantValue value) {
+      String jsName = _namer.safeVariableName(name);
       assert(jsName != receiverArgumentName);
       if (count < optionalParameterStart) {
         parametersBuffer[count] = new jsAst.Parameter(jsName);
         argumentsBuffer[count] = js('#', jsName);
       } else {
-        int index = names.indexOf(element.name);
+        int index = names.indexOf(name);
         if (index != -1) {
           indexOfLastOptionalArgumentInParameters = count;
           // The order of the named arguments is not the same as the
@@ -125,17 +119,16 @@ class ParameterStubGenerator {
           parametersBuffer[optionalParameterStart + index] =
               new jsAst.Parameter(jsName);
         } else {
-          ConstantValue value = handler.getConstantValue(element.constant);
           if (value == null) {
             argumentsBuffer[count] =
-                emitter.constantReference(new NullConstantValue());
+                _emitter.constantReference(new NullConstantValue());
           } else {
             if (!value.isNull) {
               // If the value is the null constant, we should not pass it
               // down to the native method.
               indexOfLastOptionalArgumentInParameters = count;
             }
-            argumentsBuffer[count] = emitter.constantReference(value);
+            argumentsBuffer[count] = _emitter.constantReference(value);
           }
         }
       }
@@ -143,42 +136,41 @@ class ParameterStubGenerator {
     });
 
     var body; // List or jsAst.Statement.
-    if (backend.nativeData.hasFixedBackendName(member)) {
-      body = emitterTask.nativeEmitter.generateParameterStubStatements(
+    if (_nativeData.hasFixedBackendName(member)) {
+      body = _emitterTask.nativeEmitter.generateParameterStubStatements(
           member,
           isInterceptedMethod,
-          namer.invocationName(selector),
+          _namer.invocationName(selector),
           parametersBuffer,
           argumentsBuffer,
           indexOfLastOptionalArgumentInParameters);
     } else if (member.isInstanceMember) {
       if (needsSuperGetter(member)) {
-        ClassElement superClass = member.enclosingClass;
-        jsAst.Name methodName = namer.instanceMethodName(member);
+        ClassEntity superClass = member.enclosingClass;
+        jsAst.Name methodName = _namer.instanceMethodName(member);
         // When redirecting, we must ensure that we don't end up in a subclass.
         // We thus can't just invoke `this.foo$1.call(filledInArguments)`.
         // Instead we need to call the statically resolved target.
         //   `<class>.prototype.bar$1.call(this, argument0, ...)`.
         body = js.statement('return #.#.call(this, #);', [
-          backend.emitter
-              .prototypeAccess(superClass, hasBeenInstantiated: true),
+          _emitterTask.prototypeAccess(superClass, hasBeenInstantiated: true),
           methodName,
           argumentsBuffer
         ]);
       } else {
         body = js.statement('return this.#(#);',
-            [namer.instanceMethodName(member), argumentsBuffer]);
+            [_namer.instanceMethodName(member), argumentsBuffer]);
       }
     } else {
       body = js.statement('return #(#)',
-          [emitter.staticFunctionAccess(member), argumentsBuffer]);
+          [_emitter.staticFunctionAccess(member), argumentsBuffer]);
     }
 
     jsAst.Fun function = js('function(#) { #; }', [parametersBuffer, body]);
 
-    jsAst.Name name = member.isStatic ? null : namer.invocationName(selector);
+    jsAst.Name name = member.isStatic ? null : _namer.invocationName(selector);
     jsAst.Name callName =
-        (callSelector != null) ? namer.invocationName(callSelector) : null;
+        (callSelector != null) ? _namer.invocationName(callSelector) : null;
     return new ParameterStubMethod(name, callName, function);
   }
 
@@ -213,18 +205,8 @@ class ParameterStubGenerator {
   // (1) foo$2(a, b) => MyClass.foo$4$c$d.call(this, a, b, null, null)
   // (2) foo$3$c(a, b, c) => MyClass.foo$4$c$d(this, a, b, c, null);
   // (3) foo$3$d(a, b, d) => MyClass.foo$4$c$d(this, a, b, null, d);
-  List<ParameterStubMethod> generateParameterStubs(MethodElement member,
+  List<ParameterStubMethod> generateParameterStubs(FunctionEntity member,
       {bool canTearOff: true}) {
-    if (member.enclosingElement.isClosure) {
-      ClosureClassElement cls = member.enclosingElement;
-      if (cls.supertype.element == backend.helpers.boundClosureClass) {
-        reporter.internalError(cls.methodElement, 'Bound closure1.');
-      }
-      if (cls.methodElement.isInstanceMember) {
-        reporter.internalError(cls.methodElement, 'Bound closure2.');
-      }
-    }
-
     // The set of selectors that apply to `member`. For example, for
     // a member `foo(x, [y])` the following selectors may apply:
     // `foo(x)`, and `foo(x, y)`.
@@ -239,12 +221,12 @@ class ParameterStubGenerator {
 
     // Only instance members (not static methods) need stubs.
     if (member.isInstanceMember) {
-      selectors = compiler.codegenWorldBuilder.invocationsByName(member.name);
+      selectors = _codegenWorldBuilder.invocationsByName(member.name);
     }
 
     if (canTearOff) {
-      String call = namer.closureInvocationSelectorName;
-      callSelectors = compiler.codegenWorldBuilder.invocationsByName(call);
+      String call = _namer.closureInvocationSelectorName;
+      callSelectors = _codegenWorldBuilder.invocationsByName(call);
     }
 
     assert(emptySelectorSet.isEmpty);
@@ -294,7 +276,7 @@ class ParameterStubGenerator {
     for (Selector selector in selectors.keys) {
       if (renamedCallSelectors.contains(selector)) continue;
       if (!selector.appliesUnnamed(member)) continue;
-      if (!selectors[selector].applies(member, selector, closedWorld)) {
+      if (!selectors[selector].applies(member, selector, _closedWorld)) {
         continue;
       }
 

@@ -34,8 +34,8 @@ class NsmEmitter extends CodeEmitterHelper {
   static const MAX_MINIFIED_LENGTH_FOR_DIFF_ENCODING = 4;
 
   void emitNoSuchMethodHandlers(AddPropertyFunction addProperty) {
-    ClassStubGenerator generator = new ClassStubGenerator(
-        namer, backend, codegenWorldBuilder, closedWorld,
+    ClassStubGenerator generator = new ClassStubGenerator(task.emitter,
+        closedWorld.commonElements, namer, codegenWorldBuilder, closedWorld,
         enableMinification: compiler.options.enableMinification);
 
     // Keep track of the JavaScript names we've already added so we
@@ -51,7 +51,8 @@ class NsmEmitter extends CodeEmitterHelper {
     List<jsAst.Name> names = addedJsNames.keys.toList()..sort();
     for (jsAst.Name jsName in names) {
       Selector selector = addedJsNames[jsName];
-      String reflectionName = emitter.getReflectionName(selector, jsName);
+      String reflectionName =
+          emitter.getReflectionSelectorName(selector, jsName);
 
       if (reflectionName != null) {
         emitter.mangledFieldNames[jsName] = reflectionName;
@@ -71,8 +72,8 @@ class NsmEmitter extends CodeEmitterHelper {
             generator.generateStubForNoSuchMethod(jsName, selector);
         addProperty(method.name, method.code);
         if (reflectionName != null) {
-          bool accessible = closedWorld.allFunctions
-              .filter(selector, null)
+          bool accessible = closedWorld
+              .locateMembers(selector, null)
               .any(backend.mirrorsData.isMemberAccessibleByReflection);
           addProperty(
               namer.asName('+$reflectionName'), js(accessible ? '2' : '0'));
@@ -143,9 +144,9 @@ class NsmEmitter extends CodeEmitterHelper {
     // Find out how many selectors there are with the special calling
     // convention.
     Iterable<Selector> interceptedSelectors = trivialNsmHandlers.where(
-        (Selector s) => backend.interceptorData.isInterceptedName(s.name));
+        (Selector s) => closedWorld.interceptorData.isInterceptedName(s.name));
     Iterable<Selector> ordinarySelectors = trivialNsmHandlers.where(
-        (Selector s) => !backend.interceptorData.isInterceptedName(s.name));
+        (Selector s) => !closedWorld.interceptorData.isInterceptedName(s.name));
 
     // Get the short names (JS names, perhaps minified).
     Iterable<jsAst.Name> interceptedShorts =
@@ -174,12 +175,12 @@ class NsmEmitter extends CodeEmitterHelper {
     }
     // Startup code that loops over the method names and puts handlers on the
     // Object class to catch noSuchMethod invocations.
-    ClassEntity objectClass = compiler.commonElements.objectClass;
+    ClassEntity objectClass = closedWorld.commonElements.objectClass;
     jsAst.Expression createInvocationMirror = backend.emitter
-        .staticFunctionAccess(backend.helpers.createInvocationMirror);
+        .staticFunctionAccess(
+            closedWorld.commonElements.createInvocationMirror);
     if (useDiffEncoding) {
-      statements.add(js.statement(
-          '''{
+      statements.add(js.statement('''{
           var objectClassObject = processedClasses.collected[#objectClass],
               nameSequences = #diffEncoding.split("."),
               shortNames = [];
@@ -219,11 +220,10 @@ class NsmEmitter extends CodeEmitterHelper {
               Array.prototype.push.apply(shortNames, sequence.shift());
             }
           }
-        }''',
-          {
-            'objectClass': js.quoteName(namer.className(objectClass)),
-            'diffEncoding': sortedShorts
-          }));
+        }''', {
+        'objectClass': js.quoteName(namer.className(objectClass)),
+        'diffEncoding': sortedShorts
+      }));
     } else {
       // No useDiffEncoding version.
       statements.add(js.statement(
@@ -248,8 +248,7 @@ class NsmEmitter extends CodeEmitterHelper {
                 ? true
                 : js('j < #', js.number(interceptedSelectors.length));
 
-    statements.add(js.statement(
-        '''
+    statements.add(js.statement('''
       // If we are loading a deferred library the object class will not be in
       // the collectedClasses so objectClassObject is undefined, and we skip
       // setting up the names.
@@ -296,13 +295,12 @@ class NsmEmitter extends CodeEmitterHelper {
                  })(#names[j], shortName, type);
           }
         }
-      }''',
-        {
-          'noSuchMethodName': namer.noSuchMethodName,
-          'createInvocationMirror': createInvocationMirror,
-          'names': minify ? 'shortNames' : 'longNames',
-          'isIntercepted': isIntercepted
-        }));
+      }''', {
+      'noSuchMethodName': namer.noSuchMethodName,
+      'createInvocationMirror': createInvocationMirror,
+      'names': minify ? 'shortNames' : 'longNames',
+      'isIntercepted': isIntercepted
+    }));
 
     return statements;
   }

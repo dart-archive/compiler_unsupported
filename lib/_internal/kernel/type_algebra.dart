@@ -141,6 +141,10 @@ abstract class Substitution {
     return new _MapSubstitution(map, map);
   }
 
+  static Substitution filtered(Substitution sub, TypeParameterFilter filter) {
+    return new _FilteredSubstitution(sub, filter);
+  }
+
   /// Substitutes all occurrences of the given type parameters with the
   /// corresponding upper or lower bound, depending on the variance of the
   /// context where it occurs.
@@ -171,6 +175,14 @@ abstract class Substitution {
     if (type.typeArguments.isEmpty) return _NullSubstitution.instance;
     return fromMap(new Map<TypeParameter, DartType>.fromIterables(
         type.classNode.typeParameters, type.typeArguments));
+  }
+
+  /// Substitutes the type parameters on the typedef of [type] with the
+  /// type arguments provided in [type].
+  static Substitution fromTypedefType(TypedefType type) {
+    if (type.typeArguments.isEmpty) return _NullSubstitution.instance;
+    return fromMap(new Map<TypeParameter, DartType>.fromIterables(
+        type.typedefNode.typeParameters, type.typeArguments));
   }
 
   /// Substitutes the Nth parameter in [parameters] with the Nth type in
@@ -301,6 +313,21 @@ class _CombinedSubstitution extends Substitution {
   }
 }
 
+typedef bool TypeParameterFilter(TypeParameter P);
+
+class _FilteredSubstitution extends Substitution {
+  final Substitution base;
+  final TypeParameterFilter filterFn;
+
+  _FilteredSubstitution(this.base, this.filterFn);
+
+  DartType getSubstitute(TypeParameter parameter, bool upperBound) {
+    return filterFn(parameter)
+        ? base.getSubstitute(parameter, upperBound)
+        : _NullSubstitution.instance.getSubstitute(parameter, upperBound);
+  }
+}
+
 class _InnerTypeSubstitutor extends _TypeSubstitutor {
   final Map<TypeParameter, DartType> substitution = <TypeParameter, DartType>{};
 
@@ -373,6 +400,14 @@ abstract class _TypeSubstitutor extends DartTypeVisitor<DartType> {
     var typeArguments = node.typeArguments.map(visit).toList();
     if (useCounter == before) return node;
     return new InterfaceType(node.classNode, typeArguments);
+  }
+
+  DartType visitTypedefType(TypedefType node) {
+    if (node.typeArguments.isEmpty) return node;
+    int before = useCounter;
+    var typeArguments = node.typeArguments.map(visit).toList();
+    if (useCounter == before) return node;
+    return new TypedefType(node.typedefNode, typeArguments);
   }
 
   List<TypeParameter> freshTypeParameters(List<TypeParameter> parameters) {
@@ -652,6 +687,10 @@ class _OccurrenceVisitor extends DartTypeVisitor<bool> {
   bool visitVectorType(VectorType node) => false;
 
   bool visitInterfaceType(InterfaceType node) {
+    return node.typeArguments.any(visit);
+  }
+
+  bool visitTypedefType(TypedefType node) {
     return node.typeArguments.any(visit);
   }
 

@@ -3,27 +3,18 @@
 // BSD-style license that can be found in the LICENSE file.
 library kernel.target.flutter;
 
-import '../ast.dart';
-import '../transformations/continuation.dart' as cont;
-import '../transformations/erasure.dart';
-import '../transformations/sanitize_for_vm.dart';
-import '../transformations/mixin_full_resolution.dart' as mix;
-import '../transformations/setup_builtin_library.dart' as setup_builtin_library;
 import 'targets.dart';
+import 'vm.dart' show VmTarget;
 
-class FlutterTarget extends Target {
-  final TargetFlags flags;
+class FlutterTarget extends VmTarget {
+  FlutterTarget(TargetFlags flags) : super(flags);
 
-  FlutterTarget(this.flags);
-
-  bool get strongMode => flags.strongMode;
-
-  bool get strongModeSdk => false;
-
+  @override
   String get name => 'flutter';
 
   // This is the order that bootstrap libraries are loaded according to
   // `runtime/vm/object_store.h`.
+  @override
   List<String> get extraRequiredLibraries => const <String>[
         'dart:async',
         'dart:collection',
@@ -39,32 +30,11 @@ class FlutterTarget extends Target {
 
         'dart:profiler',
         'dart:typed_data',
-        'dart:_vmservice',
-        'dart:_builtin',
         'dart:nativewrappers',
         'dart:io',
 
         // Required for flutter.
         'dart:ui',
-        'dart:jni',
         'dart:vmservice_sky',
       ];
-
-  void performModularTransformations(Program program) {
-    new mix.MixinFullResolution().transform(program);
-  }
-
-  void performGlobalTransformations(Program program) {
-    cont.transformProgram(program);
-
-    // Repair `_getMainClosure()` function in dart:{_builtin,ui} libraries.
-    setup_builtin_library.transformProgram(program);
-    setup_builtin_library.transformProgram(program, libraryUri: 'dart:ui');
-
-    if (strongMode) {
-      new Erasure().transform(program);
-    }
-
-    new SanitizeForVM().transform(program);
-  }
 }

@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../common_elements.dart' show CommonElements;
-import '../elements/elements.dart';
+import '../elements/entities.dart';
 import '../native/native.dart' as native;
 import '../types/types.dart';
 import '../universe/selector.dart' show Selector;
@@ -11,14 +11,20 @@ import '../world.dart' show ClosedWorld;
 
 class TypeMaskFactory {
   static TypeMask inferredReturnTypeForElement(
-      MethodElement element, GlobalTypeInferenceResults results) {
-    return results.resultOf(element).returnType ??
+      FunctionEntity element, GlobalTypeInferenceResults results) {
+    return results.resultOfMember(element).returnType ??
         results.closedWorld.commonMasks.dynamicType;
   }
 
-  static TypeMask inferredTypeForElement(
-      Element element, GlobalTypeInferenceResults results) {
-    return results.resultOf(element).type ??
+  static TypeMask inferredTypeForMember(
+      MemberEntity element, GlobalTypeInferenceResults results) {
+    return results.resultOfMember(element).type ??
+        results.closedWorld.commonMasks.dynamicType;
+  }
+
+  static TypeMask inferredTypeForParameter(
+      Local element, GlobalTypeInferenceResults results) {
+    return results.resultOfParameter(element).type ??
         results.closedWorld.commonMasks.dynamicType;
   }
 
@@ -45,6 +51,7 @@ class TypeMaskFactory {
       }
 
       if (type.isVoid) return commonMasks.nullType;
+      if (type.isDynamic) return commonMasks.dynamicType;
       if (type.element == commonElements.nullClass) return commonMasks.nullType;
       if (type.treatAsDynamic) return commonMasks.dynamicType;
       return new TypeMask.nonNullSubtype(type.element, closedWorld);

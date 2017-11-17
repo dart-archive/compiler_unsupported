@@ -26,8 +26,13 @@ const String setupProgramName = 'setupProgram';
 //   unlikely since it lives on types, but still.
 const String typeNameProperty = r'builtin$cls';
 
-jsAst.Statement buildSetupProgram(Program program, Compiler compiler,
-    JavaScriptBackend backend, Namer namer, Emitter emitter) {
+jsAst.Statement buildSetupProgram(
+    Program program,
+    Compiler compiler,
+    JavaScriptBackend backend,
+    Namer namer,
+    Emitter emitter,
+    ClosedWorld closedWorld) {
   jsAst.Expression typeInformationAccess =
       emitter.generateEmbeddedGlobalAccess(embeddedNames.TYPE_INFORMATION);
   jsAst.Expression globalFunctionsAccess =
@@ -72,7 +77,8 @@ jsAst.Statement buildSetupProgram(Program program, Compiler compiler,
   String defaultValuesField = namer.defaultValuesField;
   String methodsWithOptionalArgumentsField =
       namer.methodsWithOptionalArgumentsField;
-  String unmangledNameIndex = backend.mirrorsData.mustRetainMetadata
+  bool retainMetadata = backend.mirrorsData.mustRetainMetadata;
+  String unmangledNameIndex = retainMetadata
       ? ' 3 * optionalParameterCount + 2 * requiredParameterCount + 3'
       : ' 2 * optionalParameterCount + requiredParameterCount + 3';
   String receiverParamName =
@@ -103,7 +109,7 @@ jsAst.Statement buildSetupProgram(Program program, Compiler compiler,
     'staticsPropertyNameString': js.quoteName(namer.staticsPropertyName),
     'typeInformation': typeInformationAccess,
     'globalFunctions': globalFunctionsAccess,
-    'enabledInvokeOn': backend.backendUsage.isInvokeOnUsed,
+    'enabledInvokeOn': closedWorld.backendUsage.isInvokeOnUsed,
     'interceptedNames': interceptedNamesAccess,
     'interceptedNamesSet': emitter.generateInterceptedNamesSet(),
     'notInCspMode': !compiler.options.useContentSecurityPolicy,
@@ -124,26 +130,28 @@ jsAst.Statement buildSetupProgram(Program program, Compiler compiler,
     'finishedClassesAccess': finishedClassesAccess,
     'needsMixinSupport': emitter.needsMixinSupport,
     'needsNativeSupport': program.needsNativeSupport,
-    'enabledJsInterop': backend.jsInteropAnalysis.enabledJsInterop,
+    'enabledJsInterop': closedWorld.nativeData.isJsInteropUsed,
     'jsInteropBoostrap': backend.jsInteropAnalysis.buildJsInteropBootstrap(),
-    'isInterceptorClass': namer.operatorIs(backend.helpers.jsInterceptorClass),
-    'isObject': namer.operatorIs(compiler.commonElements.objectClass),
+    'isInterceptorClass':
+        namer.operatorIs(closedWorld.commonElements.jsInterceptorClass),
+    'isObject': namer.operatorIs(closedWorld.commonElements.objectClass),
     'specProperty': js.string(namer.nativeSpecProperty),
     'trivialNsmHandlers': emitter.buildTrivialNsmHandlers(),
     'hasRetainedMetadata': backend.mirrorsData.hasRetainedMetadata,
     'types': typesAccess,
     'objectClassName': js.quoteName(
-        namer.runtimeTypeName(compiler.commonElements.objectClass as Entity)),
+        namer.runtimeTypeName(closedWorld.commonElements.objectClass)),
     'needsStructuredMemberInfo': emitter.needsStructuredMemberInfo,
-    'usesMangledNames': compiler.commonElements.mirrorsLibrary != null ||
-        backend.backendUsage.isFunctionApplyUsed,
-    'tearOffCode': buildTearOffCode(backend),
+    'usesMangledNames': closedWorld.backendUsage.isMirrorsUsed ||
+        closedWorld.backendUsage.isFunctionApplyUsed,
+    'tearOffCode': buildTearOffCode(
+        compiler.options, emitter, namer, closedWorld.commonElements),
     'nativeInfoHandler': nativeInfoHandler,
     'operatorIsPrefix': js.string(namer.operatorIsPrefix),
     'deferredActionString': js.string(namer.deferredAction)
   };
   String skeleton = '''
-function $setupProgramName(programData, typesOffset) {
+function $setupProgramName(programData, metadataOffset, typesOffset) {
   "use strict";
   if (#needsClassSupport) {
 
@@ -440,7 +448,7 @@ function $setupProgramName(programData, typesOffset) {
       for (var i = 0; i < properties.length; i++) finishClass(properties[i]);
     }
 
-    // Generic handler for deferred class setup. The handler updates the 
+    // Generic handler for deferred class setup. The handler updates the
     // prototype that it is installed on (it traverses the prototype chain
     // of [this] to find itself) and then removes itself. It recurses by
     // calling deferred handling again, which terminates on Object due to
@@ -688,11 +696,35 @@ function $setupProgramName(programData, typesOffset) {
       var optionalParameterInfo = ${readInt("array", "1")};
       var optionalParameterCount = optionalParameterInfo >> 1;
       var optionalParametersAreNamed = (optionalParameterInfo & 1) === 1;
-      var isIntercepted =
-             requiredParameterCount + optionalParameterCount != funcs[0].length;
+      var totalParameterCount = requiredParameterCount + optionalParameterCount;
+      var isIntercepted = totalParameterCount != funcs[0].length;
       var functionTypeIndex = ${readFunctionType("array", "2")};
       if (typeof functionTypeIndex == "number")
         ${readFunctionType("array", "2")} = functionTypeIndex + typesOffset;
+      if (metadataOffset > 0) {
+        var position = 3;
+        // Update index that refers to the parameter default value.
+        for (var i = 0; i < optionalParameterCount; i++) {
+          if (typeof ${readInt("array", "position")} == "number")
+          ${readInt("array", "position")} =
+              ${readInt("array", "position")} + metadataOffset;
+          position++;
+        }
+        for (var i = 0; i < totalParameterCount; i++) {
+          // Update index that refers to the parameter name.
+          ${readInt("array", "position")} =
+              ${readInt("array", "position")} + metadataOffset;
+          position++;
+          if ($retainMetadata) {
+            var metaArray = ${readInt("array", "position")};
+            for (var j = 0; j < metaArray.length; j++) {
+              ${readInt("metaArray", "j")} =
+                ${readInt("metaArray", "j")} + metadataOffset;
+            }
+            position++;
+          }
+        }
+      }
       var unmangledNameIndex = $unmangledNameIndex;
 
       if (getterStubName) {
@@ -733,11 +765,15 @@ function $setupProgramName(programData, typesOffset) {
           if (isSetter) {
             reflectionName += "=";
           } else if (!isGetter) {
-            reflectionName += ":" + 
+            reflectionName += ":" +
                 (requiredParameterCount + optionalParameterCount);
           }
           mangledNames[name] = reflectionName;
           funcs[0].$reflectionNameField = reflectionName;
+          for (var i = unmangledNameIndex + 1; i < array.length; i++) {
+            ${readInt("array", "i")} =
+                ${readInt("array", "i")} + metadataOffset;
+          }
           funcs[0].$metadataIndexField = unmangledNameIndex + 1;
           // The following line installs the [${JsGetName.CALL_CATCH_ALL}]
           // property for closures.

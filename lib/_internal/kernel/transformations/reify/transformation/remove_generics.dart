@@ -4,7 +4,7 @@
 
 library kernel.transformations.reify.transformation.remove_generics;
 
-import 'package:compiler_unsupported/_internal/kernel/ast.dart';
+import '../../../ast.dart';
 import 'transformer.dart';
 
 class Erasure extends Transformer with DartTypeVisitor<DartType> {
@@ -57,6 +57,11 @@ class Erasure extends Transformer with DartTypeVisitor<DartType> {
       return new InterfaceType(type.classNode, const <DartType>[]);
     }
     return type;
+  }
+
+  @override
+  TypedefType visitTypedefType(TypedefType type) {
+    throw 'Typedef types not implemented in erasure';
   }
 
   @override

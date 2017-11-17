@@ -4,75 +4,68 @@
 
 library fasta.messages;
 
-import 'package:compiler_unsupported/_internal/kernel/ast.dart' show Location, Program;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart' show Library, Location, Program, TreeNode;
 
 import 'util/relativize.dart' show relativizeUri;
 
 import 'compiler_context.dart' show CompilerContext;
 
-import 'errors.dart' show InputError;
+import 'fasta_codes.dart' show LocatedMessage, Message;
 
-import 'colors.dart' show cyan, magenta;
+import 'severity.dart' show Severity;
 
-const bool hideWarnings = false;
-
-bool get errorsAreFatal => CompilerContext.current.options.errorsAreFatal;
-
-bool get nitsAreFatal => CompilerContext.current.options.nitsAreFatal;
-
-bool get warningsAreFatal => CompilerContext.current.options.warningsAreFatal;
+export 'fasta_codes.dart';
 
 bool get isVerbose => CompilerContext.current.options.verbose;
 
-bool get hideNits => !isVerbose;
-
-void warning(Uri uri, int charOffset, String message) {
-  if (hideWarnings) return;
-  print(format(uri, charOffset, colorWarning("Warning: $message")));
-  if (warningsAreFatal) {
-    if (isVerbose) print(StackTrace.current);
-    throw new InputError(
-        uri, charOffset, "Compilation aborted due to fatal warnings.");
-  }
+void warning(Message message, int charOffset, Uri uri) {
+  report(message.withLocation(uri, charOffset), Severity.warning);
 }
 
-void nit(Uri uri, int charOffset, String message) {
-  if (hideNits) return;
-  print(format(uri, charOffset, colorNit("Nit: $message")));
-  if (nitsAreFatal) {
-    if (isVerbose) print(StackTrace.current);
-    throw new InputError(
-        uri, charOffset, "Compilation aborted due to fatal nits.");
-  }
+void nit(Message message, int charOffset, Uri uri) {
+  report(message.withLocation(uri, charOffset), Severity.nit);
 }
 
-String colorWarning(String message) {
-  // TODO(ahe): Colors need to be optional. Doesn't work well in Emacs or on
-  // Windows.
-  return magenta(message);
-}
-
-String colorNit(String message) {
-  // TODO(ahe): Colors need to be optional. Doesn't work well in Emacs or on
-  // Windows.
-  return cyan(message);
-}
-
-String format(Uri uri, int charOffset, String message) {
-  if (uri != null) {
-    String path = relativizeUri(uri);
-    String position =
-        charOffset == -1 ? path : "${getLocation(path, charOffset)}";
-    return "$position: $message";
-  } else {
-    return message;
-  }
+void report(LocatedMessage message, Severity severity) {
+  CompilerContext.current.report(message, severity);
 }
 
 Location getLocation(String path, int charOffset) {
-  if (CompilerContext.current.uriToSource[path] == null) {
-    return new Location(path, 1, 1);
+  return CompilerContext.current.uriToSource[path]
+      ?.getLocation(path, charOffset);
+}
+
+Location getLocationFromUri(Uri uri, int charOffset) {
+  if (charOffset == -1) return null;
+  String path = relativizeUri(uri);
+  return getLocation(path, charOffset);
+}
+
+String getSourceLine(Location location) {
+  if (location == null) return null;
+  return CompilerContext.current.uriToSource[location.file]
+      ?.getTextLine(location.line);
+}
+
+Location getLocationFromNode(TreeNode node) {
+  if (node.enclosingProgram == null) {
+    TreeNode parent = node;
+    while (parent != null && parent is! Library) {
+      parent = parent.parent;
+    }
+    if (parent is Library) {
+      Program program =
+          new Program(uriToSource: CompilerContext.current.uriToSource);
+      program.libraries.add(parent);
+      parent.parent = program;
+      Location result = node.location;
+      program.libraries.clear();
+      parent.parent = null;
+      return result;
+    } else {
+      return null;
+    }
+  } else {
+    return node.location;
   }
-  return new Program(null, CompilerContext.current.uriToSource)
-      .getLocation(path, charOffset);
 }

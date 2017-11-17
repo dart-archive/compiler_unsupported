@@ -5,13 +5,12 @@
 library dart2js.js_emitter.full_emitter.container_builder;
 
 import '../../constants/values.dart';
+import '../../deferred_load.dart' show OutputUnit;
 import '../../elements/elements.dart'
-    show
-        Element,
-        Elements,
-        FunctionSignature,
-        MetadataAnnotation,
-        MethodElement;
+    show Element, MetadataAnnotation, MethodElement;
+import '../../elements/entities.dart';
+import '../../elements/entity_utils.dart' as utils;
+import '../../elements/names.dart';
 import '../../js/js.dart' as jsAst;
 import '../../js/js.dart' show js;
 import '../js_emitter.dart' hide Emitter, EmitterFactory;
@@ -23,10 +22,13 @@ import 'emitter.dart';
 /// Initially, it is just a placeholder for code that is moved from
 /// [CodeEmitterTask].
 class ContainerBuilder extends CodeEmitterHelper {
+  ContainerBuilder();
+
   void addMemberMethod(DartMethod method, ClassBuilder builder) {
-    MethodElement member = method.element;
+    FunctionEntity member = method.element;
+    OutputUnit outputUnit = backend.outputUnitData.outputUnitForMember(member);
     jsAst.Name name = method.name;
-    FunctionSignature parameters = member.functionSignature;
+    ParameterStructure parameters = member.parameterStructure;
     jsAst.Expression code = method.code;
     bool needsStubs = method.parameterStubs.isNotEmpty;
     bool canBeApplied = method.canBeApplied;
@@ -37,7 +39,6 @@ class ContainerBuilder extends CodeEmitterHelper {
     jsAst.Name superAlias = method is InstanceMethod ? method.aliasName : null;
     bool hasSuperAlias = superAlias != null;
     jsAst.Expression memberTypeExpression = method.functionType;
-
     bool needStructuredInfo =
         canTearOff || canBeReflected || canBeApplied || hasSuperAlias;
 
@@ -45,12 +46,12 @@ class ContainerBuilder extends CodeEmitterHelper {
 
     if (!needStructuredInfo) {
       compiler.dumpInfoTask
-          .registerElementAst(member, builder.addProperty(name, code));
+          .registerEntityAst(member, builder.addProperty(name, code));
 
       for (ParameterStubMethod stub in method.parameterStubs) {
         assert(stub.callName == null);
         jsAst.Property property = builder.addProperty(stub.name, stub.code);
-        compiler.dumpInfoTask.registerElementAst(member, property);
+        compiler.dumpInfoTask.registerEntityAst(member, property);
         emitter.interceptorEmitter
             .recordMangledNameOfMemberMethod(member, stub.name);
       }
@@ -102,7 +103,7 @@ class ContainerBuilder extends CodeEmitterHelper {
       jsAst.ArrayInitializer arrayInit =
           new jsAst.ArrayInitializer(expressions);
       compiler.dumpInfoTask
-          .registerElementAst(member, builder.addProperty(name, arrayInit));
+          .registerEntityAst(member, builder.addProperty(name, arrayInit));
       return;
     }
 
@@ -115,13 +116,13 @@ class ContainerBuilder extends CodeEmitterHelper {
 
     // On [requiredParameterCount], the lower bit is set if this method can be
     // called reflectively.
-    int requiredParameterCount = parameters.requiredParameterCount << 1;
-    if (member.isAccessor) requiredParameterCount++;
+    int requiredParameterCount = parameters.requiredParameters << 1;
+    if (member.isGetter || member.isSetter) requiredParameterCount++;
 
-    int optionalParameterCount = parameters.optionalParameterCount << 1;
-    if (parameters.optionalParametersAreNamed) optionalParameterCount++;
+    int optionalParameterCount = parameters.optionalParameters << 1;
+    if (parameters.namedParameters.isNotEmpty) optionalParameterCount++;
 
-    List tearOffInfo = [callSelectorString];
+    var tearOffInfo = <jsAst.Expression>[callSelectorString];
 
     for (ParameterStubMethod stub in method.parameterStubs) {
       jsAst.Name invocationName = stub.name;
@@ -140,51 +141,64 @@ class ContainerBuilder extends CodeEmitterHelper {
 
     expressions
       ..addAll(tearOffInfo)
-      ..add((tearOffName == null || member.isAccessor)
+      ..add((tearOffName == null || member.isGetter || member.isSetter)
           ? js("null")
           : js.quoteName(tearOffName))
       ..add(js.number(requiredParameterCount))
       ..add(js.number(optionalParameterCount))
-      ..add(memberTypeExpression == null ? js("null") : memberTypeExpression)
-      ..addAll(task.metadataCollector.reifyDefaultArguments(member));
+      ..add(memberTypeExpression == null ? js("null") : memberTypeExpression);
 
     if (canBeReflected || canBeApplied) {
-      parameters.forEachParameter((Element parameter) {
-        expressions.add(task.metadataCollector.reifyName(parameter.name));
-        if (backend.mirrorsData.mustRetainMetadata) {
-          Iterable<jsAst.Expression> metadataIndices =
-              parameter.metadata.map((MetadataAnnotation annotation) {
-            ConstantValue constant =
-                backend.constants.getConstantValueForMetadata(annotation);
-            backend.constants.addCompileTimeConstantForEmission(constant);
-            return task.metadataCollector.reifyMetadata(annotation);
-          });
-          expressions.add(new jsAst.ArrayInitializer(metadataIndices.toList()));
-        }
-      });
+      expressions.addAll(
+          task.metadataCollector.reifyDefaultArguments(member, outputUnit));
+
+      if (member is MethodElement) {
+        member.functionSignature.forEachParameter((Element parameter) {
+          expressions.add(
+              task.metadataCollector.reifyName(parameter.name, outputUnit));
+          if (backend.mirrorsData.mustRetainMetadata) {
+            Iterable<jsAst.Expression> metadataIndices =
+                parameter.metadata.map((MetadataAnnotation annotation) {
+              ConstantValue constant =
+                  backend.constants.getConstantValueForMetadata(annotation);
+              codegenWorldBuilder.addCompileTimeConstantForEmission(constant);
+              return task.metadataCollector
+                  .reifyMetadata(annotation, outputUnit);
+            });
+            expressions
+                .add(new jsAst.ArrayInitializer(metadataIndices.toList()));
+          }
+        });
+      } else {
+        codegenWorldBuilder.forEachParameter(member, (_, String name, _2) {
+          expressions.add(task.metadataCollector.reifyName(name, outputUnit));
+        });
+        // TODO(redemption): Support retaining mirrors metadata.
+      }
     }
+    Name memberName = member.memberName;
     if (canBeReflected) {
       jsAst.LiteralString reflectionName;
       if (member.isConstructor) {
         // TODO(herhut): This registers name as a mangled name. Do we need this
         //               given that we use a different name below?
-        emitter.getReflectionName(member, name);
+        emitter.getReflectionMemberName(member, name);
         reflectionName = new jsAst.LiteralString(
-            '"new ${Elements.reconstructConstructorName(member)}"');
+            '"new ${utils.reconstructConstructorName(member)}"');
       } else {
-        reflectionName = js.string(namer.privateName(member.memberName));
+        reflectionName = js.string(namer.privateName(memberName));
       }
       expressions
         ..add(reflectionName)
-        ..addAll(task.metadataCollector.computeMetadata(member));
+        ..addAll(task.metadataCollector.computeMetadata(member, outputUnit));
     } else if (isClosure && canBeApplied) {
-      expressions.add(js.string(namer.privateName(member.memberName)));
+      expressions.add(js.string(namer.privateName(memberName)));
     }
 
     jsAst.ArrayInitializer arrayInit =
         new jsAst.ArrayInitializer(expressions.toList());
     compiler.dumpInfoTask
-        .registerElementAst(member, builder.addProperty(name, arrayInit));
+        .registerEntityAst(member, builder.addProperty(name, arrayInit));
   }
 
   void addMemberField(Field field, ClassBuilder builder) {

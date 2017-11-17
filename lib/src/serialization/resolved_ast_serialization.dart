@@ -4,19 +4,21 @@
 
 library dart2js.serialization.resolved_ast;
 
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/parser.dart' show Parser, ParserError;
+import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart';
+
 import '../common.dart';
 import '../common/resolution.dart';
 import '../constants/expressions.dart';
-import '../elements/resolution_types.dart';
 import '../diagnostics/diagnostic_listener.dart';
 import '../elements/elements.dart';
+import '../elements/jumps.dart';
 import '../elements/modelx.dart';
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/parser.dart' show Parser, ParserError;
+import '../elements/resolution_types.dart';
 import '../parser/node_listener.dart' show NodeListener;
 import '../resolution/enum_creator.dart';
 import '../resolution/send_structure.dart';
 import '../resolution/tree_elements.dart';
-import 'package:compiler_unsupported/_internal/front_end/src/fasta/scanner.dart';
 import '../tree/tree.dart';
 import '../universe/selector.dart';
 import 'keys.dart';
@@ -121,8 +123,8 @@ class ResolvedAstSerializer extends Visitor {
       } else if (element.isConstructor) {
         kind = AstKind.ENUM_CONSTRUCTOR;
       } else {
-        assert(invariant(element, element.isConst,
-            message: "Unexpected enum member: $element"));
+        assert(element.isConst,
+            failedAt(element, "Unexpected enum member: $element"));
         kind = AstKind.ENUM_CONSTANT;
       }
     } else {
@@ -148,8 +150,11 @@ class ResolvedAstSerializer extends Visitor {
     objectEncoder.setBool(Key.CONTAINS_TRY, elements.containsTryStatement);
     if (resolvedAst.body != null) {
       int index = nodeIndices[resolvedAst.body];
-      assert(invariant(element, index != null,
-          message: "No index for body of $element: "
+      assert(
+          index != null,
+          failedAt(
+              element,
+              "No index for body of $element: "
               "${resolvedAst.body} ($nodeIndices)."));
       objectEncoder.setInt(Key.BODY, index);
     }
@@ -173,7 +178,8 @@ class ResolvedAstSerializer extends Visitor {
   }
 
   void serializeParameterNodes(FunctionElement function) {
-    function.functionSignature.forEachParameter((ParameterElement parameter) {
+    function.functionSignature.forEachParameter((_parameter) {
+      ParameterElement parameter = _parameter;
       ParameterElement parameterImpl = parameter.implementation;
       // TODO(johnniwinther): Should we support element->node mapping as well?
       getNodeDataEncoder(parameterImpl.node)
@@ -186,7 +192,7 @@ class ResolvedAstSerializer extends Visitor {
   }
 
   /// Serialize [target] into [encoder].
-  void serializeJumpTarget(JumpTarget jumpTarget, ObjectEncoder encoder) {
+  void serializeJumpTarget(JumpTargetX jumpTarget, ObjectEncoder encoder) {
     encoder.setElement(Key.EXECUTABLE_CONTEXT, jumpTarget.executableContext);
     encoder.setInt(Key.NODE, nodeIndices[jumpTarget.statement]);
     encoder.setInt(Key.NESTING_LEVEL, jumpTarget.nestingLevel);
@@ -203,7 +209,7 @@ class ResolvedAstSerializer extends Visitor {
 
   /// Serialize [label] into [encoder].
   void serializeLabelDefinition(
-      LabelDefinition labelDefinition, ObjectEncoder encoder) {
+      LabelDefinitionX labelDefinition, ObjectEncoder encoder) {
     encoder.setInt(Key.NODE, nodeIndices[labelDefinition.label]);
     encoder.setString(Key.NAME, labelDefinition.labelName);
     encoder.setBool(Key.IS_BREAK_TARGET, labelDefinition.isBreakTarget);
@@ -221,9 +227,9 @@ class ResolvedAstSerializer extends Visitor {
 
   /// Computes the [ObjectEncoder] for serializing data for [node].
   ObjectEncoder getNodeDataEncoder(Node node) {
-    assert(invariant(element, node != null, message: "Node must be non-null."));
+    assert(node != null, failedAt(element, "Node must be non-null."));
     int id = nodeIndices[node];
-    assert(invariant(element, id != null, message: "Node without id: $node"));
+    assert(id != null, failedAt(element, "Node without id: $node"));
     return nodeData.putIfAbsent(id, () {
       ObjectEncoder objectEncoder = nodeDataEncoder.createObject();
       objectEncoder.setInt(Key.ID, id);
@@ -383,7 +389,7 @@ class ResolvedAstDeserializer {
       int charOffset = objectDecoder.getInt(Key.OFFSET);
       Token beginToken = getBeginToken(uri, charOffset);
       if (beginToken == null) {
-        // TODO(johnniwinther): Handle unfound tokens by adding an erronous
+        // TODO(johnniwinther): Handle unfound tokens by adding an erroneous
         // resolved ast kind.
         reporter.internalError(
             element, "No token found for $element in $uri @ $charOffset");
@@ -410,6 +416,7 @@ class ResolvedAstDeserializer {
     }
 
     /// Computes the [Node] for the element based on the [AstKind].
+    // ignore: MISSING_RETURN
     Node computeNode(AstKind kind) {
       switch (kind) {
         case AstKind.ENUM_INDEX_FIELD:
@@ -535,7 +542,7 @@ class ResolvedAstDeserializer {
             }
           }
           return doParse((parser) {
-            parser.parseFunction(beginToken, getOrSet);
+            parser.parseMember(beginToken);
           });
       }
     }
@@ -551,8 +558,11 @@ class ResolvedAstDeserializer {
     Node body;
     int bodyNodeIndex = objectDecoder.getInt(Key.BODY, isOptional: true);
     if (bodyNodeIndex != null) {
-      assert(invariant(element, bodyNodeIndex < nodeList.length,
-          message: "Body node index ${bodyNodeIndex} out of range. "
+      assert(
+          bodyNodeIndex < nodeList.length,
+          failedAt(
+              element,
+              "Body node index ${bodyNodeIndex} out of range. "
               "Node count: ${nodeList.length}"));
       body = nodeList[bodyNodeIndex];
     }
@@ -570,7 +580,7 @@ class ResolvedAstDeserializer {
             decoder.getElement(Key.EXECUTABLE_CONTEXT);
         Node statement = nodeList[decoder.getInt(Key.NODE)];
         int nestingLevel = decoder.getInt(Key.NESTING_LEVEL);
-        JumpTarget jumpTarget =
+        JumpTargetX jumpTarget =
             new JumpTargetX(statement, nestingLevel, executableContext);
         jumpTarget.isBreakTarget = decoder.getBool(Key.IS_BREAK_TARGET);
         jumpTarget.isContinueTarget = decoder.getBool(Key.IS_CONTINUE_TARGET);
@@ -596,13 +606,14 @@ class ResolvedAstDeserializer {
         labelDefinitions.add(labelDefinition);
       }
     }
-    jumpTargetLabels.forEach((JumpTargetX jumpTarget, List<int> labelIds) {
+    jumpTargetLabels.forEach((JumpTarget jumpTarget, List<int> labelIds) {
       if (labelIds.isEmpty) return;
       List<LabelDefinition> labels = <LabelDefinition>[];
       for (int labelId in labelIds) {
         labels.add(labelDefinitions[labelId]);
       }
-      jumpTarget.labels = labels;
+      JumpTargetX target = jumpTarget;
+      target.labels = labels;
     });
 
     ListDecoder dataDecoder = objectDecoder.getList(Key.DATA, isOptional: true);

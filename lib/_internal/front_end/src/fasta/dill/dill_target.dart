@@ -8,54 +8,56 @@ import 'dart:async' show Future;
 
 import 'package:compiler_unsupported/_internal/kernel/ast.dart' show Class;
 
-import 'dill_loader.dart' show DillLoader;
+import 'package:compiler_unsupported/_internal/kernel/target/targets.dart' show Target;
 
-import '../errors.dart' show inputError, internalError;
+import '../kernel/kernel_builder.dart' show ClassBuilder;
+
+import '../problems.dart' show unsupported;
 
 import '../target_implementation.dart' show TargetImplementation;
 
 import '../ticker.dart' show Ticker;
 
-import '../translate_uri.dart' show TranslateUri;
-
-import '../kernel/kernel_builder.dart' show ClassBuilder, KernelClassBuilder;
+import '../uri_translator.dart' show UriTranslator;
 
 import 'dill_library_builder.dart' show DillLibraryBuilder;
+
+import 'dill_loader.dart' show DillLoader;
 
 class DillTarget extends TargetImplementation {
   bool isLoaded = false;
   DillLoader loader;
 
-  DillTarget(Ticker ticker, TranslateUri uriTranslator)
-      : super(ticker, uriTranslator) {
+  DillTarget(Ticker ticker, UriTranslator uriTranslator, Target backendTarget)
+      : super(ticker, uriTranslator, backendTarget) {
     loader = new DillLoader(this);
   }
 
   void addSourceInformation(
       Uri uri, List<int> lineStarts, List<int> sourceCode) {
-    internalError("Unsupported operation.");
+    unsupported("addSourceInformation", -1, null);
   }
 
   void read(Uri uri) {
-    if (loader.input == null) {
-      loader.input = uri;
-    } else {
-      inputError(uri, -1, "Can only read one dill file.");
+    unsupported("read", -1, null);
+  }
+
+  @override
+  Future<Null> buildProgram() {
+    return new Future<Null>.sync(() => unsupported("buildProgram", -1, null));
+  }
+
+  @override
+  Future<Null> buildOutlines() async {
+    if (loader.libraries.isNotEmpty) {
+      await loader.buildOutlines();
+      loader.finalizeExports();
     }
-  }
-
-  Future<Null> writeProgram(Uri uri) {
-    return internalError("not implemented.");
-  }
-
-  Future<Null> writeOutline(Uri uri) async {
-    if (loader.input == null) return null;
-    await loader.buildOutlines();
     isLoaded = true;
-    return null;
   }
 
-  DillLibraryBuilder createLibraryBuilder(Uri uri, Uri fileUri) {
+  DillLibraryBuilder createLibraryBuilder(Uri uri, Uri fileUri, origin) {
+    assert(origin == null);
     return new DillLibraryBuilder(uri, loader);
   }
 
@@ -67,8 +69,5 @@ class DillTarget extends TargetImplementation {
 
   void breakCycle(ClassBuilder cls) {}
 
-  Class get objectClass {
-    KernelClassBuilder builder = loader.coreLibrary.exports["Object"];
-    return builder.cls;
-  }
+  Class get objectClass => loader.coreLibrary["Object"].target;
 }

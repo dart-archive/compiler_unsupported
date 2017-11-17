@@ -7,19 +7,19 @@ library kernel.transformations.reify.standalone_runner;
 import 'analysis/program_analysis.dart';
 import 'dart:io' show File, IOSink;
 
-import 'package:compiler_unsupported/_internal/kernel/binary/ast_to_binary.dart' show BinaryPrinter;
+import '../../binary/ast_to_binary.dart' show BinaryPrinter;
 
-import 'package:compiler_unsupported/_internal/kernel/ast.dart';
+import '../../ast.dart';
 
-import 'package:compiler_unsupported/_internal/kernel/kernel.dart';
-import 'package:compiler_unsupported/_internal/kernel/verifier.dart';
-import 'package:compiler_unsupported/_internal/kernel/text/ast_to_text.dart' show Printer;
+import '../../kernel.dart';
+import '../../verifier.dart';
+import '../../text/ast_to_text.dart' show Printer;
 
 import 'transformation/remove_generics.dart';
 import 'transformation/transformer.dart'
     show ReifyVisitor, RuntimeLibrary, RuntimeTypeSupportBuilder;
 
-import 'package:compiler_unsupported/_internal/kernel/core_types.dart' show CoreTypes;
+import '../../core_types.dart' show CoreTypes;
 
 RuntimeLibrary findRuntimeTypeLibrary(Program p) {
   Library findLibraryEndingWith(String postfix) {
@@ -41,15 +41,15 @@ RuntimeLibrary findRuntimeTypeLibrary(Program p) {
 }
 
 Program transformProgramUsingLibraries(
-    Program program, RuntimeLibrary runtimeLibrary,
+    CoreTypes coreTypes, Program program, RuntimeLibrary runtimeLibrary,
     [Library libraryToTransform]) {
   LibraryFilter filter = libraryToTransform != null
       ? (Library library) => library == libraryToTransform
       : (_) => true;
   ProgramKnowledge knowledge = analyze(program, analyzeLibrary: filter);
   Library mainLibrary = program.mainMethod.parent;
-  RuntimeTypeSupportBuilder builder = new RuntimeTypeSupportBuilder(
-      runtimeLibrary, new CoreTypes(program), mainLibrary);
+  RuntimeTypeSupportBuilder builder =
+      new RuntimeTypeSupportBuilder(runtimeLibrary, coreTypes, mainLibrary);
   ReifyVisitor transformer =
       new ReifyVisitor(runtimeLibrary, builder, knowledge, libraryToTransform);
   // Transform the main program.
@@ -66,10 +66,11 @@ Program transformProgramUsingLibraries(
   return program;
 }
 
-Program transformProgram(Program program) {
+Program transformProgram(CoreTypes coreTypes, Program program) {
   RuntimeLibrary runtimeLibrary = findRuntimeTypeLibrary(program);
   Library mainLibrary = program.mainMethod.enclosingLibrary;
-  return transformProgramUsingLibraries(program, runtimeLibrary, mainLibrary);
+  return transformProgramUsingLibraries(
+      coreTypes, program, runtimeLibrary, mainLibrary);
 }
 
 main(List<String> arguments) async {
@@ -80,11 +81,12 @@ main(List<String> arguments) async {
   }
   Uri uri = Uri.base.resolve(path);
   Program program = loadProgramFromBinary(uri.toFilePath());
+  CoreTypes coreTypes = new CoreTypes(program);
 
   RuntimeLibrary runtimeLibrary = findRuntimeTypeLibrary(program);
   Library mainLibrary = program.mainMethod.enclosingLibrary;
-  program =
-      transformProgramUsingLibraries(program, runtimeLibrary, mainLibrary);
+  program = transformProgramUsingLibraries(
+      coreTypes, program, runtimeLibrary, mainLibrary);
 
   if (output == null) {
     // Print result

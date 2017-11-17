@@ -4,21 +4,28 @@
 
 library fasta.fasta_accessors;
 
-export 'package:compiler_unsupported/_internal/kernel/frontend/accessors.dart' show wrapInvalid;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart'
+    hide InvalidExpression, InvalidInitializer, InvalidStatement;
 
-import 'package:compiler_unsupported/_internal/kernel/frontend/accessors.dart'
-    show Accessor, buildIsNull, makeLet;
+import '../../scanner/token.dart' show Token;
 
-import 'package:compiler_unsupported/_internal/kernel/ast.dart';
+import '../fasta_codes.dart' show messageLoadLibraryTakesNoArguments;
 
-import '../errors.dart' show internalError;
+import '../messages.dart' show Message;
 
-import '../builder/scope.dart' show AccessErrorBuilder, ProblemBuilder;
+import '../names.dart' show callName, lengthName;
 
-import 'package:compiler_unsupported/_internal/kernel/frontend/accessors.dart' as kernel
+import '../problems.dart' show unhandled, unimplemented, unsupported;
+
+import '../scope.dart' show AccessErrorBuilder, ProblemBuilder, Scope;
+
+import '../type_inference/type_promotion.dart' show TypePromoter;
+
+import 'frontend_accessors.dart' as kernel
     show
         IndexAccessor,
         NullAwarePropertyAccessor,
+        LoadLibraryAccessor,
         PropertyAccessor,
         ReadOnlyAccessor,
         StaticAccessor,
@@ -28,37 +35,115 @@ import 'package:compiler_unsupported/_internal/kernel/frontend/accessors.dart' a
         ThisPropertyAccessor,
         VariableAccessor;
 
-import 'kernel_builder.dart'
-    show Builder, KernelClassBuilder, PrefixBuilder, TypeDeclarationBuilder;
+import 'frontend_accessors.dart' show Accessor;
 
-import '../names.dart' show callName;
+import 'kernel_builder.dart'
+    show
+        Builder,
+        FunctionTypeAliasBuilder,
+        KernelClassBuilder,
+        KernelInvalidTypeBuilder,
+        LibraryBuilder,
+        LoadLibraryBuilder,
+        PrefixBuilder,
+        TypeDeclarationBuilder;
+
+import 'kernel_shadow_ast.dart'
+    show
+        ShadowArguments,
+        ShadowComplexAssignment,
+        ShadowIllegalAssignment,
+        ShadowIndexAssign,
+        ShadowPropertyAssign,
+        ShadowStaticAssignment,
+        ShadowThisExpression,
+        ShadowTypeLiteral,
+        ShadowVariableAssignment;
+
+import 'utils.dart' show offsetForToken;
 
 abstract class BuilderHelper {
+  LibraryBuilder get library;
+
   Uri get uri;
+
+  TypePromoter get typePromoter;
+
+  int get functionNestingLevel;
+
+  bool get constantExpressionRequired;
 
   Constructor lookupConstructor(Name name, {bool isSuper});
 
-  Expression toSuperMethodInvocation(MethodInvocation node);
-
   Expression toValue(node);
 
-  Member lookupSuperMember(Name name, {bool isSetter: false});
+  Member lookupInstanceMember(Name name, {bool isSetter, bool isSuper});
 
-  builderToFirstExpression(Builder builder, String name, int offset);
+  scopeLookup(Scope scope, String name, Token token,
+      {bool isQualified: false, PrefixBuilder prefix});
 
   finishSend(Object receiver, Arguments arguments, int offset);
 
-  Expression buildCompileTimeError(error, [int offset]);
+  Expression buildCompileTimeError(Message message, int charOffset);
 
-  Initializer buildCompileTimeErrorIntializer(error, [int offset]);
+  Expression deprecated_buildCompileTimeError(String error, [int offset]);
 
-  Expression buildStaticInvocation(Procedure target, Arguments arguments);
+  Initializer buildInvalidInitializer(Expression expression, [int offset]);
+
+  Initializer buildFieldInitializer(
+      bool isSynthetic, String name, int offset, Expression expression);
+
+  Initializer buildSuperInitializer(
+      bool isSynthetic, Constructor constructor, Arguments arguments,
+      [int offset]);
+
+  Initializer buildRedirectingInitializer(
+      Constructor constructor, Arguments arguments,
+      [int charOffset = -1]);
+
+  Expression buildStaticInvocation(Procedure target, Arguments arguments,
+      {bool isConst, int charOffset, Member initialTarget});
 
   Expression buildProblemExpression(ProblemBuilder builder, int offset);
 
   Expression throwNoSuchMethodError(
-      String name, Arguments arguments, int offset,
-      {bool isSuper: false, isGetter: false, isSetter: false});
+      Expression receiver, String name, Arguments arguments, int offset,
+      {Member candidate,
+      bool isSuper,
+      bool isGetter,
+      bool isSetter,
+      bool isStatic});
+
+  bool checkArguments(FunctionNode function, Arguments arguments,
+      List<TypeParameter> typeParameters);
+
+  StaticGet makeStaticGet(Member readTarget, Token token);
+
+  dynamic deprecated_addCompileTimeError(int charOffset, String message,
+      {bool silent});
+
+  bool isIdentical(Member member);
+
+  Expression buildMethodInvocation(
+      Expression receiver, Name name, Arguments arguments, int offset,
+      {bool isConstantExpression,
+      bool isNullAware,
+      bool isImplicitCall,
+      bool isSuper,
+      Member interfaceTarget});
+
+  DartType validatedTypeVariableUse(
+      TypeParameterType type, int offset, bool nonInstanceAccessIsError);
+
+  void warning(Message message, int offset, int length);
+
+  Message warnUnresolvedGet(Name name, int charOffset, {bool isSuper});
+
+  Message warnUnresolvedSet(Name name, int charOffset, {bool isSuper});
+
+  Message warnUnresolvedMethod(Name name, int charOffset, {bool isSuper});
+
+  void warnTypeArgumentsMismatch(String name, int expected, int charOffset);
 }
 
 abstract class FastaAccessor implements Accessor {
@@ -70,200 +155,239 @@ abstract class FastaAccessor implements Accessor {
 
   String get plainNameForWrite => plainNameForRead;
 
+  bool get isInitializer => false;
+
   Expression buildForEffect() => buildSimpleRead();
 
-  Initializer buildFieldInitializer(
-      Map<String, FieldInitializer> initializers) {
-    // TODO(ahe): This error message is really bad.
-    return helper.buildCompileTimeErrorIntializer(
-        "Can't use $plainNameForRead here.", offset);
+  Initializer buildFieldInitializer(Map<String, int> initializedFields) {
+    int offset = offsetForToken(token);
+    return helper.buildInvalidInitializer(
+        helper.deprecated_buildCompileTimeError(
+            // TODO(ahe): This error message is really bad.
+            "Can't use $plainNameForRead here.",
+            offset),
+        offset);
   }
 
   Expression makeInvalidRead() {
-    return buildThrowNoSuchMethodError(new Arguments.empty(), isGetter: true);
+    return buildThrowNoSuchMethodError(
+        new NullLiteral()..fileOffset = offsetForToken(token),
+        new Arguments.empty(),
+        isGetter: true);
   }
 
   Expression makeInvalidWrite(Expression value) {
-    return buildThrowNoSuchMethodError(new Arguments(<Expression>[value]),
+    return buildThrowNoSuchMethodError(
+        new NullLiteral()..fileOffset = offsetForToken(token),
+        new ShadowArguments(<Expression>[value]),
         isSetter: true);
   }
 
-  /* Expression | FastaAccessor */ doInvocation(
+  /* Expression | FastaAccessor | Initializer */ doInvocation(
       int offset, Arguments arguments);
 
   /* Expression | FastaAccessor */ buildPropertyAccess(
-      IncompleteSend send, bool isNullAware) {
+      IncompleteSend send, int operatorOffset, bool isNullAware) {
     if (send is SendAccessor) {
-      return buildMethodInvocation(
-          buildSimpleRead(), send.name, send.arguments, send.offset,
+      return helper.buildMethodInvocation(buildSimpleRead(), send.name,
+          send.arguments, offsetForToken(send.token),
           isNullAware: isNullAware);
     } else {
-      return PropertyAccessor.make(helper, send.offset, buildSimpleRead(),
+      if (helper.constantExpressionRequired && send.name != lengthName) {
+        helper.deprecated_addCompileTimeError(
+            offsetForToken(token), "Not a constant expression.");
+      }
+      return PropertyAccessor.make(helper, send.token, buildSimpleRead(),
           send.name, null, null, isNullAware);
     }
   }
 
   /* Expression | FastaAccessor */ buildThrowNoSuchMethodError(
-      Arguments arguments,
+      Expression receiver, Arguments arguments,
       {bool isSuper: false,
-      isGetter: false,
-      isSetter: false,
+      bool isGetter: false,
+      bool isSetter: false,
+      bool isStatic: false,
       String name,
       int offset}) {
-    return helper.throwNoSuchMethodError(
-        name ?? plainNameForWrite, arguments, offset ?? this.offset,
-        isGetter: isGetter, isSetter: isSetter, isSuper: isSuper);
+    return helper.throwNoSuchMethodError(receiver, name ?? plainNameForWrite,
+        arguments, offset ?? offsetForToken(this.token),
+        isGetter: isGetter,
+        isSetter: isSetter,
+        isSuper: isSuper,
+        isStatic: isStatic);
   }
 
   bool get isThisPropertyAccessor => false;
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowIllegalAssignment(rhs);
 }
 
-abstract class CompileTimeErrorAccessor implements FastaAccessor {
-  @override
-  Expression get builtBinary => internalError("Unsupported operation.");
+abstract class ErrorAccessor implements FastaAccessor {
+  /// Pass [arguments] that must be evaluated before throwing an error.  At
+  /// most one of [isGetter] and [isSetter] should be true and they're passed
+  /// to [BuilderHelper.buildThrowNoSuchMethodError] if it is used.
+  Expression buildError(Arguments arguments,
+      {bool isGetter: false, bool isSetter: false, int offset});
+
+  Name get name => unsupported("name", offsetForToken(token), uri);
 
   @override
-  void set builtBinary(Expression expression) {
-    internalError("Unsupported operation.");
-  }
-
-  @override
-  Expression get builtGetter => internalError("Unsupported operation.");
-
-  @override
-  void set builtGetter(Expression expression) {
-    internalError("Unsupported operation.");
-  }
-
-  Expression buildError();
-
-  Name get name => internalError("Unsupported operation.");
-
   String get plainNameForRead => name.name;
 
-  withReceiver(Object receiver, {bool isNullAware}) => this;
+  withReceiver(Object receiver, int operatorOffset, {bool isNullAware}) => this;
 
-  Initializer buildFieldInitializer(
-      Map<String, FieldInitializer> initializers) {
-    return new LocalInitializer(new VariableDeclaration.forValue(buildError()));
+  @override
+  Initializer buildFieldInitializer(Map<String, int> initializedFields) {
+    return helper.buildInvalidInitializer(
+        buildError(new Arguments.empty(), isSetter: true));
   }
 
-  doInvocation(int offset, Arguments arguments) => this;
+  @override
+  doInvocation(int offset, Arguments arguments) {
+    return buildError(arguments, offset: offset);
+  }
 
-  buildPropertyAccess(IncompleteSend send, bool isNullAware) => this;
+  @override
+  buildPropertyAccess(
+      IncompleteSend send, int operatorOffset, bool isNullAware) {
+    return this;
+  }
 
-  buildThrowNoSuchMethodError(Arguments arguments,
+  @override
+  buildThrowNoSuchMethodError(Expression receiver, Arguments arguments,
       {bool isSuper: false,
-      isGetter: false,
-      isSetter: false,
+      bool isGetter: false,
+      bool isSetter: false,
+      bool isStatic: false,
       String name,
       int offset}) {
     return this;
   }
 
+  @override
   Expression buildAssignment(Expression value, {bool voidContext: false}) {
-    return buildError();
+    return buildError(new ShadowArguments(<Expression>[value]), isSetter: true);
   }
 
+  @override
   Expression buildCompoundAssignment(Name binaryOperator, Expression value,
       {int offset: TreeNode.noOffset,
       bool voidContext: false,
-      Procedure interfaceTarget}) {
-    return buildError();
+      Procedure interfaceTarget,
+      bool isPreIncDec: false}) {
+    return buildError(new ShadowArguments(<Expression>[value]), isGetter: true);
   }
 
+  @override
   Expression buildPrefixIncrement(Name binaryOperator,
       {int offset: TreeNode.noOffset,
       bool voidContext: false,
       Procedure interfaceTarget}) {
-    return buildError();
+    return buildError(new ShadowArguments(<Expression>[new IntLiteral(1)]),
+        isGetter: true);
   }
 
+  @override
   Expression buildPostfixIncrement(Name binaryOperator,
       {int offset: TreeNode.noOffset,
       bool voidContext: false,
       Procedure interfaceTarget}) {
-    return buildError();
+    return buildError(new ShadowArguments(<Expression>[new IntLiteral(1)]),
+        isGetter: true);
   }
 
-  Expression buildNullAwareAssignment(Expression value, DartType type,
+  @override
+  Expression buildNullAwareAssignment(
+      Expression value, DartType type, int offset,
       {bool voidContext: false}) {
-    return buildError();
+    return buildError(new ShadowArguments(<Expression>[value]), isSetter: true);
   }
 
-  Expression buildSimpleRead() => buildError();
+  @override
+  Expression buildSimpleRead() =>
+      buildError(new Arguments.empty(), isGetter: true);
 
-  Expression makeInvalidRead() => buildError();
+  @override
+  Expression makeInvalidRead() =>
+      buildError(new Arguments.empty(), isGetter: true);
 
-  Expression makeInvalidWrite(Expression value) => buildError();
+  @override
+  Expression makeInvalidWrite(Expression value) {
+    return buildError(new ShadowArguments(<Expression>[value]), isSetter: true);
+  }
 }
 
 class ThisAccessor extends FastaAccessor {
   final BuilderHelper helper;
 
-  final int offset;
+  final Token token;
 
   final bool isInitializer;
 
   final bool isSuper;
 
-  ThisAccessor(this.helper, this.offset, this.isInitializer,
+  ThisAccessor(this.helper, this.token, this.isInitializer,
       {this.isSuper: false});
 
-  @override
-  Expression get builtBinary => internalError("Unsupported operation.");
-
-  @override
-  void set builtBinary(Expression expression) {
-    internalError("Unsupported operation.");
+  String get plainNameForRead {
+    return unsupported("${isSuper ? 'super' : 'this'}.plainNameForRead",
+        offsetForToken(token), uri);
   }
-
-  @override
-  Expression get builtGetter => internalError("Unsupported operation.");
-
-  @override
-  void set builtGetter(Expression expression) {
-    internalError("Unsupported operation.");
-  }
-
-  String get plainNameForRead => internalError(isSuper ? "super" : "this");
 
   Expression buildSimpleRead() {
     if (!isSuper) {
-      return new ThisExpression();
+      return new ShadowThisExpression();
     } else {
-      return helper.buildCompileTimeError(
-          "Can't use `super` as an expression.", offset);
+      return helper.deprecated_buildCompileTimeError(
+          "Can't use `super` as an expression.", offsetForToken(token));
     }
   }
 
-  Initializer buildFieldInitializer(
-      Map<String, FieldInitializer> initializers) {
+  @override
+  Initializer buildFieldInitializer(Map<String, int> initializedFields) {
     String keyword = isSuper ? "super" : "this";
-    return helper.buildCompileTimeErrorIntializer(
-        "Can't use '$keyword' here, did you mean '$keyword()'?", offset);
+    int offset = offsetForToken(token);
+    return helper.buildInvalidInitializer(
+        helper.deprecated_buildCompileTimeError(
+            "Can't use '$keyword' here, did you mean '$keyword()'?", offset),
+        offset);
   }
 
-  buildPropertyAccess(IncompleteSend send, bool isNullAware) {
+  buildPropertyAccess(
+      IncompleteSend send, int operatorOffset, bool isNullAware) {
+    Name name = send.name;
+    Arguments arguments = send.arguments;
+    int offset = offsetForToken(send.token);
     if (isInitializer && send is SendAccessor) {
-      return buildConstructorInitializer(
-          send.offset, send.name, send.arguments);
+      if (isNullAware) {
+        helper.deprecated_addCompileTimeError(
+            operatorOffset, "Expected '.'\nTry removing '?'.");
+      }
+      return buildConstructorInitializer(offset, name, arguments);
     }
+    Member getter = helper.lookupInstanceMember(name, isSuper: isSuper);
     if (send is SendAccessor) {
       // Notice that 'this' or 'super' can't be null. So we can ignore the
       // value of [isNullAware].
-      MethodInvocation result = buildMethodInvocation(
-          new ThisExpression(), send.name, send.arguments, offset);
-      return isSuper ? helper.toSuperMethodInvocation(result) : result;
+      if (getter == null) {
+        helper.warnUnresolvedMethod(name, offsetForToken(send.token),
+            isSuper: isSuper);
+      }
+      return helper.buildMethodInvocation(new ShadowThisExpression(), name,
+          send.arguments, offsetForToken(send.token),
+          isSuper: isSuper, interfaceTarget: getter);
     } else {
+      Member setter =
+          helper.lookupInstanceMember(name, isSuper: isSuper, isSetter: true);
       if (isSuper) {
-        Member getter = helper.lookupSuperMember(send.name);
-        Member setter = helper.lookupSuperMember(send.name, isSetter: true);
         return new SuperPropertyAccessor(
-            helper, send.offset, send.name, getter, setter);
+            helper, send.token, name, getter, setter);
       } else {
         return new ThisPropertyAccessor(
-            helper, send.offset, send.name, null, null);
+            helper, send.token, name, getter, setter);
       }
     }
   }
@@ -272,32 +396,37 @@ class ThisAccessor extends FastaAccessor {
     if (isInitializer) {
       return buildConstructorInitializer(offset, new Name(""), arguments);
     } else {
-      return buildMethodInvocation(
-          new ThisExpression(), callName, arguments, offset);
+      return helper.buildMethodInvocation(
+          new ShadowThisExpression(), callName, arguments, offset,
+          isImplicitCall: true);
     }
   }
 
   Initializer buildConstructorInitializer(
       int offset, Name name, Arguments arguments) {
     Constructor constructor = helper.lookupConstructor(name, isSuper: isSuper);
-    Initializer result;
-    if (constructor == null) {
-      result = new LocalInitializer(new VariableDeclaration.forValue(
-          buildThrowNoSuchMethodError(arguments,
-              isSuper: isSuper, name: name.name, offset: offset)));
+    if (constructor == null ||
+        !helper.checkArguments(
+            constructor.function, arguments, <TypeParameter>[])) {
+      return helper.buildInvalidInitializer(
+          buildThrowNoSuchMethodError(
+              new NullLiteral()..fileOffset = offset, arguments,
+              isSuper: isSuper, name: name.name, offset: offset),
+          offset);
     } else if (isSuper) {
-      result = new SuperInitializer(constructor, arguments);
+      return helper.buildSuperInitializer(
+          false, constructor, arguments, offset);
     } else {
-      result = new RedirectingInitializer(constructor, arguments);
+      return helper.buildRedirectingInitializer(constructor, arguments, offset);
     }
-    return result..fileOffset = offset;
   }
 
   Expression buildAssignment(Expression value, {bool voidContext: false}) {
     return buildAssignmentError();
   }
 
-  Expression buildNullAwareAssignment(Expression value, DartType type,
+  Expression buildNullAwareAssignment(
+      Expression value, DartType type, int offset,
       {bool voidContext: false}) {
     return buildAssignmentError();
   }
@@ -305,7 +434,8 @@ class ThisAccessor extends FastaAccessor {
   Expression buildCompoundAssignment(Name binaryOperator, Expression value,
       {int offset: TreeNode.noOffset,
       bool voidContext: false,
-      Procedure interfaceTarget}) {
+      Procedure interfaceTarget,
+      bool isPreIncDec: false}) {
     return buildAssignmentError();
   }
 
@@ -326,300 +456,285 @@ class ThisAccessor extends FastaAccessor {
   Expression buildAssignmentError() {
     String message =
         isSuper ? "Can't assign to 'super'." : "Can't assign to 'this'.";
-    return helper.buildCompileTimeError(message, offset);
+    return helper.deprecated_buildCompileTimeError(
+        message, offsetForToken(token));
   }
 
-  toString() => "ThisAccessor($offset${isSuper ? ', super' : ''})";
+  toString() {
+    int offset = offsetForToken(token);
+    return "ThisAccessor($offset${isSuper ? ', super' : ''})";
+  }
 }
 
 abstract class IncompleteSend extends FastaAccessor {
   final BuilderHelper helper;
 
   @override
-  final int offset;
+  final Token token;
 
   final Name name;
 
-  IncompleteSend(this.helper, this.offset, this.name);
+  IncompleteSend(this.helper, this.token, this.name);
 
-  @override
-  Expression get builtBinary => internalError("Unsupported operation.");
+  withReceiver(Object receiver, int operatorOffset, {bool isNullAware});
 
-  @override
-  void set builtBinary(Expression expression) {
-    internalError("Unsupported operation.");
-  }
-
-  @override
-  Expression get builtGetter => internalError("Unsupported operation.");
-
-  @override
-  void set builtGetter(Expression expression) {
-    internalError("Unsupported operation.");
-  }
-
-  withReceiver(Object receiver, {bool isNullAware});
+  Arguments get arguments => null;
 }
 
-class IncompleteError extends IncompleteSend with CompileTimeErrorAccessor {
-  final Object error;
+class IncompleteError extends IncompleteSend with ErrorAccessor {
+  final Message message;
 
-  IncompleteError(BuilderHelper helper, int offset, this.error)
-      : super(helper, offset, null);
+  IncompleteError(BuilderHelper helper, Token token, this.message)
+      : super(helper, token, null);
 
-  Expression buildError() {
-    return helper.buildCompileTimeError(error, offset);
+  @override
+  Expression buildError(Arguments arguments,
+      {bool isGetter: false, bool isSetter: false, int offset}) {
+    return helper.buildCompileTimeError(
+        message, offset ?? offsetForToken(this.token));
   }
+
+  @override
+  doInvocation(int offset, Arguments arguments) => this;
 }
 
 class SendAccessor extends IncompleteSend {
+  @override
   final Arguments arguments;
 
-  SendAccessor(BuilderHelper helper, int offset, Name name, this.arguments)
-      : super(helper, offset, name) {
+  SendAccessor(BuilderHelper helper, Token token, Name name, this.arguments)
+      : super(helper, token, name) {
     assert(arguments != null);
   }
 
   String get plainNameForRead => name.name;
 
   Expression buildSimpleRead() {
-    return internalError("Unhandled");
+    return unsupported("buildSimpleRead", offsetForToken(token), uri);
   }
 
   Expression buildAssignment(Expression value, {bool voidContext: false}) {
-    return internalError("Unhandled");
+    return unsupported("buildAssignment", offsetForToken(token), uri);
   }
 
-  withReceiver(Object receiver, {bool isNullAware: false}) {
-    if (receiver is TypeDeclarationBuilder) {
-      /// `SomeType?.toString` is the same as `SomeType.toString`, not
-      /// `(SomeType).toString`.
-      isNullAware = false;
-    }
+  withReceiver(Object receiver, int operatorOffset, {bool isNullAware: false}) {
     if (receiver is FastaAccessor) {
-      return receiver.buildPropertyAccess(this, isNullAware);
+      return receiver.buildPropertyAccess(this, operatorOffset, isNullAware);
     }
     if (receiver is PrefixBuilder) {
       PrefixBuilder prefix = receiver;
-      receiver = helper.builderToFirstExpression(
-          prefix.exports[name.name], "${prefix.name}.${name.name}", offset);
-      return helper.finishSend(receiver, arguments, offset);
-    }
-    Expression result;
-    if (receiver is KernelClassBuilder) {
-      Builder builder = receiver.findStaticBuilder(name.name, offset, uri);
-      if (builder == null) {
-        return buildThrowNoSuchMethodError(arguments);
+      if (isNullAware) {
+        helper.deprecated_addCompileTimeError(
+            offsetForToken(token),
+            "Library prefix '${prefix.name}' can't be used with null-aware "
+            "operator.\nTry removing '?'.");
       }
-      if (builder.hasProblem) {
-        result = helper.buildProblemExpression(builder, offset);
-      } else {
-        Member target = builder.target;
-        if (target != null) {
-          if (target is Field) {
-            result = buildMethodInvocation(new StaticGet(target), callName,
-                arguments, offset + (target.name?.name?.length ?? 0),
-                isNullAware: isNullAware);
-          } else {
-            result = helper.buildStaticInvocation(target, arguments)
-              ..fileOffset = offset;
-          }
-        } else {
-          result = buildThrowNoSuchMethodError(arguments)..fileOffset = offset;
-        }
-      }
-    } else {
-      result = buildMethodInvocation(
-          helper.toValue(receiver), name, arguments, offset,
-          isNullAware: isNullAware);
+      receiver = helper.scopeLookup(prefix.exportScope, name.name, token,
+          isQualified: true, prefix: prefix);
+      return helper.finishSend(receiver, arguments, offsetForToken(token));
     }
-    return result;
+    return helper.buildMethodInvocation(
+        helper.toValue(receiver), name, arguments, offsetForToken(token),
+        isNullAware: isNullAware);
   }
 
-  Expression buildNullAwareAssignment(Expression value, DartType type,
+  Expression buildNullAwareAssignment(
+      Expression value, DartType type, int offset,
       {bool voidContext: false}) {
-    return internalError("Unhandled");
+    return unsupported("buildNullAwareAssignment", offset, uri);
   }
 
   Expression buildCompoundAssignment(Name binaryOperator, Expression value,
-      {int offset, bool voidContext: false, Procedure interfaceTarget}) {
-    return internalError("Unhandled");
+      {int offset,
+      bool voidContext: false,
+      Procedure interfaceTarget,
+      bool isPreIncDec: false}) {
+    return unsupported(
+        "buildCompoundAssignment", offset ?? offsetForToken(token), uri);
   }
 
   Expression buildPrefixIncrement(Name binaryOperator,
       {int offset, bool voidContext: false, Procedure interfaceTarget}) {
-    return internalError("Unhandled");
+    return unsupported(
+        "buildPrefixIncrement", offset ?? offsetForToken(token), uri);
   }
 
   Expression buildPostfixIncrement(Name binaryOperator,
       {int offset, bool voidContext: false, Procedure interfaceTarget}) {
-    return internalError("Unhandled");
+    return unsupported(
+        "buildPostfixIncrement", offset ?? offsetForToken(token), uri);
   }
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return internalError("Unhandled");
+    return unsupported("doInvocation", offset, uri);
   }
 
-  toString() => "SendAccessor($offset, $name, $arguments)";
+  toString() {
+    int offset = offsetForToken(token);
+    return "SendAccessor($offset, $name, $arguments)";
+  }
 }
 
 class IncompletePropertyAccessor extends IncompleteSend {
-  IncompletePropertyAccessor(BuilderHelper helper, int offset, Name name)
-      : super(helper, offset, name);
+  IncompletePropertyAccessor(BuilderHelper helper, Token token, Name name)
+      : super(helper, token, name);
 
   String get plainNameForRead => name.name;
 
-  Expression buildSimpleRead() => internalError("Unhandled");
-
-  Expression buildAssignment(Expression value, {bool voidContext: false}) {
-    return internalError("Unhandled");
+  Expression buildSimpleRead() {
+    return unsupported("buildSimpleRead", offsetForToken(token), uri);
   }
 
-  withReceiver(Object receiver, {bool isNullAware: false}) {
-    if (receiver is TypeDeclarationBuilder) {
-      /// For reasons beyond comprehension, `SomeType?.toString` is the same as
-      /// `SomeType.toString`, not `(SomeType).toString`. WTAF!?!
-      //
-      isNullAware = false;
-    }
+  Expression buildAssignment(Expression value, {bool voidContext: false}) {
+    return unsupported("buildAssignment", offsetForToken(token), uri);
+  }
+
+  withReceiver(Object receiver, int operatorOffset, {bool isNullAware: false}) {
     if (receiver is FastaAccessor) {
-      return receiver.buildPropertyAccess(this, isNullAware);
+      return receiver.buildPropertyAccess(this, operatorOffset, isNullAware);
     }
     if (receiver is PrefixBuilder) {
       PrefixBuilder prefix = receiver;
-      return helper.builderToFirstExpression(
-          prefix.exports[name.name], name.name, offset);
-    }
-    if (receiver is KernelClassBuilder) {
-      Builder builder = receiver.findStaticBuilder(name.name, offset, uri);
-      if (builder == null) {
-        // If we find a setter, [builder] is an [AccessErrorBuilder], not null.
-        return buildThrowNoSuchMethodError(new Arguments.empty(),
-            isGetter: true);
+      if (isNullAware) {
+        helper.deprecated_addCompileTimeError(
+            offsetForToken(token),
+            "Library prefix '${prefix.name}' can't be used with null-aware "
+            "operator.\nTry removing '?'.");
       }
-      Builder setter;
-      if (builder.isSetter) {
-        setter = builder;
-      } else if (builder.isGetter) {
-        setter =
-            receiver.findStaticBuilder(name.name, offset, uri, isSetter: true);
-      } else if (builder.isField && !builder.isFinal) {
-        setter = builder;
-      }
-      return new StaticAccessor.fromBuilder(helper, builder, offset, setter);
+      return helper.scopeLookup(prefix.exportScope, name.name, token,
+          isQualified: true, prefix: prefix);
     }
-    return PropertyAccessor.make(helper, offset, helper.toValue(receiver), name,
-        null, null, isNullAware);
+
+    return PropertyAccessor.make(
+        helper, token, helper.toValue(receiver), name, null, null, isNullAware);
   }
 
-  Expression buildNullAwareAssignment(Expression value, DartType type,
+  Expression buildNullAwareAssignment(
+      Expression value, DartType type, int offset,
       {bool voidContext: false}) {
-    return internalError("Unhandled");
+    return unsupported("buildNullAwareAssignment", offset, uri);
   }
 
   Expression buildCompoundAssignment(Name binaryOperator, Expression value,
-      {int offset, bool voidContext: false, Procedure interfaceTarget}) {
-    return internalError("Unhandled");
+      {int offset,
+      bool voidContext: false,
+      Procedure interfaceTarget,
+      bool isPreIncDec: false}) {
+    return unsupported(
+        "buildCompoundAssignment", offset ?? offsetForToken(token), uri);
   }
 
   Expression buildPrefixIncrement(Name binaryOperator,
       {int offset, bool voidContext: false, Procedure interfaceTarget}) {
-    return internalError("Unhandled");
+    return unsupported(
+        "buildPrefixIncrement", offset ?? offsetForToken(token), uri);
   }
 
   Expression buildPostfixIncrement(Name binaryOperator,
       {int offset, bool voidContext: false, Procedure interfaceTarget}) {
-    return internalError("Unhandled");
+    return unsupported(
+        "buildPostfixIncrement", offset ?? offsetForToken(token), uri);
   }
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return internalError("Unhandled");
+    return unsupported("doInvocation", offset, uri);
   }
 
-  toString() => "IncompletePropertyAccessor($offset, $name)";
+  toString() {
+    int offset = offsetForToken(token);
+    return "IncompletePropertyAccessor($offset, $name)";
+  }
 }
 
 class IndexAccessor extends kernel.IndexAccessor with FastaAccessor {
   final BuilderHelper helper;
 
-  IndexAccessor.internal(this.helper, int offset, Expression receiver,
+  IndexAccessor.internal(this.helper, Token token, Expression receiver,
       Expression index, Procedure getter, Procedure setter)
-      : super.internal(receiver, index, getter, setter, offset);
+      : super.internal(helper, receiver, index, getter, setter, token);
 
   String get plainNameForRead => "[]";
 
   String get plainNameForWrite => "[]=";
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return buildMethodInvocation(
-        buildSimpleRead(), callName, arguments, offset);
+    return helper.buildMethodInvocation(
+        buildSimpleRead(), callName, arguments, offset,
+        isImplicitCall: true);
   }
 
   toString() => "IndexAccessor()";
 
   static FastaAccessor make(
       BuilderHelper helper,
-      int offset,
+      Token token,
       Expression receiver,
       Expression index,
       Procedure getter,
       Procedure setter) {
     if (receiver is ThisExpression) {
-      return new ThisIndexAccessor(helper, offset, index, getter, setter);
+      return new ThisIndexAccessor(helper, token, index, getter, setter);
     } else {
       return new IndexAccessor.internal(
-          helper, offset, receiver, index, getter, setter);
+          helper, token, receiver, index, getter, setter);
     }
   }
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowIndexAssign(receiver, index, rhs);
 }
 
 class PropertyAccessor extends kernel.PropertyAccessor with FastaAccessor {
   final BuilderHelper helper;
 
-  PropertyAccessor.internal(this.helper, int offset, Expression receiver,
+  PropertyAccessor.internal(this.helper, Token token, Expression receiver,
       Name name, Member getter, Member setter)
-      : super.internal(receiver, name, getter, setter, offset);
+      : super.internal(helper, receiver, name, getter, setter, token);
 
   String get plainNameForRead => name.name;
 
   bool get isThisPropertyAccessor => receiver is ThisExpression;
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return buildMethodInvocation(receiver, name, arguments, offset);
+    return helper.buildMethodInvocation(receiver, name, arguments, offset);
   }
 
   toString() => "PropertyAccessor()";
 
   static FastaAccessor make(
       BuilderHelper helper,
-      int offset,
+      Token token,
       Expression receiver,
       Name name,
       Member getter,
       Member setter,
       bool isNullAware) {
     if (receiver is ThisExpression) {
-      return new ThisPropertyAccessor(helper, offset, name, getter, setter);
+      return unsupported("ThisExpression", offsetForToken(token), helper.uri);
     } else {
       return isNullAware
           ? new NullAwarePropertyAccessor(
-              helper, offset, receiver, name, getter, setter, null)
+              helper, token, receiver, name, getter, setter, null)
           : new PropertyAccessor.internal(
-              helper, offset, receiver, name, getter, setter);
+              helper, token, receiver, name, getter, setter);
     }
   }
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowPropertyAssign(receiver, rhs);
 }
 
 class StaticAccessor extends kernel.StaticAccessor with FastaAccessor {
-  final BuilderHelper helper;
-
-  StaticAccessor(this.helper, int offset, Member readTarget, Member writeTarget)
-      : super(readTarget, writeTarget, offset) {
+  StaticAccessor(
+      BuilderHelper helper, Token token, Member readTarget, Member writeTarget)
+      : super(helper, readTarget, writeTarget, token) {
     assert(readTarget != null || writeTarget != null);
   }
 
   factory StaticAccessor.fromBuilder(BuilderHelper helper, Builder builder,
-      int offset, Builder builderSetter) {
+      Token token, Builder builderSetter) {
     if (builder is AccessErrorBuilder) {
       AccessErrorBuilder error = builder;
       builder = error.builder;
@@ -627,7 +742,8 @@ class StaticAccessor extends kernel.StaticAccessor with FastaAccessor {
       // when not explicitly looking for a setter.
       assert(builder.isSetter);
     } else if (builder.target == null) {
-      return internalError("Unhandled: ${builder}");
+      return unhandled("${builder.runtimeType}", "StaticAccessor.fromBuilder",
+          offsetForToken(token), helper.uri);
     }
     Member getter = builder.target.hasGetter ? builder.target : null;
     Member setter = builder.target.hasSetter ? builder.target : null;
@@ -636,83 +752,129 @@ class StaticAccessor extends kernel.StaticAccessor with FastaAccessor {
         setter = builderSetter.target;
       }
     }
-    return new StaticAccessor(helper, offset, getter, setter);
+    return new StaticAccessor(helper, token, getter, setter);
   }
 
   String get plainNameForRead => (readTarget ?? writeTarget).name.name;
 
   Expression doInvocation(int offset, Arguments arguments) {
+    if (helper.constantExpressionRequired && !helper.isIdentical(readTarget)) {
+      helper.deprecated_addCompileTimeError(
+          offset, "Not a constant expression.");
+    }
     if (readTarget == null || isFieldOrGetter(readTarget)) {
-      return buildMethodInvocation(buildSimpleRead(), callName, arguments,
-          offset + (readTarget?.name?.name?.length ?? 0));
+      return helper.buildMethodInvocation(buildSimpleRead(), callName,
+          arguments, offset + (readTarget?.name?.name?.length ?? 0),
+          // This isn't a constant expression, but we have checked if a
+          // constant expression error should be emitted already.
+          isConstantExpression: true,
+          isImplicitCall: true);
     } else {
-      return helper.buildStaticInvocation(readTarget, arguments)
-        ..fileOffset = offset;
+      return helper.buildStaticInvocation(readTarget, arguments,
+          charOffset: offset);
     }
   }
 
   toString() => "StaticAccessor()";
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowStaticAssignment(rhs);
+}
+
+class LoadLibraryAccessor extends kernel.LoadLibraryAccessor
+    with FastaAccessor {
+  LoadLibraryAccessor(
+      BuilderHelper helper, Token token, LoadLibraryBuilder builder)
+      : super(helper, token, builder);
+
+  String get plainNameForRead => 'loadLibrary';
+
+  Expression doInvocation(int offset, Arguments arguments) {
+    if (arguments.positional.length > 0 || arguments.named.length > 0) {
+      helper.warning(
+          messageLoadLibraryTakesNoArguments, offset, 'loadLibrary'.length);
+    }
+    return builder.createLoadLibrary(offset);
+  }
 }
 
 class SuperPropertyAccessor extends kernel.SuperPropertyAccessor
     with FastaAccessor {
-  final BuilderHelper helper;
-
-  SuperPropertyAccessor(
-      this.helper, int offset, Name name, Member getter, Member setter)
-      : super(name, getter, setter, offset);
+  SuperPropertyAccessor(BuilderHelper helper, Token token, Name name,
+      Member getter, Member setter)
+      : super(helper, name, getter, setter, token);
 
   String get plainNameForRead => name.name;
 
   Expression doInvocation(int offset, Arguments arguments) {
+    if (helper.constantExpressionRequired) {
+      helper.deprecated_addCompileTimeError(
+          offset, "Not a constant expression.");
+    }
     if (getter == null || isFieldOrGetter(getter)) {
-      return buildMethodInvocation(
-          buildSimpleRead(), callName, arguments, offset);
+      return helper.buildMethodInvocation(
+          buildSimpleRead(), callName, arguments, offset,
+          // This isn't a constant expression, but we have checked if a
+          // constant expression error should be emitted already.
+          isConstantExpression: true,
+          isImplicitCall: true);
     } else {
-      return new DirectMethodInvocation(new ThisExpression(), getter, arguments)
-        ..fileOffset = offset;
+      // TODO(ahe): This could be something like "super.property(...)" where
+      // property is a setter.
+      return unhandled("${getter.runtimeType}", "doInvocation", offset, uri);
     }
   }
 
   toString() => "SuperPropertyAccessor()";
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowPropertyAssign(null, rhs, isSuper: true);
 }
 
 class ThisIndexAccessor extends kernel.ThisIndexAccessor with FastaAccessor {
-  final BuilderHelper helper;
-
-  ThisIndexAccessor(this.helper, int offset, Expression index, Procedure getter,
-      Procedure setter)
-      : super(index, getter, setter, offset);
+  ThisIndexAccessor(BuilderHelper helper, Token token, Expression index,
+      Procedure getter, Procedure setter)
+      : super(helper, index, getter, setter, token);
 
   String get plainNameForRead => "[]";
 
   String get plainNameForWrite => "[]=";
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return buildMethodInvocation(
-        buildSimpleRead(), callName, arguments, offset);
+    return helper.buildMethodInvocation(
+        buildSimpleRead(), callName, arguments, offset,
+        isImplicitCall: true);
   }
 
   toString() => "ThisIndexAccessor()";
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowIndexAssign(null, index, rhs);
 }
 
 class SuperIndexAccessor extends kernel.SuperIndexAccessor with FastaAccessor {
-  final BuilderHelper helper;
-
-  SuperIndexAccessor(
-      this.helper, int offset, Expression index, Member getter, Member setter)
-      : super(index, getter, setter, offset);
+  SuperIndexAccessor(BuilderHelper helper, Token token, Expression index,
+      Member getter, Member setter)
+      : super(helper, index, getter, setter, token);
 
   String get plainNameForRead => "[]";
 
   String get plainNameForWrite => "[]=";
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return buildMethodInvocation(
-        buildSimpleRead(), callName, arguments, offset);
+    return helper.buildMethodInvocation(
+        buildSimpleRead(), callName, arguments, offset,
+        isImplicitCall: true);
   }
 
   toString() => "SuperIndexAccessor()";
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowIndexAssign(null, index, rhs, isSuper: true);
 }
 
 class ThisPropertyAccessor extends kernel.ThisPropertyAccessor
@@ -720,8 +882,8 @@ class ThisPropertyAccessor extends kernel.ThisPropertyAccessor
   final BuilderHelper helper;
 
   ThisPropertyAccessor(
-      this.helper, int offset, Name name, Member getter, Member setter)
-      : super(name, getter, setter, offset);
+      this.helper, Token token, Name name, Member getter, Member setter)
+      : super(helper, name, getter, setter, token);
 
   String get plainNameForRead => name.name;
 
@@ -729,97 +891,238 @@ class ThisPropertyAccessor extends kernel.ThisPropertyAccessor
 
   Expression doInvocation(int offset, Arguments arguments) {
     Member interfaceTarget = getter;
+    if (interfaceTarget == null) {
+      helper.warnUnresolvedMethod(name, offset);
+    }
     if (interfaceTarget is Field) {
       // TODO(ahe): In strong mode we should probably rewrite this to
       // `this.name.call(arguments)`.
       interfaceTarget = null;
     }
-    return buildMethodInvocation(new ThisExpression(), name, arguments, offset);
+    return helper.buildMethodInvocation(
+        new ShadowThisExpression(), name, arguments, offset,
+        interfaceTarget: interfaceTarget);
   }
 
   toString() => "ThisPropertyAccessor()";
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowPropertyAssign(null, rhs);
 }
 
 class NullAwarePropertyAccessor extends kernel.NullAwarePropertyAccessor
     with FastaAccessor {
   final BuilderHelper helper;
 
-  NullAwarePropertyAccessor(this.helper, int offset, Expression receiver,
+  NullAwarePropertyAccessor(this.helper, Token token, Expression receiver,
       Name name, Member getter, Member setter, DartType type)
-      : super(receiver, name, getter, setter, type, offset);
+      : super(helper, receiver, name, getter, setter, type, token);
 
   String get plainNameForRead => name.name;
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return internalError("Not implemented yet.");
+    return unimplemented("doInvocation", offset, uri);
   }
 
   toString() => "NullAwarePropertyAccessor()";
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowPropertyAssign(receiverExpression, rhs);
+}
+
+int adjustForImplicitCall(String name, int offset) {
+  // Normally the offset is at the start of the token, but in this case,
+  // because we insert a '.call', we want it at the end instead.
+  return offset + (name?.length ?? 0);
 }
 
 class VariableAccessor extends kernel.VariableAccessor with FastaAccessor {
-  final BuilderHelper helper;
-
-  VariableAccessor(this.helper, int offset, VariableDeclaration variable,
+  VariableAccessor(
+      BuilderHelper helper, Token token, VariableDeclaration variable,
       [DartType promotedType])
-      : super(variable, promotedType, offset);
+      : super(helper, variable, promotedType, token);
 
   String get plainNameForRead => variable.name;
 
   Expression doInvocation(int offset, Arguments arguments) {
-    // Normally the offset is at the start of the token, but in this case,
-    // because we insert a '.call', we want it at the end instead.
-    return buildMethodInvocation(buildSimpleRead(), callName, arguments,
-        offset + (variable.name?.length ?? 0));
+    return helper.buildMethodInvocation(buildSimpleRead(), callName, arguments,
+        adjustForImplicitCall(plainNameForRead, offset),
+        isImplicitCall: true);
   }
 
   toString() => "VariableAccessor()";
+
+  @override
+  ShadowComplexAssignment startComplexAssignment(Expression rhs) =>
+      new ShadowVariableAssignment(rhs);
 }
 
 class ReadOnlyAccessor extends kernel.ReadOnlyAccessor with FastaAccessor {
-  final BuilderHelper helper;
-
   final String plainNameForRead;
 
-  ReadOnlyAccessor(
-      this.helper, Expression expression, this.plainNameForRead, int offset)
-      : super(expression, offset);
+  ReadOnlyAccessor(BuilderHelper helper, Expression expression,
+      this.plainNameForRead, Token token)
+      : super(helper, expression, token);
 
   Expression doInvocation(int offset, Arguments arguments) {
-    return buildMethodInvocation(
-        buildSimpleRead(), callName, arguments, offset);
+    return helper.buildMethodInvocation(buildSimpleRead(), callName, arguments,
+        adjustForImplicitCall(plainNameForRead, offset),
+        isImplicitCall: true);
   }
 }
 
 class ParenthesizedExpression extends ReadOnlyAccessor {
   ParenthesizedExpression(
-      BuilderHelper helper, Expression expression, int offset)
-      : super(helper, expression, "<a parenthesized expression>", offset);
+      BuilderHelper helper, Expression expression, Token token)
+      : super(helper, expression, null, token);
 
   Expression makeInvalidWrite(Expression value) {
-    return helper.buildCompileTimeError(
-        "Can't assign to a parenthesized expression.", offset);
+    return helper.deprecated_buildCompileTimeError(
+        "Can't assign to a parenthesized expression.", offsetForToken(token));
+  }
+}
+
+class TypeDeclarationAccessor extends ReadOnlyAccessor {
+  final TypeDeclarationBuilder declaration;
+
+  TypeDeclarationAccessor(BuilderHelper helper, this.declaration,
+      String plainNameForRead, Token token)
+      : super(helper, null, plainNameForRead, token);
+
+  Expression get expression {
+    if (super.expression == null) {
+      int offset = offsetForToken(token);
+      if (declaration is KernelInvalidTypeBuilder) {
+        KernelInvalidTypeBuilder declaration = this.declaration;
+        helper.library.addWarning(
+            declaration.message, declaration.charOffset, declaration.fileUri);
+        helper.warning(declaration.message, offset, token.length);
+        super.expression = new Throw(
+            new StringLiteral(declaration.message.message)
+              ..fileOffset = offsetForToken(token))
+          ..fileOffset = offset;
+      } else {
+        super.expression = new ShadowTypeLiteral(
+            buildType(null, nonInstanceAccessIsError: true))
+          ..fileOffset = offsetForToken(token);
+      }
+    }
+    return super.expression;
+  }
+
+  Expression makeInvalidWrite(Expression value) {
+    return buildThrowNoSuchMethodError(
+        new NullLiteral()..fileOffset = offsetForToken(token),
+        new Arguments(<Expression>[value])..fileOffset = value.fileOffset,
+        isSetter: true);
+  }
+
+  @override
+  buildPropertyAccess(
+      IncompleteSend send, int operatorOffset, bool isNullAware) {
+    // `SomeType?.toString` is the same as `SomeType.toString`, not
+    // `(SomeType).toString`.
+    isNullAware = false;
+
+    Name name = send.name;
+    Arguments arguments = send.arguments;
+
+    if (declaration is KernelClassBuilder) {
+      KernelClassBuilder declaration = this.declaration;
+      Builder builder = declaration.findStaticBuilder(
+          name.name, offsetForToken(token), uri, helper.library);
+
+      FastaAccessor accessor;
+      if (builder == null) {
+        // If we find a setter, [builder] is an
+        // [AccessErrorBuilder], not null.
+        accessor = new UnresolvedAccessor(helper, name, send.token);
+      } else {
+        Builder setter;
+        if (builder.isSetter) {
+          setter = builder;
+        } else if (builder.isGetter) {
+          setter = declaration.findStaticBuilder(
+              name.name, offsetForToken(token), uri, helper.library,
+              isSetter: true);
+        } else if (builder.isField && !builder.isFinal) {
+          setter = builder;
+        }
+        accessor =
+            new StaticAccessor.fromBuilder(helper, builder, send.token, setter);
+      }
+
+      return arguments == null
+          ? accessor
+          : accessor.doInvocation(offsetForToken(send.token), arguments);
+    } else {
+      return super.buildPropertyAccess(send, operatorOffset, isNullAware);
+    }
+  }
+
+  DartType buildType(List<DartType> arguments,
+      {bool nonInstanceAccessIsError: false}) {
+    if (arguments != null) {
+      int expected = 0;
+      if (declaration is KernelClassBuilder) {
+        expected = declaration.target.typeParameters.length;
+      } else if (declaration is FunctionTypeAliasBuilder) {
+        expected = declaration.target.typeParameters.length;
+      } else {
+        return unhandled(
+            "${declaration.runtimeType}",
+            "TypeDeclarationAccessor.buildType",
+            offsetForToken(token),
+            helper.uri);
+      }
+      if (arguments.length != expected) {
+        helper.warnTypeArgumentsMismatch(
+            declaration.name, expected, offsetForToken(token));
+        // We ignore the provided arguments, which will in turn return the
+        // raw type below.
+        // TODO(sigmund): change to use an InvalidType and include the raw type
+        // as a recovery node once the IR can represent it (Issue #29840).
+        arguments = null;
+      }
+    }
+    DartType type =
+        declaration.buildTypesWithBuiltArguments(helper.library, arguments);
+    if (type is TypeParameterType) {
+      return helper.validatedTypeVariableUse(
+          type, offsetForToken(token), nonInstanceAccessIsError);
+    }
+    return type;
+  }
+}
+
+class UnresolvedAccessor extends FastaAccessor with ErrorAccessor {
+  @override
+  final Token token;
+
+  @override
+  final BuilderHelper helper;
+
+  @override
+  final Name name;
+
+  UnresolvedAccessor(this.helper, this.name, this.token);
+
+  Expression doInvocation(int charOffset, Arguments arguments) {
+    return buildError(arguments, offset: charOffset);
+  }
+
+  @override
+  Expression buildError(Arguments arguments,
+      {bool isGetter: false, bool isSetter: false, int offset}) {
+    offset ??= offsetForToken(this.token);
+    return helper.throwNoSuchMethodError(new NullLiteral()..fileOffset = offset,
+        plainNameForRead, arguments, offset,
+        isGetter: isGetter, isSetter: isSetter);
   }
 }
 
 bool isFieldOrGetter(Member member) {
   return member is Field || (member is Procedure && member.isGetter);
-}
-
-Expression buildMethodInvocation(
-    Expression receiver, Name name, Arguments arguments, int offset,
-    {bool isNullAware: false}) {
-  if (isNullAware) {
-    VariableDeclaration variable = new VariableDeclaration.forValue(receiver);
-    return makeLet(
-        variable,
-        new ConditionalExpression(
-            buildIsNull(new VariableGet(variable)),
-            new NullLiteral(),
-            new MethodInvocation(new VariableGet(variable), name, arguments)
-              ..fileOffset = offset,
-            const DynamicType()));
-  } else {
-    return new MethodInvocation(receiver, name, arguments)..fileOffset = offset;
-  }
 }

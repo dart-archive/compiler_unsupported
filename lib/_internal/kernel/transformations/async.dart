@@ -48,7 +48,7 @@ class ExpressionLifter extends Transformer {
   ///
   /// If an expression should be named it is named before visiting its children
   /// so the naming assignment appears in the list before all statements
-  /// implementating the translation of the children.
+  /// implementing the translation of the children.
   ///
   /// Children that are conditionally evaluated, such as some parts of logical
   /// and conditional expressions, must be delimited so that they do not emit
@@ -457,7 +457,7 @@ class ExpressionLifter extends Transformer {
       //
       // So x is in scope for all the body's statements and the body's value.
       // This has the unpleasant consequence that all let-bound variables with
-      // await in the let's body will end up hoisted out the the expression and
+      // await in the let's body will end up hoisted out of the expression and
       // allocated to the context in the VM, even if they have no uses
       // (`let _ = e0 in e1` can be used for sequencing of `e0` and `e1`).
       statements.add(variable);

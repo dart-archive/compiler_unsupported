@@ -9,7 +9,7 @@ import 'package:compiler_unsupported/_internal/kernel/ast.dart' show DartType, S
 import 'kernel_builder.dart' show LibraryBuilder, TypeBuilder;
 
 abstract class KernelTypeBuilder extends TypeBuilder {
-  KernelTypeBuilder(int charOffset, Uri fileUri) : super(charOffset, fileUri);
+  const KernelTypeBuilder();
 
   DartType build(LibraryBuilder library);
 

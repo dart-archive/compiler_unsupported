@@ -8,8 +8,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:path/path.dart' as p;
-
 import 'file_system.dart';
 
 /// Concrete implementation of [FileSystem] which performs its operations on an
@@ -17,10 +15,8 @@ import 'file_system.dart';
 ///
 /// Not intended to be implemented or extended by clients.
 class MemoryFileSystem implements FileSystem {
-  @override
-  final p.Context context;
-
   final Map<Uri, Uint8List> _files = {};
+  final Set<Uri> _directories = new Set<Uri>();
 
   /// The "current directory" in the in-memory virtual file system.
   ///
@@ -29,13 +25,20 @@ class MemoryFileSystem implements FileSystem {
   /// Always ends in a trailing '/'.
   Uri currentDirectory;
 
-  MemoryFileSystem(this.context, Uri currentDirectory)
+  MemoryFileSystem(Uri currentDirectory)
       : currentDirectory = _addTrailingSlash(currentDirectory);
 
   @override
   MemoryFileSystemEntity entityForUri(Uri uri) {
     return new MemoryFileSystemEntity._(
         this, currentDirectory.resolveUri(uri).normalizePath());
+  }
+
+  String get debugString {
+    var sb = new StringBuffer();
+    _files.forEach((uri, _) => sb.write("- $uri\n"));
+    _directories.forEach((uri) => sb.write("- $uri\n"));
+    return '$sb';
   }
 
   static Uri _addTrailingSlash(Uri uri) {
@@ -65,19 +68,39 @@ class MemoryFileSystemEntity implements FileSystemEntity {
       other.uri == uri &&
       identical(other._fileSystem, _fileSystem);
 
+  /// Create a directory for this file system entry.
+  ///
+  /// If the entry is an existing file, this is an error.
+  void createDirectory() {
+    if (_fileSystem._files[uri] != null) {
+      throw new FileSystemException(uri, 'Entry $uri is a file.');
+    }
+    _fileSystem._directories.add(uri);
+  }
+
+  @override
+  Future<bool> exists() async {
+    return _fileSystem._files[uri] != null ||
+        _fileSystem._directories.contains(uri);
+  }
+
   @override
   Future<List<int>> readAsBytes() async {
     List<int> contents = _fileSystem._files[uri];
-    if (contents != null) {
-      return contents.toList();
+    if (contents == null) {
+      throw new FileSystemException(uri, 'File $uri does not exist.');
     }
-    throw new Exception('File does not exist');
+    return contents.toList();
   }
 
   @override
   Future<String> readAsString() async {
-    List<int> contents = await readAsBytes();
-    return UTF8.decode(contents);
+    List<int> bytes = await readAsBytes();
+    try {
+      return UTF8.decode(bytes);
+    } on FormatException catch (e) {
+      throw new FileSystemException(uri, e.message);
+    }
   }
 
   /// Writes the given raw bytes to this file system entity.
@@ -85,7 +108,7 @@ class MemoryFileSystemEntity implements FileSystemEntity {
   /// If no file exists, one is created.  If a file exists already, it is
   /// overwritten.
   void writeAsBytesSync(List<int> bytes) {
-    _fileSystem._files[uri] = new Uint8List.fromList(bytes);
+    _update(uri, new Uint8List.fromList(bytes));
   }
 
   /// Writes the given string to this file system entity.
@@ -98,6 +121,13 @@ class MemoryFileSystemEntity implements FileSystemEntity {
     // Note: the return type of UTF8.encode is List<int>, but in practice it
     // always returns Uint8List.  We rely on that for efficiency, so that we
     // don't have to make an extra copy.
-    _fileSystem._files[uri] = UTF8.encode(s) as Uint8List;
+    _update(uri, UTF8.encode(s) as Uint8List);
+  }
+
+  void _update(Uri uri, Uint8List data) {
+    if (_fileSystem._directories.contains(uri)) {
+      throw new FileSystemException(uri, 'Entry $uri is a directory.');
+    }
+    _fileSystem._files[uri] = data;
   }
 }

@@ -10,7 +10,6 @@ import 'package:compiler_unsupported/_internal/kernel/ast.dart'
         Constructor,
         DartType,
         Expression,
-        ExpressionStatement,
         Field,
         FunctionNode,
         InterfaceType,
@@ -20,18 +19,27 @@ import 'package:compiler_unsupported/_internal/kernel/ast.dart'
         Procedure,
         ProcedureKind,
         StaticGet,
-        StringLiteral,
         Supertype,
-        Throw,
         VariableDeclaration;
 
 import 'package:compiler_unsupported/_internal/kernel/class_hierarchy.dart' show ClassHierarchy;
 
-import '../errors.dart' show internalError;
-
-import '../messages.dart' show warning;
-
 import '../dill/dill_member_builder.dart' show DillMemberBuilder;
+
+import '../fasta_codes.dart'
+    show
+        messagePatchClassOrigin,
+        messagePatchClassTypeVariablesMismatch,
+        messagePatchDeclarationMismatch,
+        messagePatchDeclarationOrigin,
+        templateOverrideFewerNamedArguments,
+        templateOverrideFewerPositionalArguments,
+        templateOverrideMismatchNamedParameter,
+        templateOverrideMoreRequiredArguments,
+        templateOverrideTypeVariablesMismatch,
+        templateRedirectionTargetNotFound;
+
+import '../problems.dart' show unexpected, unhandled, unimplemented;
 
 import 'kernel_builder.dart'
     show
@@ -41,9 +49,12 @@ import 'kernel_builder.dart'
         KernelLibraryBuilder,
         KernelProcedureBuilder,
         KernelTypeBuilder,
+        KernelTypeVariableBuilder,
         LibraryBuilder,
+        MemberBuilder,
         MetadataBuilder,
         ProcedureBuilder,
+        Scope,
         TypeVariableBuilder,
         computeDefaultTypeArguments;
 
@@ -51,6 +62,8 @@ import 'redirecting_factory_body.dart' show RedirectingFactoryBody;
 
 abstract class KernelClassBuilder
     extends ClassBuilder<KernelTypeBuilder, InterfaceType> {
+  KernelClassBuilder actualOrigin;
+
   KernelClassBuilder(
       List<MetadataBuilder> metadata,
       int modifiers,
@@ -58,15 +71,21 @@ abstract class KernelClassBuilder
       List<TypeVariableBuilder> typeVariables,
       KernelTypeBuilder supertype,
       List<KernelTypeBuilder> interfaces,
-      Map<String, Builder> members,
+      Scope scope,
+      Scope constructors,
       LibraryBuilder parent,
       int charOffset)
       : super(metadata, modifiers, name, typeVariables, supertype, interfaces,
-            members, parent, charOffset);
+            scope, constructors, parent, charOffset);
 
   Class get cls;
 
   Class get target => cls;
+
+  Class get actualCls;
+
+  @override
+  KernelClassBuilder get origin => actualOrigin ?? this;
 
   /// [arguments] have already been built.
   InterfaceType buildTypesWithBuiltArguments(
@@ -81,7 +100,7 @@ abstract class KernelClassBuilder
     for (KernelTypeBuilder builder in arguments) {
       DartType type = builder.build(library);
       if (type == null) {
-        internalError("Bad type: ${builder.runtimeType}");
+        unhandled("${builder.runtimeType}", "buildTypeArguments", -1, null);
       }
       typeArguments.add(type);
     }
@@ -100,6 +119,7 @@ abstract class KernelClassBuilder
 
   Supertype buildSupertype(
       LibraryBuilder library, List<KernelTypeBuilder> arguments) {
+    Class cls = isPatch ? origin.target : this.cls;
     if (arguments != null) {
       return new Supertype(cls, buildTypeArguments(library, arguments));
     } else {
@@ -107,34 +127,42 @@ abstract class KernelClassBuilder
     }
   }
 
-  int resolveConstructors(KernelLibraryBuilder library) {
+  @override
+  int resolveConstructors(LibraryBuilder library) {
     int count = super.resolveConstructors(library);
     if (count != 0) {
+      Map<String, MemberBuilder> constructors = this.constructors.local;
       // Copy keys to avoid concurrent modification error.
-      List<String> names = members.keys.toList();
+      List<String> names = constructors.keys.toList();
       for (String name in names) {
-        Builder builder = members[name];
+        Builder builder = constructors[name];
+        if (builder.parent != this) {
+          unexpected(
+              "$fileUri", "${builder.parent.fileUri}", charOffset, fileUri);
+        }
         if (builder is KernelProcedureBuilder && builder.isFactory) {
           // Compute the immediate redirection target, not the effective.
           ConstructorReferenceBuilder redirectionTarget =
               builder.redirectionTarget;
           if (redirectionTarget != null) {
-            assert(builder.actualBody == null);
             Builder targetBuilder = redirectionTarget.target;
             addRedirectingConstructor(builder, library);
             if (targetBuilder is ProcedureBuilder) {
-              Member target = targetBuilder.target;
-              builder.body = new RedirectingFactoryBody(target);
+              builder.setRedirectingFactoryBody(targetBuilder.target);
             } else if (targetBuilder is DillMemberBuilder) {
-              builder.body = new RedirectingFactoryBody(targetBuilder.member);
+              builder.setRedirectingFactoryBody(targetBuilder.member);
             } else {
-              // TODO(ahe): Throw NSM error. This requires access to core
-              // types.
-              String message = "Redirection constructor target not found: "
-                  "${redirectionTarget.fullNameForErrors}";
-              warning(library.fileUri, -1, message);
-              builder.body = new ExpressionStatement(
-                  new Throw(new StringLiteral(message)));
+              var message = templateRedirectionTargetNotFound
+                  .withArguments(redirectionTarget.fullNameForErrors);
+              if (builder.isConst) {
+                addCompileTimeError(message, builder.charOffset);
+              } else {
+                addWarning(message, builder.charOffset);
+              }
+              // CoreTypes aren't computed yet, and this is the outline
+              // phase. So we can't and shouldn't create a method body.
+              builder.body = new RedirectingFactoryBody.unresolved(
+                  redirectionTarget.fullNameForErrors);
             }
           }
         }
@@ -156,15 +184,14 @@ abstract class KernelClassBuilder
     // Where each c1 ... cn are an instance of [StaticGet] whose target is
     // [constructor.target].
     //
-    // TODO(ahe): Generate the correct factory body instead.
+    // TODO(ahe): Add a kernel node to represent redirecting factory bodies.
     DillMemberBuilder constructorsField =
-        members.putIfAbsent("_redirecting#", () {
+        origin.scope.local.putIfAbsent("_redirecting#", () {
       ListLiteral literal = new ListLiteral(<Expression>[]);
       Name name = new Name("_redirecting#", library.library);
       Field field = new Field(name,
-          isStatic: true,
-          initializer: literal,
-          fileUri: cls.fileUri)..fileOffset = cls.fileOffset;
+          isStatic: true, initializer: literal, fileUri: cls.fileUri)
+        ..fileOffset = cls.fileOffset;
       cls.addMember(field);
       return new DillMemberBuilder(field, this);
     });
@@ -181,14 +208,13 @@ abstract class KernelClassBuilder
   void checkOverride(
       Member declaredMember, Member interfaceMember, bool isSetter) {
     if (declaredMember is Constructor || interfaceMember is Constructor) {
-      internalError(
-          "Constructor in override check.", fileUri, declaredMember.fileOffset);
+      unimplemented(
+          "Constructor in override check.", declaredMember.fileOffset, fileUri);
     }
     if (declaredMember is Procedure && interfaceMember is Procedure) {
       if (declaredMember.kind == ProcedureKind.Method &&
           interfaceMember.kind == ProcedureKind.Method) {
         checkMethodOverride(declaredMember, interfaceMember);
-        return;
       }
     }
     // TODO(ahe): Handle other cases: accessors, operators, and fields.
@@ -208,31 +234,31 @@ abstract class KernelClassBuilder
     if (declaredFunction.typeParameters?.length !=
         interfaceFunction.typeParameters?.length) {
       addWarning(
-          declaredMember.fileOffset,
-          "Declared type variables of '$name::${declaredMember.name.name}' "
-          "doesn't match those on overridden method "
-          "'${interfaceMember.enclosingClass.name}::"
-          "${interfaceMember.name.name}'.");
+          templateOverrideTypeVariablesMismatch.withArguments(
+              "$name::${declaredMember.name.name}",
+              "${interfaceMember.enclosingClass.name}::"
+              "${interfaceMember.name.name}"),
+          declaredMember.fileOffset);
     }
     if (declaredFunction.positionalParameters.length <
             interfaceFunction.requiredParameterCount ||
         declaredFunction.positionalParameters.length <
             interfaceFunction.positionalParameters.length) {
       addWarning(
-          declaredMember.fileOffset,
-          "The method '$name::${declaredMember.name.name}' has fewer "
-          "positional arguments than those of overridden method "
-          "'${interfaceMember.enclosingClass.name}::"
-          "${interfaceMember.name.name}'.");
+          templateOverrideFewerPositionalArguments.withArguments(
+              "$name::${declaredMember.name.name}",
+              "${interfaceMember.enclosingClass.name}::"
+              "${interfaceMember.name.name}"),
+          declaredMember.fileOffset);
     }
     if (interfaceFunction.requiredParameterCount <
         declaredFunction.requiredParameterCount) {
       addWarning(
-          declaredMember.fileOffset,
-          "The method '$name::${declaredMember.name.name}' has more "
-          "required arguments than those of overridden method "
-          "'${interfaceMember.enclosingClass.name}::"
-          "${interfaceMember.name.name}'.");
+          templateOverrideMoreRequiredArguments.withArguments(
+              "$name::${declaredMember.name.name}",
+              "${interfaceMember.enclosingClass.name}::"
+              "${interfaceMember.name.name}"),
+          declaredMember.fileOffset);
     }
     if (declaredFunction.namedParameters.isEmpty &&
         interfaceFunction.namedParameters.isEmpty) {
@@ -241,11 +267,11 @@ abstract class KernelClassBuilder
     if (declaredFunction.namedParameters.length <
         interfaceFunction.namedParameters.length) {
       addWarning(
-          declaredMember.fileOffset,
-          "The method '$name::${declaredMember.name.name}' has fewer named "
-          "arguments than those of overridden method "
-          "'${interfaceMember.enclosingClass.name}::"
-          "${interfaceMember.name.name}'.");
+          templateOverrideFewerNamedArguments.withArguments(
+              "$name::${declaredMember.name.name}",
+              "${interfaceMember.enclosingClass.name}::"
+              "${interfaceMember.name.name}"),
+          declaredMember.fileOffset);
     }
     Iterator<VariableDeclaration> declaredNamedParameters =
         declaredFunction.namedParameters.iterator;
@@ -258,14 +284,92 @@ abstract class KernelClassBuilder
           interfaceNamedParameters.current.name) {
         if (!declaredNamedParameters.moveNext()) {
           addWarning(
-              declaredMember.fileOffset,
-              "The method '$name::${declaredMember.name.name}' doesn't have "
-              "the named parameter '${interfaceNamedParameters.current.name}' "
-              "of overriden method '${interfaceMember.enclosingClass.name}::"
-              "${interfaceMember.name.name}'.");
+              templateOverrideMismatchNamedParameter.withArguments(
+                  "$name::${declaredMember.name.name}",
+                  interfaceNamedParameters.current.name,
+                  "${interfaceMember.enclosingClass.name}::"
+                  "${interfaceMember.name.name}"),
+              declaredMember.fileOffset);
           break outer;
         }
       }
     }
+  }
+
+  String get fullNameForErrors {
+    return isMixinApplication
+        ? "${supertype.fullNameForErrors} with ${mixedInType.fullNameForErrors}"
+        : name;
+  }
+
+  @override
+  void applyPatch(Builder patch) {
+    if (patch is KernelClassBuilder) {
+      patch.actualOrigin = this;
+      // TODO(ahe): Complain if `patch.supertype` isn't null.
+      scope.local.forEach((String name, Builder member) {
+        Builder memberPatch = patch.scope.local[name];
+        if (memberPatch != null) {
+          member.applyPatch(memberPatch);
+        }
+      });
+      scope.setters.forEach((String name, Builder member) {
+        Builder memberPatch = patch.scope.setters[name];
+        if (memberPatch != null) {
+          member.applyPatch(memberPatch);
+        }
+      });
+      constructors.local.forEach((String name, Builder member) {
+        Builder memberPatch = patch.constructors.local[name];
+        if (memberPatch != null) {
+          member.applyPatch(memberPatch);
+        }
+      });
+
+      int originLength = typeVariables?.length ?? 0;
+      int patchLength = patch.typeVariables?.length ?? 0;
+      if (originLength != patchLength) {
+        patch.addCompileTimeError(
+            messagePatchClassTypeVariablesMismatch, patch.charOffset,
+            context: messagePatchClassOrigin.withLocation(fileUri, charOffset));
+      } else if (typeVariables != null) {
+        int count = 0;
+        for (KernelTypeVariableBuilder t in patch.typeVariables) {
+          typeVariables[count++].applyPatch(t);
+        }
+      }
+    } else {
+      library.addCompileTimeError(
+          messagePatchDeclarationMismatch, patch.charOffset, patch.fileUri,
+          context:
+              messagePatchDeclarationOrigin.withLocation(fileUri, charOffset));
+    }
+  }
+
+  @override
+  Builder findStaticBuilder(
+      String name, int charOffset, Uri fileUri, LibraryBuilder accessingLibrary,
+      {bool isSetter: false}) {
+    Builder builder = super.findStaticBuilder(
+        name, charOffset, fileUri, accessingLibrary,
+        isSetter: isSetter);
+    if (builder == null && isPatch) {
+      return origin.findStaticBuilder(
+          name, charOffset, fileUri, accessingLibrary,
+          isSetter: isSetter);
+    }
+    return builder;
+  }
+
+  @override
+  Builder findConstructorOrFactory(
+      String name, int charOffset, Uri uri, LibraryBuilder accessingLibrary) {
+    Builder builder =
+        super.findConstructorOrFactory(name, charOffset, uri, accessingLibrary);
+    if (builder == null && isPatch) {
+      return origin.findConstructorOrFactory(
+          name, charOffset, uri, accessingLibrary);
+    }
+    return builder;
   }
 }

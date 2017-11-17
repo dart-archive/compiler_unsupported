@@ -4,24 +4,84 @@
 
 library fasta.kernel_function_type_builder;
 
-import 'package:compiler_unsupported/_internal/kernel/ast.dart' show DartType, DynamicType, Supertype;
+import 'package:compiler_unsupported/_internal/kernel/ast.dart'
+    show
+        DartType,
+        DynamicType,
+        FunctionType,
+        NamedType,
+        Supertype,
+        TypeParameter;
+
+import '../fasta_codes.dart' show messageSupertypeIsFunction;
+
+import '../problems.dart' show unsupported;
 
 import 'kernel_builder.dart'
-    show FunctionTypeBuilder, KernelTypeBuilder, LibraryBuilder;
+    show
+        FormalParameterBuilder,
+        FunctionTypeBuilder,
+        KernelFormalParameterBuilder,
+        KernelTypeBuilder,
+        KernelTypeVariableBuilder,
+        LibraryBuilder,
+        TypeVariableBuilder;
 
 class KernelFunctionTypeBuilder extends FunctionTypeBuilder
     implements KernelTypeBuilder {
-  KernelFunctionTypeBuilder(int charOffset, Uri fileUri,
-      KernelTypeBuilder returnType, List typeVariables, List formals)
-      : super(charOffset, fileUri, returnType, typeVariables, formals);
+  KernelFunctionTypeBuilder(
+      KernelTypeBuilder returnType,
+      List<TypeVariableBuilder> typeVariables,
+      List<FormalParameterBuilder> formals)
+      : super(returnType, typeVariables, formals);
 
-  // TODO(ahe): Return a proper function type.
-  DartType build(LibraryBuilder library) => const DynamicType();
+  FunctionType build(LibraryBuilder library) {
+    DartType builtReturnType =
+        returnType?.build(library) ?? const DynamicType();
+    List<DartType> positionalParameters = <DartType>[];
+    List<String> positionalParameterNames = <String>[];
+    List<NamedType> namedParameters;
+    int requiredParameterCount = 0;
+    if (formals != null) {
+      for (KernelFormalParameterBuilder formal in formals) {
+        DartType type = formal.type?.build(library) ?? const DynamicType();
+        if (formal.isPositional) {
+          positionalParameters.add(type);
+          positionalParameterNames.add(formal.name ?? '');
+          if (formal.isRequired) requiredParameterCount++;
+        } else if (formal.isNamed) {
+          namedParameters ??= <NamedType>[];
+          namedParameters.add(new NamedType(formal.name, type));
+        }
+      }
+      if (namedParameters != null) {
+        namedParameters.sort();
+      }
+    }
+    List<TypeParameter> typeParameters;
+    if (typeVariables != null) {
+      typeParameters = <TypeParameter>[];
+      for (KernelTypeVariableBuilder t in typeVariables) {
+        typeParameters.add(t.parameter);
+      }
+    }
+    return new FunctionType(positionalParameters, builtReturnType,
+        namedParameters: namedParameters ?? const <NamedType>[],
+        typeParameters: typeParameters ?? const <TypeParameter>[],
+        requiredParameterCount: requiredParameterCount,
+        positionalParameterNames: positionalParameterNames);
+  }
 
   Supertype buildSupertype(LibraryBuilder library) {
+    int charOffset = -1; // TODO(ahe): Provide these.
+    Uri fileUri = null; // TODO(ahe): Provide these.
     library.addCompileTimeError(
-        charOffset, "Can't use a function type as supertype.",
-        fileUri: fileUri);
+        messageSupertypeIsFunction, charOffset, fileUri);
     return null;
+  }
+
+  @override
+  buildInvalidType(int charOffset, Uri fileUri) {
+    return unsupported("buildInvalidType", charOffset, fileUri);
   }
 }
