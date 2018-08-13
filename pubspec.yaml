@@ -8,7 +8,7 @@ author: Dart2js Team <compiler-dev@dartlang.org>
 homepage: https://github.com/dart-lang/compiler_unsupported
 
 environment:
-  sdk: ">=1.11.0 <2.0.0"
+  sdk: ">=1.11.0 <3.0.0"
 
 dependencies:
   dart2js_info: ^0.2.0
@@ -24,4 +24,4 @@ dependencies:
 dev_dependencies:
   grinder: ^0.8.0
   path: any
-  test: ^0.12.0
+  test: '>=0.12.0 <2.0.01'
